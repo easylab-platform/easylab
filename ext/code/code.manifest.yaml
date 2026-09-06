@@ -1,0 +1,17 @@
+{
+  "id": "easyvcs-code",
+  "version": "0.1.0",
+  "tools": [
+    { "name": "list", "description": "List files/dirs at a revision. Args: org, repo, rev, path.", "input_schema": {"type":"object","properties":{"org":{"type":"string"},"repo":{"type":"string"},"rev":{"type":"string"},"path":{"type":"string"}},"required":["org","repo"]} },
+    { "name": "read", "description": "Read a file (optionally by line range). Args: org, repo, rev, path, offset, limit.", "input_schema": {"type":"object","properties":{"org":{"type":"string"},"repo":{"type":"string"},"rev":{"type":"string"},"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["org","repo","path"]} },
+    { "name": "write", "description": "Write a file, creating a new revision. Args: org, repo, path, content, message.", "input_schema": {"type":"object","properties":{"org":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"},"message":{"type":"string"}},"required":["org","repo","path","content"]} },
+    { "name": "edit", "description": "Replace a line range, creating a new revision. Args: org, repo, rev, path, start_line, end_line, content, message.", "input_schema": {"type":"object","properties":{"org":{"type":"string"},"repo":{"type":"string"},"rev":{"type":"string"},"path":{"type":"string"},"start_line":{"type":"integer"},"end_line":{"type":"integer"},"content":{"type":"string"},"message":{"type":"string"}},"required":["org","repo","path","content"]} },
+    { "name": "delete", "description": "Delete a file, creating a new revision. Args: org, repo, path, message.", "input_schema": {"type":"object","properties":{"org":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"message":{"type":"string"}},"required":["org","repo","path"]} },
+    { "name": "search", "description": "Grep the tree at a revision. Args: org, repo, rev, q.", "input_schema": {"type":"object","properties":{"org":{"type":"string"},"repo":{"type":"string"},"rev":{"type":"string"},"q":{"type":"string"}},"required":["org","repo","q"]} },
+    { "name": "revision_diff", "description": "Diff two revisions (rev_a/rev_b) or one revision vs parent (rev). Args: org, repo, rev_a, rev_b, rev.", "input_schema": {"type":"object","properties":{"org":{"type":"string"},"repo":{"type":"string"},"rev_a":{"type":"string"},"rev_b":{"type":"string"},"rev":{"type":"string"}},"required":["org","repo"]} },
+    { "name": "log", "description": "List revisions. Args: org, repo, rev, limit.", "input_schema": {"type":"object","properties":{"org":{"type":"string"},"repo":{"type":"string"},"rev":{"type":"string"},"limit":{"type":"integer"}},"required":["org","repo"]} },
+    { "name": "blame", "description": "Per-line attribution. Args: org, repo, rev, path.", "input_schema": {"type":"object","properties":{"org":{"type":"string"},"repo":{"type":"string"},"rev":{"type":"string"},"path":{"type":"string"}},"required":["org","repo","path"]} },
+    { "name": "refs", "description": "List bookmarks + tags. Args: org, repo.", "input_schema": {"type":"object","properties":{"org":{"type":"string"},"repo":{"type":"string"}},"required":["org","repo"]} },
+    { "name": "history", "description": "List revisions that edited a file. Args: org, repo, path.", "input_schema": {"type":"object","properties":{"org":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"}},"required":["org","repo","path"]} }
+  ]
+}
