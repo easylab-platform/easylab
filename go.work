@@ -2,9 +2,6 @@ go 1.26.5
 
 use (
 	./easyvcs
-	./ext/code
-	./ext/ops-host
-	./ext/repo
 	./pkr/pkr-cargo
 	./pkr/pkr-composer
 	./pkr/pkr-conan
