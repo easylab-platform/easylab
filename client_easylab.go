@@ -1,6 +1,7 @@
 package main
 
 import (
+	"connectrpc.com/connect"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -12,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	easylabv1 "forgejo.develop.10.199.64.20.nip.io/easylab/easylab-proto/easylab/v1"
-	"forgejo.develop.10.199.64.20.nip.io/easylab/client-sdk"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
+	"github.com/easylab-platform/easylab-client-sdk"
 )
 
 // easylabClient bridges ext/repo onto the easylab lab API.
@@ -350,3 +351,28 @@ func errText(v map[string]interface{}) string {
 }
 
 var _ = easylabv1.BranchInfo{}
+
+// Rebase reparents a revision onto new parents via the typed SDK.
+func (c *easylabClient) Rebase(ctx context.Context, org, repo, rev string, newParents []string) (string, string, error) {
+	return c.sdk.Rebase(ctx, org, repo, rev, newParents)
+}
+
+// Blame returns per-line origin ids via the typed SDK.
+func (c *easylabClient) Blame(ctx context.Context, org, repo, path, ref string) (map[string]interface{}, error) {
+	lines, err := c.sdk.Lab.Blame(ctx, connect.NewRequest(&easylabv1.BlameRequest{Org: org, Repo: repo, Path: path, Ref: ref}))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]interface{}{"_arr": []interface{}{}}
+	arr := make([]interface{}, 0, len(lines.Msg.GetLines()))
+	for i, l := range lines.Msg.GetLines() {
+		arr = append(arr, map[string]interface{}{"revision_id": l, "line_number": i + 1, "content": ""})
+	}
+	out["_arr"] = arr
+	return out, nil
+}
+
+// Diff returns per-file diffs for a change via the typed SDK.
+func (c *easylabClient) Diff(ctx context.Context, org, repo, changeID, path string) ([]*easylabv1.DiffFile, error) {
+	return c.sdk.Diff(ctx, org, repo, changeID, path)
+}

@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	agentsdk "forgejo.develop.10.199.64.20.nip.io/abc-protocol/agent-sdk"
+	agentsdk "github.com/abcp-sdk/agent-sdk"
 )
 
 // agentClient talks to the abc agent session API via the typed

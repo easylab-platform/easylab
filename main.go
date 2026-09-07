@@ -1,6 +1,7 @@
 package main
 
 import (
+	easylabsdk "github.com/easylab-platform/easylab-client-sdk"
 	"context"
 	_ "embed"
 	"log/slog"
@@ -32,6 +33,7 @@ type server struct {
 	store *Store
 	cache *sessCache
 	lab   *easylabClient
+	sdk   *easylabsdk.Client // typed easylab client (search/graph/compare/rebase/tree/revisions)
 	ag    *agentClient
 	ext   *extension.Extension
 }
@@ -39,10 +41,11 @@ type server struct {
 func main() {
 	log := slog.Default().With("svc", "repo-extension")
 	s := &server{
-		base:  envOr("ZERGX_REPO_MANAGER_URL", "http://127.0.0.1:18160"),
-		agent: envOr("ZERGX_AGENT_URL", "http://agent.zergx.svc.cluster.local:80"),
+		base:  envOr("EASYLAB_URL", "http://127.0.0.1:18160"),
+		agent: envOr("AGENT_URL", "http://agent.easylab.svc.cluster.local:80"),
 	}
 	s.lab = newClient(s.base, envOr("EASYLAB_TOKEN", "devtoken"))
+	s.sdk = easylabsdk.New(s.base, envOr("EASYLAB_TOKEN", "devtoken"))
 	s.ag = newAgentClient(s.agent)
 	s.cache = newSessCache(5 * time.Second)
 
@@ -88,8 +91,8 @@ func main() {
 			Handler: s.router(),
 			Run: func(runCtx context.Context, ext *extension.Extension) {
 				s.ext = ext
-				log.Info("listening", "port", envOr("ZERGX_PORT", "8080"), "nats", natsURL)
-				go runReconciler(runCtx, s, time.Duration(envInt("ZERGX_RECONCILE_INTERVAL_SECS", 60))*time.Second)
+				log.Info("listening", "port", envOr("PORT", "8080"), "nats", natsURL)
+				go runReconciler(runCtx, s, time.Duration(envInt("RECONCILE_INTERVAL_SECS", 60))*time.Second)
 			},
 		},
 	); err != nil {
@@ -99,7 +102,7 @@ func main() {
 }
 
 func pgConfig() PgConfig {
-	name := envOr("REPOEXT_DB", "zergx_repoext.db")
+	name := envOr("REPOEXT_DB", "easylab_repoext.db")
 	if !filepath.IsAbs(name) {
 		name = filepath.Join(envOr("EASYVCS_HOME", homeDir()), name)
 	}

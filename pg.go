@@ -40,7 +40,7 @@ type Store struct {
 func OpenStore(_ context.Context, cfg PgConfig) (*Store, error) {
 	path := cfg.DB
 	if path == "" {
-		path = filepath.Join(os.TempDir(), "zergx-repoext.db")
+		path = filepath.Join(os.TempDir(), "easylab-repoext.db")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
