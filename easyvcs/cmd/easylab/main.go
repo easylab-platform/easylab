@@ -37,8 +37,8 @@ import (
 	_ "github.com/pkr/pkr-system"
 	"github.com/pkr/pkrkit"
 
-	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/agent-proto/agent/v1/agentv1connect"
-	"forgejo.develop.10.199.64.20.nip.io/easylab/easylab-proto/easylab/v1/easylabv1connect"
+	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
+	"github.com/easylab-platform/easylab-proto/easylab/v1/easylabv1connect"
 
 	"easyvcs/internal/object"
 	"easyvcs/internal/revision"

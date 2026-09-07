@@ -17,8 +17,8 @@ require (
 
 require (
 	connectrpc.com/connect v1.20.0
-	forgejo.develop.10.199.64.20.nip.io/easylab/easylab-proto v0.0.0
-	forgejo.develop.10.199.64.20.nip.io/abc-protocol/agent-proto v0.0.0
+	github.com/easylab-platform/easylab-proto v0.1.0
+	github.com/abcp-sdk/agent-proto v0.1.0
 )
 
 require (
@@ -29,5 +29,5 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 )
 
-replace forgejo.develop.10.199.64.20.nip.io/easylab/easylab-proto => ../../proto/gen/go
+replace github.com/easylab-platform/easylab-proto => ../../proto/gen/go
 

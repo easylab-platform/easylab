@@ -3,8 +3,9 @@ module easyvcs-ext-code
 go 1.26
 
 require (
-	forgejo.develop.10.199.64.20.nip.io/easylab/client-sdk v0.0.0
 	github.com/abcp-sdk/abc-protocol-go v1.0.9
+	github.com/easylab-platform/easylab-client-sdk v0.0.0
+	github.com/easylab-platform/easylab-proto v0.1.0
 )
 
 require (
@@ -19,4 +20,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace forgejo.develop.10.199.64.20.nip.io/easylab/client-sdk => ../../deps/easylab-client-sdk
+replace github.com/easylab-platform/easylab-client-sdk => ../../deps/easylab-client-sdk

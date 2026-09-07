@@ -3,15 +3,17 @@ module easyvcs-ext-repo
 go 1.26
 
 require (
-	forgejo.develop.10.199.64.20.nip.io/abc-protocol/agent-sdk v0.0.0
-	forgejo.develop.10.199.64.20.nip.io/easylab/client-sdk v0.0.0
 	github.com/abcp-sdk/abc-protocol-go v1.0.9
+	github.com/abcp-sdk/agent-sdk v0.0.0
+	github.com/easylab-platform/easylab-client-sdk v0.0.0
+	github.com/easylab-platform/easylab-proto v0.1.0
 	github.com/go-chi/chi/v5 v5.3.2
 	modernc.org/sqlite v1.58.0
 )
 
 require (
 	connectrpc.com/connect v1.20.0 // indirect
+	github.com/abcp-sdk/agent-proto v0.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.19.1 // indirect
@@ -30,6 +32,6 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 )
 
-replace forgejo.develop.10.199.64.20.nip.io/abc-protocol/agent-sdk => ../../deps/abc-agent-sdk
+replace github.com/abcp-sdk/agent-sdk => ../../deps/abc-agent-sdk
 
-replace forgejo.develop.10.199.64.20.nip.io/easylab/client-sdk => ../../deps/easylab-client-sdk
+replace github.com/easylab-platform/easylab-client-sdk => ../../deps/easylab-client-sdk

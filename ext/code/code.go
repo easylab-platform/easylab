@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	easylabv1 "forgejo.develop.10.199.64.20.nip.io/easylab/easylab-proto/easylab/v1"
-	"forgejo.develop.10.199.64.20.nip.io/easylab/client-sdk"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
+	"github.com/easylab-platform/easylab-client-sdk"
 	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
 	"github.com/abcp-sdk/abc-protocol-go/extension"
 )

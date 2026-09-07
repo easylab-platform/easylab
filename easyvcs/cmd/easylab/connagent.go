@@ -6,8 +6,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "forgejo.develop.10.199.64.20.nip.io/abc-protocol/agent-proto/agent/v1"
-	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/agent-proto/agent/v1/agentv1connect"
+	agentv1 "github.com/abcp-sdk/agent-proto/agent/v1"
+	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
 )
 
 // connAgent is the easylab-side gateway implementation of the agent.v1

@@ -1,5 +1,7 @@
 connectrpc.com/connect v1.20.0 h1:6TNDAB+WeNd2uolWNlYczB5E0KNNaVMNUEx8JEUsPmQ=
 connectrpc.com/connect v1.20.0/go.mod h1:A2ygJrukXwWy32vkCAAHNVguZrqZ+jeZ9rGRnGR4dN4=
+github.com/easylab-platform/easylab-proto v0.1.0 h1:iX1MmqnxTVmFiD0c5sK7oWniV0dMVNKqLmskZif6nlk=
+github.com/easylab-platform/easylab-proto v0.1.0/go.mod h1:PcZuLRhnUB6ZQmF1/vC8ip2IVhOArtp86+ZnCJfXHoY=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 google.golang.org/protobuf v1.36.12 h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	
-	easylabv1 "forgejo.develop.10.199.64.20.nip.io/easylab/easylab-proto/easylab/v1"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 
 	"connectrpc.com/connect"
 	"easyvcs/internal/ops"
