@@ -1,29 +1,9 @@
 package ops
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
-
-func TestLocalRuntimeRun(t *testing.T) {
-	rt := NewLocalRuntime(t.TempDir())
-	res, err := rt.Run(t.Context(), RunSpec{Command: "echo hello"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.ExitCode != 0 || !strings.Contains(res.Output, "hello") {
-		t.Fatalf("run: %+v", res)
-	}
-}
-
-func TestLocalRuntimeTimeout(t *testing.T) {
-	rt := NewLocalRuntime(t.TempDir())
-	_, err := rt.Run(t.Context(), RunSpec{Command: "sleep 5", Timeout: 50 * time.Millisecond}, nil)
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
-}
 
 func TestTaskRegistryLifecycle(t *testing.T) {
 	reg := NewTaskRegistry()

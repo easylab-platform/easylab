@@ -1,57 +1,44 @@
 package ops
 
 import (
+	"archive/tar"
 	"bufio"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
-)
 
-// killGroup sends SIGKILL to the process group led by pid, mirroring the
-// process-group isolation used by the local runtime so a timeout tears down
-// the whole build (and any subprocesses).
-func killGroup(pid int) error {
-	if pid <= 0 {
-		return nil
-	}
-	return syscall.Kill(-pid, syscall.SIGKILL)
-}
+	"github.com/docker/docker/api/types/build"
+	imagepkg "github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/registry"
+	"github.com/docker/docker/client"
+)
 
 // BuildSpec describes a container image build.
 type BuildSpec struct {
-	// Context is the build context directory (a checkout), or empty to build
-	// from a raw Containerfile.
+	// Context is the build context directory (a checkout).
 	Context string
 	// Containerfile is the raw Dockerfile/Containerfile body used when Context
-	// is empty.
+	// holds a writable scratch dir and the body must be materialized.
 	Containerfile string
 	// Dockerfile is a path to the Dockerfile relative to Context (default
-	// "Containerfile").
+	// "Dockerfile").
 	Dockerfile string
-	// Image is the destination image ref (e.g. "registry.example.com/a/app:v1").
+	// Image is the destination image ref (e.g. "host/ns/app:v1").
 	Image string
 	// Registry is the address of the OCI registry to push to. Empty disables
 	// push.
 	Registry string
-	// RegistryAuth is a basic-auth "user:pass" for the target registry, when
-	// auth is on. It is scoped to a temporary docker config so it never leaks.
+	// RegistryAuth is a basic-auth "user:pass" for the target registry.
 	RegistryAuth string
-	// CacheRepo is a repository (in Registry) used to export/import build
-	// cache. When set, the build seeds from (--cache-from) and writes back
-	// (--cache-to) through the registry, so the OCI registry holds reusable
-	// layers shared across builds.
+	// CacheRepo / CacheKey are legacy cache-through knobs; the podman layer
+	// cache is reused when building against the same base, so they are inert.
 	CacheRepo string
-	// CacheKey is an optional opaque key suffix scoping the cache (e.g. a
-	// platform/arch or a CI run). Defaults to "_builtin".
-	CacheKey string
+	CacheKey  string
 	// BuildArgs are --build-arg KEY=VAL entries.
 	BuildArgs []string
 	// NoCache disables layer caching.
@@ -66,89 +53,42 @@ type BuildResult struct {
 	Out   string // build log tail
 }
 
-// Builder is the image-build execution seam.
+// Builder is the image-build execution seam. The backend is the podman
+// sidecar's buildah (via docker/client ImageBuild).
 type Builder interface {
 	Build(ctx context.Context, spec BuildSpec, log func(string)) (BuildResult, error)
 	Name() string
 }
 
-func writeDockerConfig(registry, auth string) (string, error) {
-	if registry == "" || auth == "" {
-		return "", nil
-	}
-	dir, err := os.MkdirTemp("", "easyvcs-build-auth")
-	if err != nil {
-		return "", err
-	}
-	dockerDir := filepath.Join(dir, ".docker")
-	if err := os.MkdirAll(dockerDir, 0o700); err != nil {
-		os.RemoveAll(dir)
-		return "", err
-	}
-	encoded := encodeBasicAuth(auth)
-	cfg := fmt.Sprintf(`{"auths":{"%s":{"auth":"%s"}}}`, registry, encoded)
-	if err := os.WriteFile(filepath.Join(dockerDir, "config.json"), []byte(cfg), 0o600); err != nil {
-		os.RemoveAll(dir)
-		return "", err
-	}
-	return dir, nil
+// podmanBuilder builds container images through the podman sidecar's
+// buildah-in-podman, driven by the Docker-compatible API (docker/client). It is
+// static (no CGO) and reuses the same OCI registry graph the sidecar owns.
+type podmanBuilder struct {
+	cli *client.Client
 }
 
-func encodeBasicAuth(auth string) string {
-	return base64.StdEncoding.EncodeToString([]byte(auth))
-}
-
-// buildahBuilder builds container images with the daemonless, rootless
-// `buildah` client. It needs no buildkitd and no /run write access, so it is
-// fully self-contained inside the EasyLab container. It builds with --layers
-// for local layer caching and, when CacheRepo is set, seeds/writes the cache
-// through the OCI registry so layers are shared across builds.
-type buildahBuilder struct {
-	bin string // path to buildah
-}
-
-// NewBuildahBuilder builds a Builder backed by buildah at bin.
-func NewBuildahBuilder(bin string) *buildahBuilder {
-	if bin == "" {
-		bin = "buildah"
-	}
-	return &buildahBuilder{bin: bin}
+// NewPodmanBackendBuilder builds a Builder backed by the podman API.
+func NewPodmanBackendBuilder(cli *client.Client) *podmanBuilder {
+	return &podmanBuilder{cli: cli}
 }
 
 // Name implements Builder.
-func (b *buildahBuilder) Name() string { return "buildah" }
+func (b *podmanBuilder) Name() string { return "podman" }
 
-// NewBuilderFromEnv returns the sole image-build backend: an embedded buildah
-// (daemonless, rootless). EasyLab only supports in-container builds; there is
-// no buildctl/buildkitd backend. EASYVCS_BUILDAH_BIN overrides the binary path.
+// NewBuilderFromEnv returns the image-build backend: podman's buildah (via the
+// Docker-compatible API). DOCKER_HOST selects the sidecar socket.
 func NewBuilderFromEnv() Builder {
-	bin := os.Getenv("EASYVCS_BUILDAH_BIN")
-	if bin == "" {
-		bin = "buildah"
+	cli, err := client.NewClientWithOpts(
+		client.WithHost(dockerHost()),
+		client.WithAPIVersionNegotiation(),
+	)
+	if err != nil {
+		panic(fmt.Sprintf("podman API client: %v", err))
 	}
-	return NewBuildahBuilder(bin)
+	return NewPodmanBackendBuilder(cli)
 }
 
-// resolveBin locates the buildah executable, preferring the configured path
-// then PATH.
-func (b *buildahBuilder) resolveBin() (string, error) {
-	if _, err := os.Stat(b.bin); err == nil {
-		return b.bin, nil
-	}
-	if p, err := exec.LookPath(b.bin); err == nil {
-		return p, nil
-	}
-	return "", fmt.Errorf("buildah not found (tried %s)", b.bin)
-}
-
-// Build implements Builder via `buildah bud`. It builds with --layers (local
-// cache), and when CacheRepo is set uses --cache-from/--cache-to through the
-// OCI registry so layers are reused, then pushes to the registry if given.
-// buildDir returns a writable ext4 scratch directory for buildah's context
-// overlay scaffolding and TMPDIR. buildah (bud) mounts an overlay over the
-// build context; that requires a writable non-tmpfs backing (e.g. an ext4
-// hostPath/PVC). The default is <EASYVCS_HOME>/buildtmp; override with
-// EASYVCS_BUILDAH_TMP. This mirrors the required on-host path.
+// buildDir returns the writable scratch root used for build contexts.
 func buildDir() string {
 	if v := os.Getenv("EASYVCS_BUILDAH_TMP"); v != "" {
 		return v
@@ -160,201 +100,148 @@ func buildDir() string {
 	return filepath.Join(home, "buildtmp")
 }
 
-func (b *buildahBuilder) Build(ctx context.Context, spec BuildSpec, log func(string)) (BuildResult, error) {
-	bin, err := b.resolveBin()
+// packContextTar walks ctxDir into a tar stream (ImageBuild context). It
+// returns the raw pipe reader: wrapping the stream in a *tar.Reader would
+// buffer-ahead and truncate the body, so podman's buildah would read an empty
+// context and fail with "stat .../Dockerfile: no such file".
+func packContextTar(ctxDir string) (io.Reader, error) {
+	var files []buildFile
+	err := filepath.Walk(ctxDir, func(name string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		rel := strings.TrimPrefix(name, ctxDir)
+		rel = strings.TrimPrefix(rel, "/")
+		files = append(files, buildFile{name: rel, data: data})
+		return nil
+	})
 	if err != nil {
-		return BuildResult{}, err
+		return nil, err
 	}
+	return tarStream(files), nil
+}
 
+type buildFile struct {
+	name string
+	data []byte
+}
+
+func tarStream(files []buildFile) io.Reader {
+	pr, pw := io.Pipe()
+	go func() {
+		tw := tar.NewWriter(pw)
+		for _, f := range files {
+			hdr := &tar.Header{Name: f.name, Mode: 0o644, Size: int64(len(f.data))}
+			_ = tw.WriteHeader(hdr)
+			_, _ = tw.Write(f.data)
+		}
+		_ = tw.Close()
+		_ = pw.Close()
+	}()
+	return pr
+}
+
+// hostOf extracts scheme://host from a registry/ref as the auth key.
+func hostOf(ref string) string {
+	ref = strings.TrimPrefix(ref, "https://")
+	ref = strings.TrimPrefix(ref, "http://")
+	if i := strings.Index(ref, "/"); i > 0 {
+		return ref[:i]
+	}
+	return ref
+}
+
+// Build implements Builder via podman's ImageBuild.
+func (b *podmanBuilder) Build(ctx context.Context, spec BuildSpec, log func(string)) (BuildResult, error) {
 	if spec.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, spec.Timeout)
 		defer cancel()
 	}
-
-	// Working root for buildah: must be a writable ext4 dir so the context
-	// overlay scaffolding can mount. Create it up front.
-	workRoot := buildDir()
-	if err := os.MkdirAll(workRoot, 0o755); err != nil {
-		return BuildResult{}, err
+	if spec.Context == "" {
+		return BuildResult{}, errors.New("build requires a context directory")
 	}
-
-	// Resolve a build context directory.
-	var ctxDir string
-	if spec.Context != "" {
-		ctxDir = spec.Context
-	} else if spec.Containerfile != "" {
-		d, err := scratchDir(workRoot, "easyvcs-build-ctx")
-		if err != nil {
-			return BuildResult{}, err
-		}
-		ctxDir = d
-	} else {
-		return BuildResult{}, fmt.Errorf("build requires a context or a raw Containerfile")
-	}
-
 	dockerfile := spec.Dockerfile
 	if dockerfile == "" {
-		dockerfile = "Containerfile"
+		dockerfile = "Dockerfile"
 	}
-
-	// If a raw Containerfile body is supplied, materialise it into the context
-	// directory under the dockerfile name so buildah picks it up.
 	if spec.Containerfile != "" {
-		full := filepath.Join(ctxDir, dockerfile)
+		full := filepath.Join(spec.Context, dockerfile)
 		if err := os.WriteFile(full, []byte(spec.Containerfile), 0o644); err != nil {
 			return BuildResult{}, err
 		}
 	}
 
-	image := spec.Image
-	args := []string{"bud"}
-	// In-cluster registries are plain-HTTP / self-signed (the built-in /v2,
-	// forgejo nip.io, etc.). Disable TLS verification so buildah can pull base
-	// images, write the cache, and push the result to them.
-	args = append(args, "--tls-verify=false")
-	if image != "" {
-		args = append(args, "-t", image)
+	ctxReader, err := packContextTar(spec.Context)
+	if err != nil {
+		return BuildResult{}, err
 	}
-	if spec.NoCache {
-		args = append(args, "--no-cache")
-	} else {
-		args = append(args, "--layers")
-	}
-	args = append(args, "-f", dockerfile)
+
+	buildArgs := map[string]*string{}
 	for _, ba := range spec.BuildArgs {
-		args = append(args, "--build-arg", ba)
+		k, v, _ := strings.Cut(ba, "=")
+		val := v
+		buildArgs[k] = &val
 	}
-	// Cache sharing through the OCI registry (seed + write-back), when set.
-	// buildah uses plain image-reference form (host/repo[:tag]): --cache-from
-	// takes a repo (no tag) and --cache-to takes a repo (no tag); they use the
-	// buildah-local layer cache seeded from / written to the registry after the
-	// build. Unlike buildkit, there is no `type=registry,ref=` wrapper.
-	cacheRepo := spec.CacheRepo
-	if cacheRepo != "" && !spec.NoCache {
-		ref := cacheRepo
-		args = append(args, "--cache-from", ref)
-		args = append(args, "--cache-to", ref)
-		args = append(args, "--cache-ttl", "168h")
-	}
-	args = append(args, ctxDir)
 
-	// Isolate credentials for the target registry (scoped docker config), so
-	// the build can push to /v2 (or a private base) without leaking tokens.
-	authDir, err := writeDockerConfig(spec.Registry, spec.RegistryAuth)
+	opts := build.ImageBuildOptions{
+		Dockerfile: dockerfile,
+		Tags:       []string{spec.Image},
+		NoCache:    spec.NoCache,
+		BuildArgs:  buildArgs,
+		AuthConfigs: map[string]registry.AuthConfig{
+			hostOf(spec.Registry): {Username: "", Password: ""},
+		},
+		Context: ctxReader,
+	}
+	if spec.RegistryAuth != "" && spec.Registry != "" {
+		u, p, _ := strings.Cut(spec.RegistryAuth, ":")
+		opts.AuthConfigs[hostOf(spec.Registry)] = registry.AuthConfig{Username: u, Password: p}
+	}
+
+	resp, err := b.cli.ImageBuild(ctx, ctxReader, opts)
 	if err != nil {
 		return BuildResult{}, err
 	}
-	if authDir != "" {
-		defer os.RemoveAll(authDir)
-	}
-
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = ctxDir
-	cmd.Env = os.Environ()
-	// bud mounts an overlay over the build context; point TMPDIR at the
-	// writable ext4 work root and force a no-daemon, rootless-friendly build.
-	cmd.Env = append(cmd.Env,
-		"TMPDIR="+workRoot,
-		"BUILDAH_ISOLATION=chroot",
-		"STORAGE_DRIVER=vfs",
-	)
-	if authDir != "" {
-		cmd.Env = append(cmd.Env, "HOME="+authDir)
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.WaitDelay = 500 * time.Millisecond
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return killGroup(cmd.Process.Pid)
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return BuildResult{}, err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return BuildResult{}, err
-	}
-	if err := cmd.Start(); err != nil {
-		return BuildResult{}, err
-	}
+	defer resp.Body.Close()
 
 	var out strings.Builder
-	scan := func(rd io.Reader) {
-		sc := bufio.NewScanner(rd)
-		for sc.Scan() {
-			line := sc.Text()
+	sc := bufio.NewScanner(resp.Body)
+	for sc.Scan() {
+		line := sc.Text()
+		out.WriteString(line + "\n")
+		if log != nil {
+			log(line)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return BuildResult{}, err
+	}
+
+	// Push to the registry if one was given (podman buildah writes into the
+	// sidecar's graph; push publishes to the OCI registry).
+	if spec.Registry != "" && spec.Image != "" {
+		pc, err := b.cli.ImagePush(ctx, spec.Image, imagepkg.PushOptions{RegistryAuth: ""})
+		if err != nil {
+			return BuildResult{Image: spec.Image, Out: out.String()}, err
+		}
+		defer pc.Close()
+		sc2 := bufio.NewScanner(pc)
+		for sc2.Scan() {
+			line := sc2.Text()
 			out.WriteString(line + "\n")
 			if log != nil {
 				log(line)
 			}
 		}
 	}
-	done := make(chan struct{}, 2)
-	go func() { scan(stdout); done <- struct{}{} }()
-	go func() { scan(stderr); done <- struct{}{} }()
-	<-done
-	<-done
 
-	err = cmd.Wait()
-	if ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return BuildResult{Image: image, Out: out.String()}, fmt.Errorf("build timed out")
-	}
-	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			return BuildResult{Image: image, Out: out.String()}, fmt.Errorf("buildah exited %d", ee.ExitCode())
-		}
-		return BuildResult{Image: image, Out: out.String()}, err
-	}
-
-	// If a registry was given, push the built image to it.
-	if image != "" && spec.Registry != "" {
-		if err := pushBuildah(bin, image, spec.Registry, spec.RegistryAuth, ctx, log); err != nil {
-			return BuildResult{Image: image, Out: out.String()}, err
-		}
-	}
-	return BuildResult{Image: image, Out: out.String()}, nil
-}
-
-// pushBuildah runs `buildah push <image> docker://<image>`. The image is
-// already a fully-qualified reference (e.g. host/ns/name:tag) because buildah
-// bud tagged it with -t that name; do NOT prepend the registry again, which
-// would double-prefix it into an invalid reference.
-func pushBuildah(bin, image, registry, auth string, ctx context.Context, log func(string)) error {
-	_ = registry
-	authDir, err := writeDockerConfig(registry, auth)
-	if err != nil {
-		return err
-	}
-	if authDir != "" {
-		defer os.RemoveAll(authDir)
-	}
-	ref := "docker://" + image
-	cmd := exec.CommandContext(ctx, bin, "push", "--tls-verify=false", image, ref)
-	cmd.Env = os.Environ()
-	if authDir != "" {
-		cmd.Env = append(cmd.Env, "HOME="+authDir)
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return killGroup(cmd.Process.Pid)
-	}
-	out, err := cmd.CombinedOutput()
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if line != "" && log != nil {
-			log(line)
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("buildah push failed: %w", err)
-	}
-	return nil
+	return BuildResult{Image: spec.Image, Out: out.String()}, nil
 }

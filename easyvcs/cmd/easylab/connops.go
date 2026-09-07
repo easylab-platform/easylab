@@ -237,15 +237,6 @@ func (c *connOps) Build(ctx context.Context, req *connect.Request[easylabv1.Buil
 	return connect.NewResponse(&easylabv1.BuildResponse{Ok: true, TaskId: id, Image: image}), nil
 }
 
-func (c *connOps) Run(ctx context.Context, req *connect.Request[easylabv1.RunRequest]) (*connect.Response[easylabv1.RunResponse], error) {
-	id := c.s.ops.builders.NewID("run")
-	task := c.s.ops.builders.Create(id, ops.KindRun)
-	go func() {
-		task.Finish(true, "run submitted", "")
-	}()
-	return connect.NewResponse(&easylabv1.RunResponse{Ok: true, TaskId: id}), nil
-}
-
 func (c *connOps) TaskLog(ctx context.Context, req *connect.Request[easylabv1.TaskLogRequest], stream *connect.ServerStream[easylabv1.TaskLogResponse]) error {
 	task := c.s.ops.builders.Get(req.Msg.Id)
 	if task == nil {

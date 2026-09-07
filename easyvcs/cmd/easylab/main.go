@@ -224,7 +224,6 @@ func (s *server) mountOps(mux *http.ServeMux) {
 	// The ops router uses full /api/v1/... patterns; register each directly on
 	// the top-level mux so PathValue is populated by the outer request.
 	mux.Handle("/api/v1/ops/namespaces", http.HandlerFunc(s.opsNamespaces))
-	mux.Handle("/api/v1/ops/runs", http.HandlerFunc(s.opsRun))
 	mux.Handle("/api/v1/ops/tasks", http.HandlerFunc(s.opsTasksList))
 	mux.Handle("/api/v1/ops/tasks/{id}", http.HandlerFunc(s.opsTaskGet))
 	mux.Handle("/api/v1/ops/tasks/{id}/stream", http.HandlerFunc(s.opsTaskStream))

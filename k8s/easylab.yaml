@@ -23,7 +23,7 @@ spec:
       containers:
         # ---- easylab core (Go) — drives podman sidecar via Docker-compatible API
         - name: easylab
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260907155526
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260907163208
           imagePullPolicy: IfNotPresent
           args: ["-addr", "0.0.0.0:8080"]
           env:
@@ -59,7 +59,7 @@ spec:
         - name: podman
           image: forgejo.develop.10.199.64.20.nip.io/easylab/podman:official
           imagePullPolicy: IfNotPresent
-          command: ["bash", "-c", "podman system service --time=0 unix:///run/podman/podman.sock"]
+          command: ["bash", "-c", "cat > /etc/containers/registries.conf.d/100-insecure.conf <<'EOF'\n[[registry]]\nlocation = \"127.0.0.1:8080\"\ninsecure = true\n[[registry]]\nlocation = \"easylab.temp.svc.cluster.local:8080\"\ninsecure = true\nEOF\nexec podman system service --time=0 unix:///run/podman/podman.sock"]
           env:
             - name: EASYLAB_EXT_TAG
               value: "20260907044106"
@@ -67,6 +67,12 @@ spec:
               value: root
             - name: FORGEJO_PASS
               value: devpassword
+            - name: HTTP_PROXY
+              value: http://mihomo.develop.svc.cluster.local:7890
+            - name: HTTPS_PROXY
+              value: http://mihomo.develop.svc.cluster.local:7890
+            - name: NO_PROXY
+              value: localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io
           securityContext:
             allowPrivilegeEscalation: true
             privileged: true

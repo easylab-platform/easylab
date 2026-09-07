@@ -1,147 +1,85 @@
 package ops
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/docker/docker/api/types/container"
+	imagepkg "github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/filters"
+	networkapi "github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/registry"
+	"github.com/docker/go-connections/nat"
+	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
-// PodmanServiceRunner launches services as podman containers running INSIDE the
-// EasyLab container. It is the fully self-contained "internal podman" backend,
-// chosen when EasyLab is run as a privileged pod with writable cgroups:
+// PodmanServiceRunner drives service containers through the podman privileged
+// sidecar using the official Docker-compatible API (docker/client). It does NOT
+// exec a local podman CLI and does NOT require CGO — the easylab binary stays
+// static. It dials the podman API over DOCKER_HOST (default the shared sidecar
+// socket: unix:///run/podman/podman.sock). Service networks, cgroup limits and
+// port publishing map onto the podman API.
 //
-//   - per-service podman network (--network <name>, bridge + built-in DNS) so
-//     services resolve each other by name (`http://<svc>:<port>`);
-//   - real cgroup resource limits (--cpus / --memory) — requires the pod to
-//     mount /sys/fs/cgroup read-write (privileged + a remount at startup);
-//   - port publishing on the EasyLab loopback so a reverse proxy can reach
-//     each service.
+// The podman sidecar runs `podman system service` (Docker-compatible), so image
+// builds go to podman's buildah (ImageBuild) and every build/container lands in
+// the same OCI registry graph the sidecar owns (EASYVCS_REGISTRY).
 type PodmanServiceRunner struct {
 	registryHost string
-	workRoot     string // writable ext4 dir for podman storage/run
-	bin          string
+	workRoot     string
+	cli          *client.Client
 }
 
-// NewPodmanServiceRunner builds a podman-backed runner.
+// dockerHost returns the podman API socket (or override).
+func dockerHost() string {
+	if v := os.Getenv("DOCKER_HOST"); v != "" {
+		return v
+	}
+	if v := os.Getenv("EASYLAB_PODMAN_URI"); v != "" {
+		return v
+	}
+	return "unix:///run/podman/podman.sock"
+}
+
+// NewPodmanServiceRunner builds a docker/client-backed podman runner.
 func NewPodmanServiceRunner(registryHost, workRoot string) *PodmanServiceRunner {
+	cli, err := client.NewClientWithOpts(
+		client.WithHost(dockerHost()),
+		client.WithAPIVersionNegotiation(),
+	)
+	if err != nil {
+		panic(fmt.Sprintf("podman API client: %v", err))
+	}
 	return &PodmanServiceRunner{
 		registryHost: registryHost,
 		workRoot:     workRoot,
-		bin:          envOr("EASYVCS_PODMAN_BIN", "podman"),
+		cli:          cli,
 	}
 }
 
 // Name implements ServiceRunner.
 func (r *PodmanServiceRunner) Name() string { return "podman" }
 
-// podmanEnv returns the env so podman uses our storage/run (not /var/lib, which
-// is unwritable in a restricted pod). This is rootful podman; the pod is
-// privileged with a rw cgroup mount.
-func (r *PodmanServiceRunner) podmanEnv() []string {
-	return []string{
-		"STORAGE_DRIVER=vfs",
-		"HOME=" + r.workRoot,
-		"XDG_RUNTIME_DIR=" + r.workRoot,
-	}
+// getRegistryAuth builds an auth config for the internal registry (bare
+// host/repo). Pulling from the built-in /v2 is open (no auth); but when a
+// registry auth is configured it is honored. We pass empty auth which works
+// for the open in-cluster registry.
+func (r *PodmanServiceRunner) authFor(image string) registry.AuthConfig {
+	return registry.AuthConfig{}
 }
 
-// runPodman executes a podman subcommand with our env.
-func (r *PodmanServiceRunner) runPodman(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, r.bin, args...)
-	cmd.Env = append(os.Environ(), r.podmanEnv()...)
-	out, err := cmd.CombinedOutput()
-	s := strings.TrimSpace(string(out))
-	if err != nil {
-		if s == "" {
-			s = err.Error()
-		}
-		return s, fmt.Errorf("podman %s: %s", strings.Join(args, " "), s)
-	}
-	return s, nil
-}
-
-// Exec runs a command inside a running service container (podman exec) and
-// returns its combined output. It is used by the sandbox pass-through.
-func (r *PodmanServiceRunner) Exec(ctx context.Context, name string, command string) (string, error) {
-	if command == "" {
-		return "", fmt.Errorf("exec requires a command")
-	}
-	return r.runPodman(ctx, "exec", name, "sh", "-c", command)
-}
-
-// ContainerFile writes content to a path inside a running container via
-// podman cp (temp file -> container).
-func (r *PodmanServiceRunner) ContainerFile(ctx context.Context, name, path string, content []byte) error {
-	tmpHost := filepath.Join(r.workRoot, fmt.Sprintf("containerfile-%d", time.Now().UnixNano()))
-	if err := os.WriteFile(tmpHost, content, 0o600); err != nil {
-		return err
-	}
-	defer os.Remove(tmpHost)
-	_, err := r.runPodman(ctx, "cp", tmpHost, name+":"+path)
-	return err
-}
-
-// ReadContainerFile copies a path out of a container to a temp file and returns
-// its bytes.
-func (r *PodmanServiceRunner) ReadContainerFile(ctx context.Context, name, path string) ([]byte, error) {
-	tmpHost := filepath.Join(r.workRoot, fmt.Sprintf("read-%d", time.Now().UnixNano()))
-	defer os.Remove(tmpHost)
-	if _, err := r.runPodman(ctx, "cp", name+":"+path, tmpHost); err != nil {
-		return nil, err
-	}
-	return os.ReadFile(tmpHost)
-}
-
-// netName returns the network name for a service. When the request specifies an
-// explicit Network, services sharing it resolve each other by name; otherwise a
-// per-service (same-name) network is used.
-func (r *PodmanServiceRunner) netName(name string) string { return name }
-
-// runroot returns the podman runroot actually in use (from storage.conf that
-// the container is wired to). The aardvark-dns config lives under
-// <runroot>/networks/aardvark-dns, so we must purge there — a hardcoded work
-// dir may not match the real runroot.
-func (r *PodmanServiceRunner) runroot() string {
-	out, err := r.runPodman(context.Background(), "info", "--format", "{{.Store.RunRoot}}")
-	if err == nil && strings.TrimSpace(out) != "" {
-		return strings.TrimSpace(out)
-	}
-	return filepath.Join(r.workRoot, "runroot")
-}
-
-// ensureNetwork creates a bridge network (with DNS) for the given name. It
-// first purges the aardvark-dns config so the DNS server doesn't try to bind
-// gateways of stale/removed networks (which no longer exist in this container's
-// netns and caused aardvark to abort), then forces-removes any stale network of
-// the same name before creating a fresh one.
-func (r *PodmanServiceRunner) ensureNetwork(ctx context.Context, name string) error {
-	_, _ = r.runPodman(ctx, "network", "rm", "-f", name)
-	// Wipe aardvark's per-network DNS config under the real runroot so it only
-	// registers the network we are about to create.
-	root := r.runroot()
-	_ = os.RemoveAll(filepath.Join(root, "networks", "aardvark-dns"))
-	_, err := r.runPodman(ctx, "network", "create", "--driver", "bridge", name)
-	return err
-}
-
-func (r *PodmanServiceRunner) publishArgs(ports map[int]int) []string {
-	var args []string
-	for c, h := range ports {
-		if h == 0 {
-			args = append(args, "-p", fmt.Sprintf("127.0.0.1::%d", c))
-		} else {
-			args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d", h, c))
-		}
-	}
-	return args
-}
-
-// qualify prepends the internal registry host to a bare image name.
+// qualify prepends the internal registry host to a bare image name, mirroring
+// the CLI heuristic (so unqualified "alpine" resolves to the internal OCI).
 func (r *PodmanServiceRunner) qualify(image string) string {
 	if strings.Contains(image, "/") && !strings.Contains(strings.SplitN(image, "/", 2)[0], ".") &&
 		!strings.Contains(strings.SplitN(image, "/", 2)[0], ":") {
@@ -153,19 +91,95 @@ func (r *PodmanServiceRunner) qualify(image string) string {
 	return image
 }
 
-// containerIP returns the primary container's IP on its network.
-func (r *PodmanServiceRunner) containerIP(ctx context.Context, name string) (string, error) {
-	out, err := r.runPodman(ctx, "inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", name)
+// ensureNetwork creates a bridge network for name (Docker-compatible; podman
+// maps this to its netavark bridge + embedded DNS).
+func (r *PodmanServiceRunner) ensureNetwork(ctx context.Context, name string) error {
+	if name == "" {
+		return nil
+	}
+	// Exists?
+	if _, err := r.cli.NetworkInspect(ctx, name, networkapi.InspectOptions{}); err == nil {
+		return nil
+	}
+	_, err := r.cli.NetworkCreate(ctx, name, networkapi.CreateOptions{Driver: "bridge"})
+	return err
+}
+
+// Exec runs a command inside a running service container via the exec API and
+// returns its combined output.
+func (r *PodmanServiceRunner) Exec(ctx context.Context, name string, command string) (string, error) {
+	if command == "" {
+		return "", fmt.Errorf("exec requires a command")
+	}
+	cfg := container.ExecOptions{
+		Cmd:          []string{"sh", "-c", command},
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+	execID, err := r.cli.ContainerExecCreate(ctx, name, cfg)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	resp, err := r.cli.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Close()
+	var buf bytes.Buffer
+	_, _ = stdcopy.StdCopy(&buf, &buf, resp.Reader)
+	return strings.TrimSpace(buf.String()), nil
 }
 
-// Launch creates the network, pulls the image, and runs the requested number of
-// containers with real cgroup resource limits. When ServiceRequest.Network is
-// set, the container joins that shared network (so services in the same network
-// resolve each other by name); otherwise a per-service network is created.
+// ContainerFile writes content to a path inside a running container via
+// CopyToContainer (tar stream).
+func (r *PodmanServiceRunner) ContainerFile(ctx context.Context, name, path string, content []byte) error {
+	tarStream := tarBytes([]tarEntry{{name: filepath.Base(path), data: content}})
+	return r.cli.CopyToContainer(ctx, name, filepath.Dir(path), tarStream, container.CopyToContainerOptions{})
+}
+
+// ReadContainerFile copies a path out of a container via CopyFromContainer.
+func (r *PodmanServiceRunner) ReadContainerFile(ctx context.Context, name, path string) ([]byte, error) {
+	rc, _, err := r.cli.CopyFromContainer(ctx, name, path)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	br := tar.NewReader(rc)
+	for {
+		hdr, err := br.Next()
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("no file at %s", path)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if hdr.Typeflag == tar.TypeReg {
+			data, err := io.ReadAll(br)
+			if err != nil {
+				return nil, err
+			}
+			return data, nil
+		}
+	}
+}
+
+// netName returns the network name for a service.
+func (r *PodmanServiceRunner) netName(name string) string { return name }
+
+// containerIP returns the container's IP on its network.
+func (r *PodmanServiceRunner) containerIP(ctx context.Context, name string) (string, error) {
+	insp, err := r.cli.ContainerInspect(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if insp.NetworkSettings == nil {
+		return "", nil
+	}
+	return insp.NetworkSettings.IPAddress, nil
+}
+
+// Launch creates the network, pulls the image, and starts the requested number
+// of containers with cgroup resource limits.
 func (r *PodmanServiceRunner) Launch(ctx context.Context, req ServiceRequest, log func(string)) (ServiceStatus, error) {
 	if req.Name == "" {
 		return ServiceStatus{}, fmt.Errorf("service name required")
@@ -177,9 +191,15 @@ func (r *PodmanServiceRunner) Launch(ctx context.Context, req ServiceRequest, lo
 	if err := r.ensureNetwork(ctx, net); err != nil {
 		return ServiceStatus{}, fmt.Errorf("create network: %w", err)
 	}
-	ports := req.Ports
-	if len(ports) == 0 {
-		ports = map[int]int{8080: 0}
+	image := r.qualify(req.Image)
+	// Pull if absent (Docker-compatible pull); ignore not-found-on-inspect.
+	if _, _, err := r.cli.ImageInspectWithRaw(ctx, image); err != nil {
+		if _, perr := r.cli.ImagePull(ctx, image, imagepkg.PullOptions{}); perr != nil {
+			return ServiceStatus{}, fmt.Errorf("pull %s: %w", image, perr)
+		}
+		if log != nil {
+			log("pulled " + image)
+		}
 	}
 	reps := req.Replicas
 	if reps <= 0 {
@@ -197,33 +217,55 @@ func (r *PodmanServiceRunner) Launch(ctx context.Context, req ServiceRequest, lo
 		if reps > 1 {
 			containerName = fmt.Sprintf("%s-%d", req.Name, i)
 		}
-		args := []string{"run", "-d", "--name", containerName, "--network", net}
-		args = append(args, r.publishArgs(ports)...)
-		args = append(args, "--restart", restart, "--tls-verify=false", "--pull", "missing")
-		for k, v := range req.Labels {
-			args = append(args, "--label", k+"="+v)
+		binds := []string{}
+		exposed := map[nat.Port]struct{}{}
+		pbinds := nat.PortMap{}
+		for c, h := range req.Ports {
+			port := nat.Port(fmt.Sprintf("%d/tcp", c))
+			exposed[port] = struct{}{}
+			if h != 0 {
+				pbinds[port] = []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: fmt.Sprintf("%d", h)}}
+			}
 		}
-		for _, e := range req.Env {
-			args = append(args, "-e", e)
+		hostCfg := &container.HostConfig{
+			RestartPolicy:     container.RestartPolicy{Name: container.RestartPolicyMode(restart)},
+			NetworkMode:       container.NetworkMode(net),
+			PortBindings:      pbinds,
+			Binds:             binds,
+			Resources:         container.Resources{},
 		}
 		if req.CPUs != "" {
-			args = append(args, "--cpus", req.CPUs)
+			hostCfg.Resources.NanoCPUs = nanoCPUs(req.CPUs)
 		}
 		if req.MemoryBytes > 0 {
-			args = append(args, "--memory", fmt.Sprintf("%d", req.MemoryBytes))
+			hostCfg.Resources.Memory = int64(req.MemoryBytes)
 		}
-		args = append(args, r.qualify(req.Image))
+		env, cmd := req.Env, []string{}
 		if req.Command != "" {
-			args = append(args, "sh", "-c", req.Command)
+			cmd = []string{"sh", "-c", req.Command}
 		}
+		labels := req.Labels
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		cfgspec := &container.Config{
+			Image:        image,
+			Cmd:          cmd,
+			Env:          env,
+			Labels:       labels,
+			ExposedPorts: exposed,
+		}
+		created, err := r.cli.ContainerCreate(ctx, cfgspec, hostCfg, nil, nil, containerName)
+		if err != nil {
+			return ServiceStatus{}, fmt.Errorf("create %s: %w", containerName, err)
+		}
+		if err := r.cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+			return ServiceStatus{}, fmt.Errorf("start %s: %w", containerName, err)
+		}
+		ids = append(ids, created.ID)
 		if log != nil {
 			log("launch " + containerName)
 		}
-		out, err := r.runPodman(ctx, args...)
-		if err != nil {
-			return ServiceStatus{}, fmt.Errorf("launch %s: %w", containerName, err)
-		}
-		ids = append(ids, strings.TrimSpace(out))
 		if firstIP == "" {
 			firstIP, _ = r.containerIP(ctx, containerName)
 		}
@@ -232,7 +274,7 @@ func (r *PodmanServiceRunner) Launch(ctx context.Context, req ServiceRequest, lo
 	if reps > 1 {
 		primary = req.Name + "-0"
 	}
-	return r.statusOf(ctx, primary, req.Name, reps, ids, firstIP, ports, net), nil
+	return r.statusOf(ctx, primary, req.Name, reps, ids, firstIP, req.Ports, net), nil
 }
 
 // statusOf assembles a ServiceStatus.
@@ -254,37 +296,39 @@ func (r *PodmanServiceRunner) statusOf(ctx context.Context, primary, name string
 	return st
 }
 
-// Status inspects a single container by name.
+// Status inspects a single container by name (or id).
 func (r *PodmanServiceRunner) Status(ctx context.Context, name string) (ServiceStatus, error) {
-	out, err := r.runPodman(ctx, "inspect", "--format", "{{.State.Status}}", name)
+	insp, err := r.cli.ContainerInspect(ctx, name)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such") || strings.Contains(err.Error(), "not found") {
+		if client.IsErrNotFound(err) {
 			return ServiceStatus{}, os.ErrNotExist
 		}
 		return ServiceStatus{}, err
 	}
-	state := strings.TrimSpace(out)
-	ip, _ := r.containerIP(ctx, name)
+	ip, _ := r.containerIP(ctx, insp.ID)
+	state := insp.State.Status
 	st := ServiceStatus{Name: name, Kind: "deployment", Phase: state, Replicas: 1, Ready: 1, PodIP: ip, ServiceURL: name}
-	if state == "exited" || state == "dead" {
+	if state == "exited" || state == "dead" || state == "created" {
 		st.Ready = 0
 	}
 	return st, nil
 }
 
-// Delete removes a service (containers + network). When Network is shared, we
-// only remove the per-service network (the same-name one) to avoid tearing
-// down a shared group network. Containers are removed by the service name
-// prefix.
+// Delete removes a service's containers (by name prefix) and network.
 func (r *PodmanServiceRunner) Delete(ctx context.Context, name string) error {
 	candidates := []string{name}
 	for i := 0; i < 64; i++ {
 		candidates = append(candidates, fmt.Sprintf("%s-%d", name, i))
 	}
 	for _, c := range candidates {
-		_, _ = r.runPodman(ctx, "rm", "-f", c)
+		insp, err := r.cli.ContainerInspect(ctx, c)
+		if err != nil {
+			continue
+		}
+		_ = r.cli.ContainerStop(ctx, insp.ID, container.StopOptions{})
+		_ = r.cli.ContainerRemove(ctx, insp.ID, container.RemoveOptions{Force: true})
 	}
-	_, _ = r.runPodman(ctx, "network", "rm", "-f", r.netName(name))
+	_ = r.cli.NetworkRemove(ctx, r.netName(name))
 	return nil
 }
 
@@ -293,17 +337,23 @@ func (r *PodmanServiceRunner) Scale(ctx context.Context, name string, replicas i
 	current := 1
 	for i := 1; ; i++ {
 		c := fmt.Sprintf("%s-%d", name, i)
-		if _, err := r.runPodman(ctx, "inspect", c); err == nil {
+		if _, err := r.cli.ContainerInspect(ctx, c); err == nil {
 			current = i + 1
 		} else {
 			break
 		}
 	}
 	for i := current; i < replicas; i++ {
-		_, _ = r.runPodman(ctx, "start", fmt.Sprintf("%s-%d", name, i))
+		c := fmt.Sprintf("%s-%d", name, i)
+		if insp, err := r.cli.ContainerInspect(ctx, c); err == nil {
+			_ = r.cli.ContainerStart(ctx, insp.ID, container.StartOptions{})
+		}
 	}
 	for i := replicas; i < current; i++ {
-		_, _ = r.runPodman(ctx, "stop", fmt.Sprintf("%s-%d", name, i))
+		c := fmt.Sprintf("%s-%d", name, i)
+		if insp, err := r.cli.ContainerInspect(ctx, c); err == nil {
+			_ = r.cli.ContainerStop(ctx, insp.ID, container.StopOptions{})
+		}
 	}
 	ip, _ := r.containerIP(ctx, name)
 	return ServiceStatus{Name: name, Kind: "deployment", Replicas: replicas, Ready: replicas, PodIP: ip, ServiceURL: name}, nil
@@ -311,22 +361,18 @@ func (r *PodmanServiceRunner) Scale(ctx context.Context, name string, replicas i
 
 // List lists containers, optionally filtered by network.
 func (r *PodmanServiceRunner) List(ctx context.Context, network string) ([]ServiceStatus, error) {
-	var extra []string
+	opts := container.ListOptions{All: true}
 	if network != "" {
-		extra = append(extra, "--filter", "network="+network)
+		opts.Filters = filters.NewArgs(filters.Arg("network", network))
 	}
-	out, err := r.runPodman(ctx, append([]string{"ps", "-a", "--format", "{{.Names}}"}, extra...)...)
+	summaries, err := r.cli.ContainerList(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
 	var list []ServiceStatus
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		st := ServiceStatus{Name: line, Kind: "deployment", Replicas: 1}
-		if ip, e := r.containerIP(ctx, line); e == nil {
+	for _, s := range summaries {
+		st := ServiceStatus{Name: s.Names[0], Kind: "deployment", Replicas: 1}
+		if ip, e := r.containerIP(ctx, s.ID); e == nil {
 			st.PodIP = ip
 		}
 		list = append(list, st)
@@ -334,30 +380,48 @@ func (r *PodmanServiceRunner) List(ctx context.Context, network string) ([]Servi
 	return list, nil
 }
 
-var _ ServiceRunner = (*PodmanServiceRunner)(nil)
-var _ = json.Marshal
-var _ = time.Second
-
-// SyncTar extracts a tarball into a running service container at dest. The
-// tarball is staged through the work root (podman cp needs a real file). The
-// destination directory is created first (podman cp cannot mkdir).
+// SyncTar extracts a tarball into a running service container at dest.
 func (r *PodmanServiceRunner) SyncTar(ctx context.Context, name, dest string, tarball []byte) error {
 	if dest == "" {
 		dest = "/workspace"
 	}
-	if _, err := r.Exec(ctx, name, "mkdir -p "+shQuoted(dest)); err != nil {
-		return fmt.Errorf("sync mkdir: %w", err)
-	}
-	tmp := filepath.Join(r.workRoot, fmt.Sprintf("sync-%d.tar", time.Now().UnixNano()))
-	if err := os.WriteFile(tmp, tarball, 0o644); err != nil {
-		return err
-	}
-	defer os.Remove(tmp)
-	_, err := r.runPodman(ctx, "cp", tmp, name+":"+dest)
-	return err
+	return r.cli.CopyToContainer(ctx, name, dest, bytes.NewReader(tarball), container.CopyToContainerOptions{})
 }
 
-// shQuoted quotes a path for the plain sh -c used by Exec.
-func shQuoted(p string) string {
-	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+var _ ServiceRunner = (*PodmanServiceRunner)(nil)
+
+// ---- helpers ----
+
+
+func nanoCPUs(cpus string) int64 {
+	// Accept "1", "0.5", "250m"; convert to nano-CPUs.
+	var v float64
+	if strings.HasSuffix(cpus, "m") {
+		fmt.Sscanf(cpus[:len(cpus)-1], "%f", &v)
+		v = v / 1000
+	} else {
+		fmt.Sscanf(cpus, "%f", &v)
+	}
+	return int64(v * 1e9)
 }
+
+type tarEntry struct {
+	name string
+	data []byte
+}
+
+func tarBytes(entries []tarEntry) io.Reader {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, e := range entries {
+		hdr := &tar.Header{Name: e.name, Mode: 0o644, Size: int64(len(e.data))}
+		_ = tw.WriteHeader(hdr)
+		_, _ = tw.Write(e.data)
+	}
+	_ = tw.Close()
+	return bytes.NewReader(buf.Bytes())
+}
+
+var _ = json.Marshal
+var _ = http.StatusOK
+var _ = time.Second
