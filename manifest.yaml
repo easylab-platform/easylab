@@ -1,0 +1,463 @@
+# ops-extension protocol manifest — single declarative source for the
+# extension's wire protocol (tools + session variables + lifecycle). Handler
+# and resolver bindings stay in code (tools.go / variables.go).
+id: ops
+version: 0.1.0
+lifecycle: [deleted]
+variables:
+  - name: sandbox-id
+    scope: session
+    description: Container ID of the session sandbox.
+    descriptions:
+      zh: 会话沙箱的容器 ID。
+  - name: sandbox-status
+    scope: session
+    description: Status of the session sandbox.
+    descriptions:
+      zh: 会话沙箱的状态。
+tools:
+  - name: sandbox-create
+    description: Create the session sandbox from a chosen base image. The worker binary is injected automatically; you must call this before any other sandbox-* tool. Choose an image easylab can pull (e.g. docker.io/library/alpine:3.20, docker.io/library/node:22-alpine, docker.io/library/golang:1.26-alpine). The workspace is synced into it once ready.
+    descriptions:
+      zh: 从所选基础镜像创建会话沙箱。worker 二进制会被自动注入；必须先调用本工具再使用其他 sandbox-* 工具。请选择 easylab 可拉取的镜像（如 docker.io/library/alpine:3.20、docker.io/library/node:22-alpine、docker.io/library/golang:1.26-alpine）。就绪后工作区会同步进去。
+    input_schema:
+      type: object
+      properties:
+        image:
+          type: string
+          description: Base image for the sandbox (easylab-reachable, e.g. docker.io/library/<toolchain>:<tag>). The worker binary is injected automatically.
+          descriptions:
+            zh: 沙箱的基础镜像（easylab 可拉取，如 docker.io/library/<工具链>:<tag>）。worker 二进制会被自动注入。
+      required: [image]
+  - name: sandbox-run
+    description: Run a shell command in the session sandbox. The workspace is synced to the repo bookmark head first (repo files refreshed; sandbox-only files kept).
+    descriptions:
+      zh: 在会话沙箱中运行 shell 命令。先将工作区同步到仓库书签头部（刷新仓库文件；保留仅沙箱的文件）。
+    input_schema:
+      type: object
+      properties:
+        command:
+          type: string
+          description: Shell command to run in the sandbox (the workspace is synced to the repo bookmark head first).
+          descriptions:
+            zh: 在沙箱中运行的 shell 命令（工作区先同步到仓库书签头部）。
+        workdir:
+          type: string
+          description: "Working directory inside the sandbox, relative to the workspace root (default: workspace root)."
+          descriptions:
+            zh: 沙箱内的工作目录，相对于工作区根目录（默认：工作区根目录）。
+        timeout-ms:
+          type: integer
+          description: Synchronous wait ceiling in milliseconds (default 10000). If the command does not finish within this window it is backgrounded and a completion notice is sent to the chat.
+          descriptions:
+            zh: 同步等待上限（毫秒，默认 10000）。命令在此时限内未完成则转入后台，完成后向聊天发送通知。
+      required: [command]
+  - name: sandbox-read
+    description: Read a file from the session sandbox filesystem (synced to repo first).
+    descriptions:
+      zh: 从会话沙箱文件系统读取文件（先同步到仓库）。
+    input_schema:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Target path inside the sandbox or repository (relative to the workspace root).
+          descriptions:
+            zh: 沙箱或仓库内的目标路径（相对于工作区根目录）。
+      required: [path]
+  - name: sandbox-write
+    description: Write a file into the session sandbox filesystem (no sync first — never clobbers in-progress edits).
+    descriptions:
+      zh: 写入会话沙箱文件系统中的文件（不先同步——绝不覆盖进行中的编辑）。
+    input_schema:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Target path inside the sandbox or repository (relative to the workspace root).
+          descriptions:
+            zh: 沙箱或仓库内的目标路径（相对于工作区根目录）。
+        content:
+          type: string
+          description: File content (write) or the replacement text (edit).
+          descriptions:
+            zh: 文件内容（写入）或替换文本（编辑）。
+      required: [path, content]
+  - name: sandbox-edit
+    description: Replace or insert lines in a sandbox file by line numbers (synced to repo first).
+    descriptions:
+      zh: 按行号替换或插入沙箱文件中的行（先同步到仓库）。
+    input_schema:
+      type: object
+      properties:
+        start-line:
+          type: integer
+          description: 1-based start line of the edit. When end_line < start_line, inserts before this line.
+          descriptions:
+            zh: 编辑的起始行（从 1 开始）；当 end_line < start_line 时在此行前插入。
+        end-line:
+          type: integer
+          description: 1-based end line of the edit (inclusive). Less than start_line means insert mode.
+          descriptions:
+            zh: 编辑的结束行（从 1 开始，含端点）；小于 start_line 表示插入模式。
+        path:
+          type: string
+          description: Target path inside the sandbox or repository (relative to the workspace root).
+          descriptions:
+            zh: 沙箱或仓库内的目标路径（相对于工作区根目录）。
+        content:
+          type: string
+          description: File content (write) or the replacement text (edit).
+          descriptions:
+            zh: 文件内容（写入）或替换文本（编辑）。
+      required: [path, start_line, end_line]
+  - name: sandbox-job-list
+    description: List jobs (commands) in the session sandbox.
+    descriptions:
+      zh: 列出会话沙箱中的作业（命令）。
+    input_schema:
+      type: object
+      properties: {}
+  - name: sandbox-job-output
+    description: Read output of a sandbox job (supports offset/limit/grep).
+    descriptions:
+      zh: 读取沙箱作业的输出（支持 offset/limit/grep）。
+    input_schema:
+      type: object
+      properties:
+        job-id:
+          type: string
+          description: Background job id (returned by sandbox-run).
+          descriptions:
+            zh: 后台任务 id（由 sandbox-run 返回）。
+        start:
+          type: integer
+          description: Zero-based line offset to start reading from (default 0).
+          descriptions:
+            zh: 起始读取的从 0 计的行偏移（默认 0）。
+        end:
+          type: integer
+          description: "Exclusive upper line bound (default: to the end)."
+          descriptions:
+            zh: 不含端点的行上界（默认：到末尾）。
+        grep:
+          type: string
+          description: Case-insensitive substring to filter output lines with.
+          descriptions:
+            zh: 用于过滤输出行的大小写不敏感子串。
+      required: [job-id]
+  - name: sandbox-job-wait
+    description: Wait for a sandbox job to finish.
+    descriptions:
+      zh: 等待沙箱作业完成。
+    input_schema:
+      type: object
+      properties:
+        job-id:
+          type: string
+          description: Background job id (returned by sandbox-run).
+          descriptions:
+            zh: 后台任务 id（由 sandbox-run 返回）。
+        timeout-ms:
+          type: integer
+          description: Maximum wait in milliseconds (default 10000; up to 30000).
+          descriptions:
+            zh: 最长等待毫秒数（默认 10000，上限 30000）。
+      required: [job-id]
+  - name: sandbox-job-stdin
+    description: Send stdin data to a running sandbox job.
+    descriptions:
+      zh: 向运行中的沙箱作业发送 stdin 数据。
+    input_schema:
+      type: object
+      properties:
+        job-id:
+          type: string
+          description: Background job id (returned by sandbox-run).
+          descriptions:
+            zh: 后台任务 id（由 sandbox-run 返回）。
+        data:
+          type: string
+          description: Raw bytes (stdin text or drop payload) as a string.
+          descriptions:
+            zh: 原始字节（stdin 文本或 drop 负载）的字符串形式。
+      required: [job-id, data]
+  - name: sandbox-job-kill
+    description: Kill a sandbox job.
+    descriptions:
+      zh: 终止沙箱作业。
+    input_schema:
+      type: object
+      properties:
+        job-id:
+          type: string
+          description: Background job id (returned by sandbox-run).
+          descriptions:
+            zh: 后台任务 id（由 sandbox-run 返回）。
+      required: [job-id]
+  - name: sandbox-port
+    description: Copy a file from the sandbox into the session's repo (bookmark moves; the change syncs back on the next sandbox tool call).
+    descriptions:
+      zh: 把文件从沙箱复制到会话的仓库（书签移动；该变更会在下一次沙箱工具调用时回写）。
+    input_schema:
+      type: object
+      properties:
+        sandbox-path:
+          type: string
+          description: File path inside the sandbox (relative to the sandbox root).
+          descriptions:
+            zh: 沙箱内的文件路径（相对于沙箱根目录）。
+        repo-path:
+          type: string
+          description: Repository-relative path that maps from the sandbox file (defaults to the same path).
+          descriptions:
+            zh: 沙箱文件映射到的仓库相对路径（默认同路径）。
+        message:
+          type: string
+          description: Commit message for the ported file (defaults to a descriptive one).
+          descriptions:
+            zh: 端口文件的提交信息（默认给出描述性信息）。
+      required: [sandbox-path, repo-path]
+  - name: container-build
+    description: Build a container image from a Containerfile in the repo using the remote buildkit builder.
+    descriptions:
+      zh: 使用远程 buildkit 构建器从仓库中的 Containerfile 构建容器镜像。
+    input_schema:
+      type: object
+      properties:
+        dockerfile-path:
+          type: string
+          description: "Repo-relative path to the Dockerfile (default: ./Dockerfile)."
+          descriptions:
+            zh: Dockerfile 的仓库相对路径（默认 ./Dockerfile）。
+        tag:
+          type: string
+          description: Image tag (defaults to the session bookmark).
+          descriptions:
+            zh: 镜像标签（默认会话书签）。
+        image-tag:
+          type: string
+          description: Optional semantic version for the pushed image reference (e.g. v0.0.1). When omitted the tag defaults to the source bookmark (a floating tag).
+          descriptions:
+            zh: 可选的语义化版本号（如 v0.0.1）。省略时标签默认为源书签（浮动标签）。
+        context:
+          type: string
+          description: "Build context path, relative to the repo root (default: repo root)."
+          descriptions:
+            zh: 构建上下文路径，相对于仓库根目录（默认：仓库根目录）。
+        no-cache:
+          type: boolean
+          description: Skip the layer cache (build from scratch).
+          descriptions:
+            zh: 跳过层缓存（从零构建）。
+      required: [dockerfile-path, tag]
+  - name: service-deploy
+    description: Deploy a container image as a Kubernetes deployment (with optional nested resource requests/limits). On success returns the service's in-cluster DNS hostname (<name>.<namespace>.svc.cluster.local) so the sandbox can reach it by name.
+    descriptions:
+      zh: 将容器镜像部署为 Kubernetes Deployment（可带嵌套的 resource requests/limits）。成功后返回服务的集群内 DNS 主机名（<name>.<namespace>.svc.cluster.local），沙箱可直接用该主机名访问。
+    input_schema:
+      type: object
+      properties:
+        image:
+          type: string
+          description: Image reference to deploy (bare names are qualified against the in-cluster registry).
+          descriptions:
+            zh: 要部署的镜像引用（裸名会在集群内注册表上限定）。
+        name:
+          type: string
+          description: 'Deployment name (defaults to a unique org-repo-bookmark slug; a service owned by another session is rejected).'
+          descriptions:
+            zh: '部署名称（默认为唯一的 org-repo-bookmark 派生名；属于其他会话的服务会被拒绝）。'
+        resources:
+          type: object
+          description: CPU / memory requests and limits for the container.
+          descriptions:
+            zh: 容器的 CPU / 内存请求与上限。
+          properties:
+            requests:
+              type: object
+              description: Resource requests (minimum guaranteed).
+              descriptions:
+                zh: 资源请求（最低保证）。
+              properties:
+                cpu:
+                  type: string
+                  description: CPU request/limit (e.g. 250m, 1).
+                  descriptions:
+                    zh: CPU 请求/上限（如 250m、1）。
+                memory:
+                  type: string
+                  description: CPU request/limit (e.g. 250m, 1).
+                  descriptions:
+                    zh: CPU 请求/上限（如 250m、1）。
+            limits:
+              type: object
+              description: Resource limits (hard upper bound).
+              descriptions:
+                zh: 资源上限（硬性上限）。
+              properties:
+                cpu:
+                  type: string
+                  description: CPU request/limit (e.g. 250m, 1).
+                  descriptions:
+                    zh: CPU 请求/上限（如 250m、1）。
+                memory:
+                  type: string
+                  description: CPU request/limit (e.g. 250m, 1).
+                  descriptions:
+                    zh: CPU 请求/上限（如 250m、1）。
+      required: [image]
+  - name: container-search
+    description: Search container images in the OCI registry. Default returns all cached/published images (incl. library/* base images like docker.io/library/go:alpine); pass repo=<org/repo> to filter images built from that source repo, source=push|pull to filter origin, or all=true.
+    descriptions:
+      zh: 检索 OCI registry 中的容器镜像。默认返回全部已缓存/已发布镜像（含 docker.io/library/go:alpine 等基础镜像）；传 repo=<org/repo> 过滤某源仓库构建的镜像、source=push|pull 过滤来源，或 all=true。
+    input_schema:
+      type: object
+      properties:
+        repo:
+          type: string
+          description: Source repo (org/repo) to filter images built from it.
+          descriptions:
+            zh: 过滤某源仓库（org/repo）构建的镜像。
+        source:
+          type: string
+          description: Origin filter (push | pull).
+          descriptions:
+            zh: 来源过滤（push | pull）。
+        all:
+          type: boolean
+          description: Include every image (default only cached/published).
+          descriptions:
+            zh: 包含全部镜像（默认仅已缓存/已发布）。
+
+  - name: service-list
+    description: List Kubernetes services (bare sandbox pods + deployments) created through the ops surface. Default lists only the current session's temporary services; pass all=true to list every service in the runtime namespace (incl. shared/public). Narrow with org/repo/kind or a specific namespace.
+    descriptions:
+      zh: 列出通过 ops 表面创建的 Kubernetes 服务（bare 沙箱 pod + deployment）。默认仅列当前会话的临时服务；传 all=true 列出运行时命名空间全部（含共享/公共）。可用 org/repo/kind 过滤或指定 namespace。
+    input_schema:
+      type: object
+      properties:
+        all:
+          type: boolean
+          description: Include every service regardless of session.
+          descriptions:
+            zh: 包含与会话无关的全部服务。
+        org:
+          type: string
+          description: Only services deployed for this org (read from the zergx/org annotation).
+          descriptions:
+            zh: 仅列出属于该组织的服务（读取 zergx/org 注解）。
+        repo:
+          type: string
+          description: Only services deployed for this repository (read from the zergx/repo annotation).
+          descriptions:
+            zh: 仅列出属于该仓库的服务（读取 zergx/repo 注解）。
+        kind:
+          type: string
+          description: Narrow by service kind (deployment = formal service, bare = sandbox/worker pod).
+          descriptions:
+            zh: 按服务类型过滤（deployment = 正式服务，bare = 沙箱/worker pod）。
+        namespace:
+          type: string
+          description: Kubernetes namespace to list (defaults to the ops runtime namespace).
+          descriptions:
+            zh: 要列出的 Kubernetes 命名空间（默认 ops 运行时命名空间）。
+
+  - name: package-publish
+    description: "Publish the repo checkout as a package. Runs the protocol's official CLI inside a containerfile build (buildkit, no image export). Protocols: npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift. Manifest-driven protocols (npm/pypi/cargo/...) read name+version from the package manifest; go/hex/composer/maven/swift/generic need explicit name+version (+file for generic)."
+    descriptions:
+      zh: 把仓库检出发布为包。在 containerfile 构建内运行该协议的官方 CLI（buildkit，不导出镜像）。协议：npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift。清单驱动的协议（npm/pypi/cargo/...）从包清单读取 name+version；go/hex/composer/maven/swift/generic 需要显式 name+version（generic 还需 file）。
+    input_schema:
+      type: object
+      properties:
+        protocol:
+          type: string
+          description: Package protocol (npm / pypi / maven / …).
+          descriptions:
+            zh: 包协议（npm / pypi / maven 等）。
+        org:
+          type: string
+          description: Target organization.
+          descriptions:
+            zh: 目标组织。
+        repo:
+          type: string
+          description: Target repository.
+          descriptions:
+            zh: 目标仓库。
+        bookmark:
+          type: string
+          description: Bookmark to read or publish from.
+          descriptions:
+            zh: 读取或发布所用的书签（分支）。
+        name:
+          type: string
+          description: Deployment / release name.
+          descriptions:
+            zh: 部署 / release 名称。
+        version:
+          type: string
+          description: Package version to publish.
+          descriptions:
+            zh: 要发布的包版本。
+        file:
+          type: string
+          description: Repo-relative path to the package archive to upload.
+          descriptions:
+            zh: 要上传的包归档的仓库相对路径。
+        dockerfile-path:
+          type: string
+          description: "Repo-relative path to the Dockerfile (default: ./Dockerfile)."
+          descriptions:
+            zh: Dockerfile 的仓库相对路径（默认 ./Dockerfile）。
+      required: [protocol]
+  - name: package-search
+    description: Search packages and their versions stored in the artifact registry (all protocols, incl. git releases stored as format=release).
+    descriptions:
+      zh: 检索 artifact registry 中存储的包与版本（全部协议，含以 format=release 存储的 git release）。
+    input_schema:
+      type: object
+      properties:
+        protocol:
+          type: string
+          description: Package protocol (npm / pypi / maven / release / …).
+          descriptions:
+            zh: 包协议（npm / pypi / maven / release 等）。
+
+
+  - name: pull-git-repo
+    description: Clone a remote git repository into easylab local storage (org 'external').
+    descriptions:
+      zh: 把远程 git 仓库克隆进 easylab 本地存储（org 'external'）。
+    input_schema:
+      type: object
+      properties:
+        git-url:
+          type: string
+          description: Git clone URL to fetch (non-repo upstream).
+          descriptions:
+            zh: 要拉取的 git 克隆地址（仓库外的上游）。
+        org:
+          type: string
+          description: Target organization.
+          descriptions:
+            zh: 目标组织。
+      required: [git-url]
+  - name: sandbox-download
+    description: Download a previously uploaded file (referenced as file:<code>) into the session sandbox at the given path. The bytes come from the agent's file store; use this to bring attachments into the workspace so shell/docs tooling can reach them.
+    descriptions:
+      zh: 把之前上传的文件（以 file:<code> 引用）下载到会话沙箱的指定路径。字节来自 agent 的文件存储；用于把附件带入工作区供 shell/文档工具访问。
+    input_schema:
+      type: object
+      properties:
+        code:
+          type: string
+          description: The file code (the segment after file:)
+          descriptions:
+            zh: "文件编码（file: 之后的部分）。"
+        path:
+          type: string
+          description: Target path in the sandbox (relative to the workspace root)
+          descriptions:
+            zh: 沙箱内的目标路径（相对于工作区根目录）。
+      required: [code, path]
