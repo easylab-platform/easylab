@@ -25,8 +25,10 @@ ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ENV HTTP_PROXY=${HTTP_PROXY} \
     HTTPS_PROXY=${HTTPS_PROXY} \
     NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io \
-    GOPROXY=direct \
-    GOSUMDB=off
+    GOPROXY=https://proxy.golang.org \
+    GONOSUMDB=github.com/easylab-platform/*,github.com/abcp-sdk/*
+# Proxy mode needs ca-certificates (the golang alpine image strips them).
+RUN apk add --no-cache ca-certificates
 WORKDIR /src
 COPY go.work go.work.sum ./
 COPY easyvcs ./easyvcs
