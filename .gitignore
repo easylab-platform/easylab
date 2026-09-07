@@ -1,0 +1,11 @@
+# build artifacts / binaries
+/easylab
+/easyvcs/easylab
+/easyvcs/easyvcsd
+/ext/repo/easyvcs-ext-repo
+/ext/code/easyvcs-ext-code
+/ext/ops-host/easyvcs-ext-ops
+/e2e/easyvcs-e2e
+/proto/gen/
+go.work.bak
+*.db
