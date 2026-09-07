@@ -3,18 +3,14 @@
 #
 # Pipeline (verified):
 #   1. Assemble a temp build context rooted at '.', containing go.work +
-#      easyvcs/ + pkr/ so the Go module graph resolves. The go.work uses './'
-#      paths (context-root relative) so the in-container build resolves.
+#      easyvcs/. The Go module graph now resolves EVERYTHING from public
+#      GitHub (easylab-platform/artifact/*, easylab-proto, abcp-sdk/*) — no
+#      local pkr/ or deps/ needed. go.work only lists ./easyvcs.
 #   2. buildctl targets the shared cluster buildkitd (default the temp one) and
 #      builds the image, exporting a docker archive (with a RepoTag). buildkitd
 #      does NOT push.
 #   3. skopeo copies the docker archive to forgejo OCI registry (the only
-#      registry whose write path is authenticated & reachable from here; its
-#      token exchange rejects buildkitd, but skopeo's basic->token works).
-#
-# The resulting EasyLab image embeds buildah + podman, made self-contained/
-# rootless-ready for RUNNING user image builds and service/sandbox containers
-# inside the pod.
+#      registry whose write path is authenticated & reachable from here).
 #
 # Prereqs: a reachable buildkitd, skopeo, and base images in forgejo OCI.
 set -euo pipefail
@@ -33,10 +29,10 @@ PROXY="${PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
-# Build context root: holds go.work (./ paths), easyvcs/, pkr/, and
-# easy-lab/Dockerfile. easyvcs/go.mod has `replace github.com/pkr/pkrkit =>
-# ../../pkr/pkrkit` which resolves (from /src/easyvcs) to /src/pkr/pkrkit — the
-# same dir the go.work also uses, so no conflicting replace remains.
+# Build context root: holds go.work (./ path) + easyvcs/ + easy-lab/Dockerfile.
+# easyvcs/go.mod requires github.com/easylab-platform/artifact/*,
+# github.com/easylab-platform/easylab-proto, github.com/abcp-sdk/* — all public,
+# resolved by network inside the buildkitd build. No local vendoring.
 CTX="${WORK}/ctx"
 mkdir -p "${CTX}"
 if [ -d "${LAB_DIR}/easyvcs" ]; then
@@ -44,36 +40,12 @@ if [ -d "${LAB_DIR}/easyvcs" ]; then
 else
   cp -r "${LAB_DIR%/easy-lab}/easyvcs" "${CTX}/easyvcs"
 fi
-# The in-container go.work uses ./pkr/pkrkit as a workspace module, so the
-# module-local `replace github.com/pkr/pkrkit => ../../pkr/pkrkit` in
-# easyvcs/go.mod would conflict (Go rejects a module that is both a workspace
-# member and a replace target). Drop it; the workspace resolves pkrkit.
-sed -i '/^replace github.com\/pkr\/pkrkit => ..\/..\/pkr\/pkrkit/d' "${CTX}/easyvcs/go.mod"
-cp -r "${LAB_DIR%/easy-lab}/pkr" "${CTX}/pkr"
-# The in-container go.work must use './' paths (context root holds easyvcs/
-# and pkr/ side by side), not the host '../' layout.
+# The in-container go.work uses './easyvcs' only (context root holds easyvcs/).
 cat > "${CTX}/go.work" <<'GOWORK'
 go 1.26.5
 
 use (
 	./easyvcs
-	./pkr/pkr-cargo
-	./pkr/pkr-composer
-	./pkr/pkr-conan
-	./pkr/pkr-generic
-	./pkr/pkr-go
-	./pkr/pkr-helm
-	./pkr/pkr-hex
-	./pkr/pkr-maven
-	./pkr/pkr-npm
-	./pkr/pkr-nuget
-	./pkr/pkr-oci
-	./pkr/pkr-pub
-	./pkr/pkr-pypi
-	./pkr/pkr-rubygems
-	./pkr/pkr-swift
-	./pkr/pkr-system
-	./pkr/pkrkit
 )
 GOWORK
 [ -f "${LAB_DIR}/go.work.sum" ] && cp "${LAB_DIR}/go.work.sum" "${CTX}/go.work.sum"

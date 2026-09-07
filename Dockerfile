@@ -11,30 +11,32 @@
 # buildctl is NOT embedded — runtime image builds only ever use buildah.
 #
 # The build context is a temp workspace assembled by build-image.sh: it holds
-# go.work (paths rooted at the context root), easyvcs/, and pkr/ so the Go
-# module graph resolves. Base images come from forgejo OCI (root/golang, root/
-# alpine present there).
+# go.work (paths rooted at the context root) and easyvcs/. ALL Go dependencies
+# (github.com/easylab-platform/artifact/*, easylab-proto, abcp-sdk/*) resolve
+# from public GitHub during the build — no local pkr/ or deps/ vendored.
+# Base images come from forgejo OCI (root/golang, root/alpine present there).
 ARG REGISTRY=forgejo.develop.10.199.64.20.nip.io/root
 ARG ALPINE=3.24
 
 # ---- easylab + easyvcs (static Go binaries) ----
 FROM ${REGISTRY}/golang:1.26-alpine AS gobuild
-ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:789
-ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:789
+ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:7890
+ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ENV HTTP_PROXY=${HTTP_PROXY} \
     HTTPS_PROXY=${HTTPS_PROXY} \
-    NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io
+    NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io \
+    GOPROXY=direct \
+    GOSUMDB=off
 WORKDIR /src
 COPY go.work go.work.sum ./
 COPY easyvcs ./easyvcs
-COPY pkr ./pkr
 RUN cd easyvcs && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/easylab ./cmd/easylab \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/easyvcs ./cmd/easyvcs
 
 # ---- runtime ----
 FROM ${REGISTRY}/alpine:${ALPINE}
-ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:789
-ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:789
+ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:7890
+ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ENV HTTP_PROXY=${HTTP_PROXY} \
     HTTPS_PROXY=${HTTPS_PROXY} \
     NO_PROXY=localhost,127.0.0.1,mirrors.aliyun.com,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io
