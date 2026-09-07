@@ -1,0 +1,602 @@
+//go:build e2e
+
+package main
+
+import (
+	"context"
+	"encoding/json"
+	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+// ---- in-memory fakes ----
+
+// fakeLab emulates the easylab REST surface repo-extension depends on.
+type fakeLab struct {
+	mu     sync.Mutex
+	repos  map[string]map[string][]string // org -> repo -> bookmarks
+	anchor map[string]string              // "org/repo/new_bm" -> source it was created from
+	server *httptest.Server
+}
+
+func newFakeLab() *fakeLab {
+	f := &fakeLab{
+		repos:  map[string]map[string][]string{},
+		anchor: map[string]string{},
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/repos", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeTestJSON(w, 405, nil)
+			return
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		orgs := []interface{}{}
+		for org, repos := range f.repos {
+			rl := []interface{}{}
+			for repo := range repos {
+				rl = append(rl, map[string]interface{}{"repo": repo, "default_bookmark": "main"})
+			}
+			orgs = append(orgs, map[string]interface{}{"org": org, "repos": rl})
+		}
+		writeTestJSON(w, 200, map[string]interface{}{"orgs": orgs})
+	})
+	// POST /api/v1/repos/{org}/{repo} — create repo (or 409 if it exists).
+	mux.HandleFunc("/api/v1/repos/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/repos/"), "/")
+		switch {
+		case r.Method == http.MethodPost && len(parts) == 2:
+			org, repo := parts[0], parts[1]
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.repos[org] == nil {
+				f.repos[org] = map[string][]string{}
+			}
+			if _, ok := f.repos[org][repo]; !ok {
+				f.repos[org][repo] = []string{"main"}
+			}
+			writeTestJSON(w, 201, map[string]interface{}{"full_name": org + "/" + repo})
+		// POST /bookmarks/{bm} {target: src}; DELETE /bookmarks/{bm}.
+		case r.Method == http.MethodPost && len(parts) == 4 && parts[2] == "bookmarks":
+			var b map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&b)
+			org, repo, nb := parts[0], parts[1], parts[3]
+			src, _ := b["target"].(string)
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			bms, ok := f.repos[org][repo]
+			if !ok {
+				writeTestJSON(w, 404, map[string]interface{}{"ok": false, "error": "no repo"})
+				return
+			}
+			found := src == "" // "" resolves to head
+			if !found {
+				for _, b := range bms {
+					if b == src {
+						found = true
+					}
+				}
+			}
+			if !found {
+				writeTestJSON(w, 422, map[string]interface{}{"ok": false, "error": "cannot resolve " + src})
+				return
+			}
+			f.anchor[org+"/"+repo+"/"+nb] = src
+			f.repos[org][repo] = append(bms, nb)
+			writeTestJSON(w, 200, map[string]interface{}{"ok": true, "sha": "hash"})
+		case r.Method == http.MethodDelete && len(parts) == 4 && parts[2] == "bookmarks":
+			org, repo, bm := parts[0], parts[1], parts[3]
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			var out []string
+			for _, b := range f.repos[org][repo] {
+				if b != bm {
+					out = append(out, b)
+				}
+			}
+			f.repos[org][repo] = out
+			writeTestJSON(w, 204, map[string]interface{}{"ok": true})
+		// GET /bookmarks and GET /contents?ref={rev}.
+		case r.Method == http.MethodGet && len(parts) == 3 && parts[2] == "bookmarks":
+			org, repo := parts[0], parts[1]
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			bl := []interface{}{}
+			for _, b := range f.repos[org][repo] {
+				bl = append(bl, map[string]interface{}{"name": b, "sha": "h"})
+			}
+			writeTestJSON(w, 200, map[string]interface{}{"bookmarks": bl})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents"):
+			org, repo := parts[0], parts[1]
+			rev := r.URL.Query().Get("ref")
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if _, ok := f.repos[org][repo]; !ok {
+				writeTestJSON(w, 404, map[string]interface{}{"ok": false})
+				return
+			}
+			if rev == "" {
+				writeTestJSON(w, 200, map[string]interface{}{"entries": []interface{}{}})
+				return
+			}
+			for _, b := range f.repos[org][repo] {
+				if b == rev {
+					writeTestJSON(w, 200, map[string]interface{}{"entries": []interface{}{}})
+					return
+				}
+			}
+			writeTestJSON(w, 404, map[string]interface{}{"ok": false})
+		default:
+			writeTestJSON(w, 404, nil)
+		}
+	})
+	f.server = httptest.NewServer(mux)
+	return f
+}
+
+func (f *fakeLab) Close()      { f.server.Close() }
+func (f *fakeLab) URL() string { return f.server.URL }
+func (f *fakeLab) hasRepo(org, repo string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.repos[org][repo]
+	return ok
+}
+func (f *fakeLab) hasBM(org, repo, bm string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, b := range f.repos[org][repo] {
+		if b == bm {
+			return true
+		}
+	}
+	return false
+}
+func (f *fakeLab) bmAnchor(org, repo, bm string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.anchor[org+"/"+repo+"/"+bm]
+}
+
+// fakeAgent emulates the agent-ts session REST surface.
+type fakeAgent struct {
+	mu       sync.Mutex
+	sessions map[string]bool
+	server   *httptest.Server
+}
+
+func newFakeAgent() *fakeAgent {
+	a := &fakeAgent{sessions: map[string]bool{}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			list := []interface{}{}
+			for name := range a.sessions {
+				list = append(list, map[string]interface{}{"name": name})
+			}
+			writeTestJSON(w, 200, map[string]interface{}{"sessions": list})
+			return
+		}
+		var b map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		name, _ := b["name"].(string)
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if a.sessions[name] {
+			writeTestJSON(w, 409, map[string]interface{}{"ok": false, "error": "Session already exists"})
+			return
+		}
+		a.sessions[name] = true
+		writeTestJSON(w, 200, map[string]interface{}{"ok": true, "session_name": name})
+	})
+	a.server = httptest.NewServer(mux)
+	return a
+}
+
+func (a *fakeAgent) Close()      { a.server.Close() }
+func (a *fakeAgent) URL() string { return a.server.URL }
+func (a *fakeAgent) has(name string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sessions[name]
+}
+
+func writeTestJSON(w http.ResponseWriter, code int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// ---- test harness ----
+
+// testStore connects to a PG instance gated by REPOEXT_TEST_PG=1 and resets
+// the schema for isolation.
+func testStore(t *testing.T) *Store {
+	t.Helper()
+	cfg := PgConfig{
+		DB: filepath.Join(t.TempDir(), "repoext_test.db"),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	store, err := OpenStore(ctx, cfg)
+	if err != nil {
+		t.Skipf("sqlite unavailable: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		DELETE FROM session_repos; DELETE FROM managed_repos; DELETE FROM executed_worksheets;`); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	t.Cleanup(store.Close)
+	return store
+}
+
+func newTestServer(t *testing.T, lab *fakeLab, ag *fakeAgent, store *Store) *server {
+	t.Helper()
+	return &server{
+		base:  lab.URL(),
+		agent: ag.URL(),
+		store: store,
+		cache: newSessCache(50 * time.Millisecond),
+		lab:   newClient(lab.URL(), "test-token"),
+		ag:    newAgentClient(ag.URL()),
+	}
+}
+
+func doReq(t *testing.T, h http.Handler, method, path string, body interface{}) (int, map[string]interface{}) {
+	t.Helper()
+	var rd *strings.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		rd = strings.NewReader(string(b))
+	} else {
+		rd = strings.NewReader("")
+	}
+	req := httptest.NewRequest(method, path, rd)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var v map[string]interface{}
+	_ = json.NewDecoder(rec.Body).Decode(&v)
+	return rec.Code, v
+}
+
+func (s *server) emit(t *testing.T, ctx context.Context, event string, env abcprotocol.LifecycleEvent) error {
+	t.Helper()
+	return s.handleLifecycleEvent(ctx, event, env)
+}
+
+// ---- lifecycle event tests ----
+
+func TestLifecycleCreated(t *testing.T) {
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
+	defer ag.Close()
+	s := newTestServer(t, lab, ag, testStore(t))
+	ctx := context.Background()
+
+	if err := s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"}); err != nil {
+		t.Fatal(err)
+	}
+	if !lab.hasRepo("acme", "api") || !lab.hasBM("acme", "api", "main") {
+		t.Fatal("created did not materialize repo/bookmark")
+	}
+	if row, _ := s.store.GetRow(ctx, "acme", "api", "main"); row == nil {
+		t.Fatal("mapping row missing")
+	}
+	// tool path resolves immediately (eager)
+	o, r, b, err := s.resolveSession(ctx, "acme:api:main")
+	if err != nil || o != "acme" || r != "api" || b != "main" {
+		t.Fatalf("resolveSession = %q %q %q %v", o, r, b, err)
+	}
+	// idempotent: redelivery is a no-op
+	if err := s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"}); err != nil {
+		t.Fatal(err)
+	}
+	// non-derived names are dropped (permanent)
+	if err := s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "hi"}); !isPermanent(err) {
+		t.Fatalf("non-derived create should be permanent, got %v", err)
+	}
+}
+
+func TestLifecycleForkedInheritsParentBookmark(t *testing.T) {
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
+	defer ag.Close()
+	s := newTestServer(t, lab, ag, testStore(t))
+	ctx := context.Background()
+
+	mustEmit := func(ev abcprotocol.LifecycleEvent) {
+		event := string(ev.Kind)
+		if err := s.emit(t, ctx, event, ev); err != nil {
+			t.Fatalf("%s: %v", event, err)
+		}
+	}
+	mustEmit(abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"})
+	mustEmit(abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:dev"})
+	mustEmit(abcprotocol.LifecycleEvent{Kind: "forked", SessionName: "acme:api:feat", Parent: strptr("acme:api:dev")})
+
+	if !lab.hasBM("acme", "api", "feat") {
+		t.Fatal("fork bookmark missing")
+	}
+	if got := lab.bmAnchor("acme", "api", "feat"); got != "dev" {
+		t.Fatalf("fork anchored at %q, want parent bookmark %q", got, "dev")
+	}
+	if row, _ := s.store.GetRow(ctx, "acme", "api", "feat"); row == nil || row.SessionName != "acme:api:feat" {
+		t.Fatalf("fork row missing: %+v", row)
+	}
+	// idempotent redelivery
+	mustEmit(abcprotocol.LifecycleEvent{Kind: "forked", SessionName: "acme:api:feat", Parent: strptr("acme:api:dev")})
+	// fork from unmapped parent materializes the parent first
+	mustEmit(abcprotocol.LifecycleEvent{Kind: "forked", SessionName: "acme:api:f2", Parent: strptr("acme:api:legacy")})
+	if !lab.hasBM("acme", "api", "legacy") {
+		t.Fatal("unmapped parent should be materialized first")
+	}
+	// cross-repo fork is rejected (permanent)
+	if err := s.emit(t, ctx, "forked", abcprotocol.LifecycleEvent{Kind: "forked", SessionName: "other:api:x", Parent: strptr("acme:api:dev")}); !isPermanent(err) {
+		t.Fatalf("cross-repo fork should be permanent, got %v", err)
+	}
+}
+
+func TestLifecycleRenamedDual(t *testing.T) {
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
+	defer ag.Close()
+	s := newTestServer(t, lab, ag, testStore(t))
+	ctx := context.Background()
+
+	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:old"})
+	if err := s.emit(t, ctx, "renamed", abcprotocol.LifecycleEvent{Kind: "renamed", From: strptr("acme:api:old"), To: strptr("acme:api:new")}); err != nil {
+		t.Fatal(err)
+	}
+	if lab.hasBM("acme", "api", "old") || !lab.hasBM("acme", "api", "new") {
+		t.Fatal("bookmark rename not dual")
+	}
+	if got := lab.bmAnchor("acme", "api", "new"); got != "old" {
+		t.Fatalf("renamed bookmark should anchor at old, got %q", got)
+	}
+	if row, _ := s.store.GetRow(ctx, "acme", "api", "new"); row == nil || row.SessionName != "acme:api:new" {
+		t.Fatalf("row not renamed: %+v", row)
+	}
+	if row, _ := s.store.GetRow(ctx, "acme", "api", "old"); row != nil {
+		t.Fatal("old row must be gone")
+	}
+	// rename of never-materialized session = plain create
+	if err := s.emit(t, ctx, "renamed", abcprotocol.LifecycleEvent{Kind: "renamed", From: strptr("acme:api:ghost"), To: strptr("acme:api:revived")}); err != nil {
+		t.Fatal(err)
+	}
+	if !lab.hasBM("acme", "api", "revived") {
+		t.Fatal("rename-as-create failed")
+	}
+}
+
+func TestLifecycleDeleted(t *testing.T) {
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
+	defer ag.Close()
+	s := newTestServer(t, lab, ag, testStore(t))
+	ctx := context.Background()
+
+	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:tmp"})
+	if err := s.emit(t, ctx, "deleted", abcprotocol.LifecycleEvent{Kind: "deleted", SessionName: "acme:api:tmp"}); err != nil {
+		t.Fatal(err)
+	}
+	if lab.hasBM("acme", "api", "tmp") {
+		t.Fatal("bookmark survived delete")
+	}
+	if row, _ := s.store.GetRow(ctx, "acme", "api", "tmp"); row != nil {
+		t.Fatal("row survived delete")
+	}
+	// deleting a never-materialized session is a no-op success
+	if err := s.emit(t, ctx, "deleted", abcprotocol.LifecycleEvent{Kind: "deleted", SessionName: "acme:api:never"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveSessionStrict(t *testing.T) {
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
+	defer ag.Close()
+	s := newTestServer(t, lab, ag, testStore(t))
+	ctx := context.Background()
+
+	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"})
+
+	// unmapped but well-formed → "not ready" (permanent-ish info), no creation
+	if _, _, _, err := s.resolveSession(ctx, "acme:api:pending"); err == nil {
+		t.Fatal("unmapped session should fail (no lazy creation)")
+	}
+	if !lab.hasBM("acme", "api", "pending") {
+		// sanity: nothing was created
+		t.Log("ok: no lazy creation")
+	} else {
+		t.Fatal("resolveSession must not create bookmarks")
+	}
+	// non-derived name → hard error
+	if _, _, _, err := s.resolveSession(ctx, "hi"); err == nil {
+		t.Fatal("non-derived name should fail")
+	}
+	// session_name is the ONLY workspace source; empty session must error.
+	if _, _, _, err := s.sessionBase(ctx, map[string]interface{}{}, ""); err == nil {
+		t.Fatal("expected error without session context")
+	}
+	if _, _, _, err := s.sessionBase(ctx, map[string]interface{}{"_org": "x", "_repo": "y", "_bookmark": "z"}, ""); err == nil {
+		t.Fatal("legacy _org/_repo/_bookmark should be rejected (session_name only)")
+	}
+}
+
+// ---- ops-surface endpoint tests ----
+
+func TestLazyAdoptEndpoint(t *testing.T) {
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
+	defer ag.Close()
+	s := newTestServer(t, lab, ag, testStore(t))
+	h := s.router()
+
+	// orphan bookmark created directly in lab
+	lab.mu.Lock()
+	lab.repos["acme"] = map[string][]string{"api": {"main", "orphan-bm"}}
+	lab.mu.Unlock()
+
+	code, v := doReq(t, h, "POST", "/api/v1/repos/acme/api/bookmarks/orphan-bm/session", nil)
+	if code != 200 || v["adopted"] != true {
+		t.Fatalf("adopt = %d %v", code, v)
+	}
+	if !ag.has("acme:api:orphan-bm") {
+		t.Fatal("adopt did not create session")
+	}
+	code, v = doReq(t, h, "POST", "/api/v1/repos/acme/api/bookmarks/orphan-bm/session", nil)
+	if code != 200 || v["adopted"] != false {
+		t.Fatalf("re-adopt = %d %v", code, v)
+	}
+	if code, _ = doReq(t, h, "POST", "/api/v1/repos/acme/api/bookmarks/ghost/session", nil); code != 404 {
+		t.Fatalf("ghost adopt = %d, want 404", code)
+	}
+}
+
+func TestGetSessionMap(t *testing.T) {
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
+	defer ag.Close()
+	s := newTestServer(t, lab, ag, testStore(t))
+	h := s.router()
+	ctx := context.Background()
+
+	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"})
+	code, v := doReq(t, h, "GET", "/api/v1/session-map?session=acme:api:main", nil)
+	if code != 200 || v["bookmark"] != "main" {
+		t.Fatalf("session-map = %d %v", code, v)
+	}
+	if code, _ = doReq(t, h, "GET", "/api/v1/session-map?session=missing", nil); code != 404 {
+		t.Fatalf("missing map = %d", code)
+	}
+}
+
+func TestListReposAnnotates(t *testing.T) {
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
+	defer ag.Close()
+	s := newTestServer(t, lab, ag, testStore(t))
+	h := s.router()
+
+	s.emit(t, context.Background(), "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"})
+	code, v := doReq(t, h, "GET", "/api/v1/repos", nil)
+	if code != 200 {
+		t.Fatalf("list = %d", code)
+	}
+	b, _ := json.Marshal(v["orgs"])
+	if !strings.Contains(string(b), `"managed":true`) || !strings.Contains(string(b), "acme:api:main") {
+		t.Fatalf("annotation missing: %s", b)
+	}
+}
+
+// ---- reconcile tests ----
+
+func TestReconcileConvergesDrift(t *testing.T) {
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
+	defer ag.Close()
+	s := newTestServer(t, lab, ag, testStore(t))
+	ctx := context.Background()
+
+	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"})
+
+	// drift 1: bookmark deleted directly in lab → row removed
+	lab.mu.Lock()
+	lab.repos["acme"]["api"] = []string{}
+	lab.mu.Unlock()
+	if err := reconcileOnce(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	if row, _ := s.store.GetRow(ctx, "acme", "api", "main"); row != nil {
+		t.Fatal("row survived bookmark deletion")
+	}
+
+	// drift 2: session deleted directly in agent → row removed, bookmark orphaned
+	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:bm2"})
+	ag.mu.Lock()
+	delete(ag.sessions, "acme:api:bm2")
+	ag.mu.Unlock()
+	if err := reconcileOnce(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	if row, _ := s.store.GetRow(ctx, "acme", "api", "bm2"); row != nil {
+		t.Fatal("row survived session deletion")
+	}
+	if !lab.hasBM("acme", "api", "bm2") {
+		t.Fatal("bookmark must survive as orphan (work preserved)")
+	}
+}
+
+func TestReconcileBackfillsLostEvents(t *testing.T) {
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
+	defer ag.Close()
+	s := newTestServer(t, lab, ag, testStore(t))
+	ctx := context.Background()
+
+	// sessions created in the agent while every lifecycle event was lost
+	// (publish failure / downtime beyond retention) — no rows, no bookmarks
+	ag.mu.Lock()
+	ag.sessions["acme:api:main"] = true
+	ag.sessions["acme:api:feat"] = true
+	ag.sessions["hi"] = true // non-derived: outside the 1:1 contract
+	ag.mu.Unlock()
+
+	if err := reconcileOnce(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"acme:api:main", "acme:api:feat"} {
+		org, repo, bm, _ := parseSession(name)
+		if row, _ := s.store.GetRow(ctx, org, repo, bm); row == nil || row.SessionName != name {
+			t.Fatalf("backfill missing row for %s", name)
+		}
+		if !lab.hasBM(org, repo, bm) {
+			t.Fatalf("backfill missing bookmark for %s", name)
+		}
+	}
+	// non-derived session must NOT get a workspace
+	if row, _ := s.store.GetRowBySession(ctx, "hi"); row != nil {
+		t.Fatal("non-derived session must not be backfilled")
+	}
+	// idempotent: a second cycle changes nothing
+	if err := reconcileOnce(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReconcileBackfillAndUnmapDoNotFight(t *testing.T) {
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
+	defer ag.Close()
+	s := newTestServer(t, lab, ag, testStore(t))
+	ctx := context.Background()
+
+	// row exists, session gone (drift) — unmap must win over backfill paths
+	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:x"})
+	ag.mu.Lock()
+	delete(ag.sessions, "acme:api:x")
+	ag.mu.Unlock()
+	if err := reconcileOnce(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	if row, _ := s.store.GetRow(ctx, "acme", "api", "x"); row != nil {
+		t.Fatal("row should be unmapped (session gone)")
+	}
+	if !lab.hasBM("acme", "api", "x") {
+		t.Fatal("bookmark should remain as orphan")
+	}
+}
+
+func strptr(s string) *string { return &s }
