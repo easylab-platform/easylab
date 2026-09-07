@@ -37,7 +37,7 @@ func t(locale, en, zh string) string {
 // lc returns the localized Content for a tool result given the session locale,
 // the English string `en` and its Chinese equivalent `zh`.
 func lc(ctx context.Context, ext *extension.Extension, sessionName, en, zh string) string {
-	return t(localeOf(ctx, ext, sessionName, envOr("ZERGX_LOCALE", "en")), en, zh)
+	return t(localeOf(ctx, ext, sessionName, envOr("LOCALE", "en")), en, zh)
 }
 
 // ef builds a localized error with the given en/zh format and arguments, so

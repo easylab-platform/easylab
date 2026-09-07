@@ -344,14 +344,14 @@ tools:
             zh: 包含与会话无关的全部服务。
         org:
           type: string
-          description: Only services deployed for this org (read from the zergx/org annotation).
+          description: Only services deployed for this org (read from the easylab/org annotation).
           descriptions:
-            zh: 仅列出属于该组织的服务（读取 zergx/org 注解）。
+            zh: 仅列出属于该组织的服务（读取 easylab/org 注解）。
         repo:
           type: string
-          description: Only services deployed for this repository (read from the zergx/repo annotation).
+          description: Only services deployed for this repository (read from the easylab/repo annotation).
           descriptions:
-            zh: 仅列出属于该仓库的服务（读取 zergx/repo 注解）。
+            zh: 仅列出属于该仓库的服务（读取 easylab/repo 注解）。
         kind:
           type: string
           description: Narrow by service kind (deployment = formal service, bare = sandbox/worker pod).

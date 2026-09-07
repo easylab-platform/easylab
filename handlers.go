@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"easyvcs-ext-ops/internal/easylab"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
+	easylabsdk "github.com/easylab-platform/easylab-client-sdk"
 	"strings"
 )
 
@@ -195,7 +196,8 @@ func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
 	if b.Port == 0 {
 		b.Port = 8080
 	}
-	if _, err := s.ops.EnsureService(r.Context(), s.deploymentRequest(b)); err != nil {
+	spec := s.deploymentRequest(b)
+	if _, err := s.sdk.LaunchServiceFull(r.Context(), spec); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -232,32 +234,27 @@ func (s *server) deploymentRequest(b struct {
 	Env       map[string]string `json:"env"`
 	Session   string            `json:"session"`
 	Resources *ResourceRequest  `json:"resources"`
-}) easylab.ServiceRequest {
-	req := easylab.ServiceRequest{
+}) easylabsdk.LaunchServiceSpec {
+	req := easylabsdk.LaunchServiceSpec{
 		Name:      b.Name,
 		Image:     b.Image,
 		Kind:      "deployment",
-		Ports:     []easylab.PortSpec{{Container: int(b.Port), Service: 80}},
+		Ports:     []*easylabv1.PortSpec{{Container: b.Port, Service: 80}},
 		Env:       b.Env,
 		Namespace: s.runtimeNamespace,
 	}
 	if b.Replicas > 0 {
-		replicas := int(b.Replicas)
-		req.Replicas = &replicas
+		req.Replicas = b.Replicas
 	}
 	if b.Session != "" {
-		req.Annotations = map[string]string{"zergx/session": b.Session}
+		req.Annotations = map[string]string{"easylab/session": b.Session}
 	}
-	if b.Resources != nil && (b.Resources.Requests != nil || b.Resources.Limits != nil) {
-		res := easylab.ResourceSpec{}
+	if b.Resources != nil {
 		if b.Resources.Requests != nil {
-			res.CPU = b.Resources.Requests.CPU
-			res.Memory = b.Resources.Requests.Memory
+			req.CPUs = b.Resources.Requests.CPU
 		} else if b.Resources.Limits != nil {
-			res.CPU = b.Resources.Limits.CPU
-			res.Memory = b.Resources.Limits.Memory
+			req.CPUs = b.Resources.Limits.CPU
 		}
-		req.Resources = &res
 	}
 	return req
 }

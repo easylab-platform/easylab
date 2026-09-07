@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"easyvcs-ext-ops/internal/easylab"
+	"connectrpc.com/connect"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
+	easylabsdk "github.com/easylab-platform/easylab-client-sdk"
 )
 
 // sandboxCtx is the resolved per-call sandbox context: which workspace, which
@@ -103,23 +105,13 @@ func (s *server) invalidateWorkspace(sid string) {
 
 // easylabBranchHead fetches a branch's target commit id from easylab.
 func (s *server) easylabBranchHead(ctx context.Context, org, repo, bm string) (string, error) {
-	u := fmt.Sprintf("%s/api/v1/repos/%s/%s/branchs", s.base, urlPathEscape(org), urlPathEscape(repo))
-	body, err := s.httpGetRaw(ctx, u)
+	branches, err := s.sdk.Branches(ctx, org, repo)
 	if err != nil {
 		return "", fmt.Errorf("easylab branchs %s/%s: %w", org, repo, err)
 	}
-	var out struct {
-		Branchs []struct {
-			Name string `json:"name"`
-			Sha  string `json:"sha"`
-		} `json:"branchs"`
-	}
-	if err := json.Unmarshal(body, &out); err != nil {
-		return "", fmt.Errorf("easylab branchs %s/%s: bad response: %w", org, repo, err)
-	}
-	for _, b := range out.Branchs {
-		if b.Name == bm {
-			return b.Sha, nil
+	for _, b := range branches {
+		if b.GetName() == bm {
+			return b.GetSha(), nil
 		}
 	}
 	return "", fmt.Errorf("branch %q not found in %s/%s", bm, org, repo)
@@ -154,75 +146,84 @@ func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{},
 }
 
 // sandboxWorkerPort is the port worker-go serves inside the sandbox pod.
-// The worker's default is 8080, so the ensure request pins ZERGX_PORT to keep
+// The worker's default is 8080, so the ensure request pins WORKER_PORT to keep
 // the process, the declared containerPort and the readiness probe in sync.
 const sandboxWorkerPort = 48080
 
 // createWorker explicitly creates the session's worker pod from a chosen base
 // image. When a pod already exists for the session it is reused (get-or-create)
 // so sandbox-create is idempotent; the base image is carried as the
-// `zergx/sandbox.image` annotation which easylab uses to derive the worker image.
+// `easylab/sandbox.image` annotation which easylab uses to derive the worker image.
 func (s *server) createWorker(ctx context.Context, sid, baseImage string) (ContainerInfo, error) {
 	key := labelKey(sid)
-	st, err := s.ops.EnsureService(ctx, easylab.ServiceRequest{
+	_, err := s.sdk.LaunchServiceFull(ctx, easylabsdk.LaunchServiceSpec{
 		Name:  key,
 		Image: baseImage,
 		Kind:  "bare",
-		Ports: []easylab.PortSpec{{Container: sandboxWorkerPort, Service: 80}},
+		Ports: []*easylabv1.PortSpec{{Container: sandboxWorkerPort, Service: 80}},
 		Env: map[string]string{
 			"WORKER_PORT": "48080",
 		},
 		Annotations: map[string]string{
-			"zergx/session":       sid,
-			"zergx/sandbox.image": baseImage,
+			"easylab/session":       sid,
+			"easylab/sandbox.image": baseImage,
 		},
 		Namespace: s.runtimeNamespace,
 	})
 	if err != nil {
 		return ContainerInfo{}, err
 	}
-	return ContainerInfo{
-		ContainerID: key,
-		PodName:     "sandbox-" + key[:8],
-		Namespace:   s.runtimeNamespace,
-		WorkerURL:   st.WorkerURL(sandboxWorkerPort),
-		PodIP:       st.PodIP,
-		Status:      statusFromReady(st),
-		SessionName: sid,
-	}, nil
+	info, err := s.workerInfo(ctx, key)
+	if err != nil {
+		return ContainerInfo{}, err
+	}
+	info.SessionName = sid
+	return info, nil
 }
 
 // statusFromReady maps easylab's readiness into the legacy status vocabulary.
-func statusFromReady(st easylab.ServiceStatus) string {
-	if st.ReadyOK() {
+func statusFromInfo(st *easylabv1.ServiceInfo) string {
+	if st.GetReady() > 0 {
 		return "running"
 	}
-	if st.Phase != "" {
-		return strings.ToLower(st.Phase)
+	if st.GetPhase() != "" {
+		return strings.ToLower(st.GetPhase())
 	}
 	return "pending"
 }
 
+// workerURLFrom derives the direct pod worker base.
+func workerURLFrom(st *easylabv1.ServiceInfo, port int32) string {
+	if st.GetPodIp() == "" {
+		return ""
+	}
+	return fmt.Sprintf("http://%s:%d", st.GetPodIp(), port)
+}
+
 // workerInfo fetches the current sandbox state from easylab.
 func (s *server) workerInfo(ctx context.Context, key string) (ContainerInfo, error) {
-	st, err := s.ops.Service(ctx, key, s.runtimeNamespace)
+	res, err := s.sdk.GetService(ctx, key)
 	if err != nil {
 		return ContainerInfo{}, err
 	}
+	st := res.GetService()
 	return ContainerInfo{
 		ContainerID: key,
 		PodName:     "sandbox-" + key[:8],
 		Namespace:   s.runtimeNamespace,
-		WorkerURL:   st.WorkerURL(sandboxWorkerPort),
-		PodIP:       st.PodIP,
-		Status:      statusFromReady(st),
+		WorkerURL:   workerURLFrom(st, sandboxWorkerPort),
+		PodIP:       st.GetPodIp(),
+		Status:      statusFromInfo(st),
 	}, nil
 }
 
 // destroyWorker deletes the sandbox through easylab. The ID may be the raw
 // session name, the derived key, or a pod/short name.
 func (s *server) destroyWorker(ctx context.Context, id string) error {
-	return s.ops.DeleteService(ctx, labelKey(id), s.runtimeNamespace)
+	if _, err := s.sdk.Ops.DeleteService(ctx, connect.NewRequest(&easylabv1.DeleteServiceRequest{Name: labelKey(id)})); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ensureSynced pushes the repo tree at ws.rev into the worker unless easylab
@@ -233,12 +234,7 @@ func (s *server) ensureSynced(ctx context.Context, cid, session string, ws works
 	if s.syncedRev(cid) == ws.rev {
 		return nil
 	}
-	if _, err := s.ops.Sync(ctx, labelKey(session), easylab.SyncRequest{
-		Org:       ws.org,
-		Repo:      ws.repo,
-		Rev:       ws.rev,
-		Namespace: s.runtimeNamespace,
-	}, false); err != nil {
+	if _, err := s.sdk.Sync(ctx, labelKey(session), ws.org, ws.repo, ws.rev, "", false); err != nil {
 		return fmt.Errorf("sync: %w", err)
 	}
 	s.setSyncedRev(cid, ws.rev)
@@ -306,7 +302,7 @@ type ContainerInfo struct {
 }
 
 // filterServicesBySession narrows a easylab /ops/services JSON response to the
-// services carrying a zergx/session annotation equal to `session` (opaque
+// services carrying a easylab/session annotation equal to `session` (opaque
 // metadata we own at the tools layer; easylab never interprets it).
 func filterServicesBySession(body, session string) string {
 	var in struct {
@@ -318,7 +314,7 @@ func filterServicesBySession(body, session string) string {
 	var out []map[string]interface{}
 	for _, svc := range in.Services {
 		ann, _ := svc["annotations"].(map[string]interface{})
-		if s, _ := ann["zergx/session"].(string); s == session {
+		if s, _ := ann["easylab/session"].(string); s == session {
 			out = append(out, svc)
 		}
 	}
@@ -350,12 +346,12 @@ func filterServicesByExtra(body, org, repo, kind string) string {
 		if org != "" || repo != "" {
 			ann, _ := svc["annotations"].(map[string]interface{})
 			if org != "" {
-				if o, _ := ann["zergx/org"].(string); o != org {
+				if o, _ := ann["easylab/org"].(string); o != org {
 					continue
 				}
 			}
 			if repo != "" {
-				if r, _ := ann["zergx/repo"].(string); r != repo {
+				if r, _ := ann["easylab/repo"].(string); r != repo {
 					continue
 				}
 			}

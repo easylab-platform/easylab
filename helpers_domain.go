@@ -81,9 +81,9 @@ func (s *server) fetchService(ctx context.Context, name, namespace string) (map[
 		return nil, err
 	}
 	// Flatten annotations into the returned map under "session" for the
-	// ownership check; callers only need zergx/session here.
+	// ownership check; callers only need easylab/session here.
 	if ann, ok := out["annotations"].(map[string]interface{}); ok {
-		if s, ok := ann["zergx/session"].(string); ok {
+		if s, ok := ann["easylab/session"].(string); ok {
 			out["session"] = s
 		}
 	}

@@ -34,7 +34,7 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 			// Ownership guard: only the session that created a service may
 			// update/scale it. Read the existing service's session annotation
 			// (easylab status now returns `annotations`); absent annotation
-			// (legacy/service, no zergx/session) is adopted + tagged on first
+			// (legacy/service, no easylab/session) is adopted + tagged on first
 			// touch; a mismatched session is rejected with a conflict.
 			existing, err := s.fetchService(ctx, name, s.runtimeNamespace)
 			if err == nil && existing != nil {
@@ -53,13 +53,13 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 			}
 			ann := map[string]string{}
 			if sessionName != "" {
-				ann["zergx/session"] = sessionName
+				ann["easylab/session"] = sessionName
 			}
 			if org != "" {
-				ann["zergx/org"] = org
+				ann["easylab/org"] = org
 			}
 			if repo != "" {
-				ann["zergx/repo"] = repo
+				ann["easylab/repo"] = repo
 			}
 			if len(ann) > 0 {
 				body["annotations"] = ann
