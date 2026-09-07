@@ -10,7 +10,7 @@ shared zergx dark theme) served at `/`.
 
 - **Session-scoped sandboxes**: the agent injects `_session`
   (`org:repo:bookmark`) into every tool call; ops-extension resolves the
-  workspace against **jjlab only**, lazily creates/reuses the session's
+  workspace against **easylab only**, lazily creates/reuses the session's
   worker pod (k8s label `zergx/container=<key>`), and syncs the repo tree
   into it before execution.
 - **Overlay sync**: only the worker's `sync/files` endpoint is used — repo
@@ -60,7 +60,7 @@ Admin/UI: `/status`, `/sessions`, `/packages`, `/publish-specs`,
 
 `frontend/` — Svelte 5 (runes) + Vite + Tailwind 4 + bits-ui + lucide,
 zod-validated API client (schemas are the single source of truth for types).
-Same shared zergx dark theme as jjlab/artifact. Build with
+Same shared zergx dark theme as easylab/artifact. Build with
 `make frontend` (pnpm), embedded via `go:embed` — pages: Overview / Sessions /
 Sandbox console / Builds / Packages / Tools.
 
@@ -86,7 +86,7 @@ All sandbox tools resolve the workspace from `_session` (or legacy
 
 Publishing is done by running the protocol's official CLI inside a buildkit
 build (no image export, only RUN side effects). The repo checkout from
-jjlab (`GET /api/v1/repos/{org}/{repo}/{rev}/archive`) is the build
+easylab (`GET /api/v1/repos/{org}/{repo}/{rev}/archive`) is the build
 context; base images are pulled through the artifact OCI pull-through proxy,
 so toolchain layers stay cached on the shared buildkitd.
 
@@ -115,9 +115,9 @@ the agent sees the CLI error.
 | `RUCODER_BUILDKIT_ADDR` | `tcp://zergx-buildkitd.temp.svc.cluster.local:1234` |
 | `RUCODER_ARTIFACT_URL`  | `http://zergx-artifact.temp.svc.cluster.local:80` (packages + OCI + metadata) |
 | `RUCODER_ARTIFACT_TOKEN`| *(empty — anonymous)* token for artifact write auth (Bearer / X-NuGet-ApiKey / npm _authToken per protocol) |
-| `RUCODER_JJ_SERVER_URL` | `http://zergx-jjlab.temp.svc.cluster.local:80` (archive + contents + clone) |
+| `EASYLAB_URL` | `http://zergx-easylab.temp.svc.cluster.local:80` (archive + contents + clone) |
 | `NATS_URL`              | `nats://nats.develop.svc.cluster.local:4222` |
 | `RUCODER_PORT`          | `8080` |
 
-> `RUCODER_REPO_MANAGER_URL` is still honored as a fallback for `RUCODER_JJ_SERVER_URL`.
+> `RUCODER_REPO_MANAGER_URL` is still honored as a fallback for `EASYLAB_URL`.
 > The old `RUCODER_REGISTRY` / `RUCODER_REGISTRY_URL` (zot + zergx-registry) are gone.

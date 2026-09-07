@@ -13,7 +13,7 @@ import (
 )
 
 // handlers binds each repo tool to its implementation, forwarding to the
-// jjlab REST surface. Descriptions/schemas live in manifest.yaml (the single
+// easylab REST surface. Descriptions/schemas live in manifest.yaml (the single
 // declarative protocol source); each handler is bound by tool name.
 func (s *server) handlers() map[string]extension.ToolSpec {
 	// contentsPath addresses a file at the session bookmark via the
@@ -24,10 +24,10 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 	}
 
 	// readFileRaw fetches a file and returns (raw utf8, sha, size) or error.
-	// jjlab responds with `encoding: base64` + base64 `content` (Gitea shape),
+	// easylab responds with `encoding: base64` + base64 `content` (Gitea shape),
 	// never with a plain-text body.
 	readFileRaw := func(ctx context.Context, o, r, b, path string) (string, string, int64, error) {
-		v, err := s.jj.get(ctx, contentsPath(o, r, b, path))
+		v, err := s.lab.get(ctx, contentsPath(o, r, b, path))
 		if err != nil {
 			return "", "", 0, err
 		}
@@ -133,13 +133,13 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				// Optimistic-lock: read the file's current blob sha (if it
 				// exists) and pass it as the base so a concurrent change is
 				// rejected rather than silently overwritten. A new file passes
-				// no sha (jjlab treats missing base as "no lock").
+				// no sha (easylab treats missing base as "no lock").
 				baseSha := ""
 				if oldText, oldSha, _, rerr := readFileRaw(ctx, o, r, b, path); rerr == nil {
 					_ = oldText
 					baseSha = oldSha
 				}
-				v, err := s.jj.commit(ctx, o, r, b, message, []map[string]interface{}{
+				v, err := s.lab.commit(ctx, o, r, b, message, []map[string]interface{}{
 					{"action": "update", "path": path, "content_base64": base64.StdEncoding.EncodeToString([]byte(content)), "sha": baseSha},
 				})
 				if err != nil {
@@ -172,7 +172,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					baseSha = oldSha
 				}
 				body := map[string]interface{}{"action": "delete", "path": path, "sha": baseSha}
-				v, err := s.jj.commit(ctx, o, r, b, message, []map[string]interface{}{body})
+				v, err := s.lab.commit(ctx, o, r, b, message, []map[string]interface{}{body})
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to delete file: %v", "删除文件失败：%v", err)
 				}
@@ -215,7 +215,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 
 				// Optimistic-lock: pass the blob sha we read as the base so a
 				// concurrent edit is rejected (409) instead of clobbered.
-				v, err := s.jj.commit(ctx, o, r, b, message, []map[string]interface{}{
+				v, err := s.lab.commit(ctx, o, r, b, message, []map[string]interface{}{
 					{"action": "update", "path": path, "content_base64": base64.StdEncoding.EncodeToString([]byte(newContent)), "sha": sha},
 				})
 				if err != nil {
@@ -250,7 +250,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if endpoint == "/contents" {
 					sep = ""
 				}
-				v, err := s.jj.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+endpoint+sep+"?ref="+url.QueryEscape(b))
+				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+endpoint+sep+"?ref="+url.QueryEscape(b))
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to list directory: %v", "列出目录失败：%v", err)
 				}
@@ -302,7 +302,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if path := abcprotocol.ArgString(args, "path"); path != "" {
 					q.Set("path", path)
 				}
-				v, err := s.jj.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/search?"+q.Encode())
+				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/search?"+q.Encode())
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "search failed: %v", "搜索失败：%v", err)
 				}
@@ -334,7 +334,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"explore": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				tree, err := s.jj.GetRepoTree(ctx)
+				tree, err := s.lab.GetRepoTree(ctx)
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to browse structure: %v", "浏览结构失败：%v", err)
 				}
@@ -382,7 +382,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if limit > 0 {
 					q.Set("limit", fmt.Sprintf("%d", limit))
 				}
-				v, err := s.jj.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/graph?"+q.Encode())
+				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/graph?"+q.Encode())
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get graph: %v", "获取图失败：%v", err)
 				}
@@ -421,7 +421,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				path := abcprotocol.ArgString(args, "path")
 				q := url.Values{"base": {revA}, "head": {revB}}
-				v, err := s.jj.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/compare?"+q.Encode())
+				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/compare?"+q.Encode())
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get diff: %v", "获取差异失败：%v", err)
 				}
@@ -448,7 +448,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'source' argument", "缺少 'source' 参数")
 				}
 				body := map[string]interface{}{"source": source, "dest": b}
-				v, err := s.jj.post(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/rebase", body)
+				v, err := s.lab.post(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/rebase", body)
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "rebase failed: %v", "变基失败：%v", err)
 				}
@@ -481,7 +481,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if _, oldSha, _, rerr := readFileRaw(ctx, o, r, b, path); rerr == nil {
 					baseSha = oldSha
 				}
-				v, err := s.jj.commit(ctx, o, r, b, message, []map[string]interface{}{
+				v, err := s.lab.commit(ctx, o, r, b, message, []map[string]interface{}{
 					{"action": "update", "path": path, "content_base64": base64.StdEncoding.EncodeToString([]byte(content)), "sha": baseSha},
 				})
 				if err != nil {
@@ -507,7 +507,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'path' argument", "缺少 'path' 参数")
 				}
 				q := url.Values{"ref": {rev}}
-				v, err := s.jj.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/blame?path="+url.QueryEscape(path)+"&"+q.Encode())
+				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/blame?path="+url.QueryEscape(path)+"&"+q.Encode())
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get blame: %v", "获取 blame 失败：%v", err)
 				}
@@ -548,7 +548,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if b != "" {
 					q.Set("ref", b)
 				}
-				v, err := s.jj.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/revisions?"+q.Encode())
+				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/revisions?"+q.Encode())
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get commit history: %v", "获取提交历史失败：%v", err)
 				}
@@ -580,7 +580,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if rev == "" {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'rev' argument", "缺少 'rev' 参数")
 				}
-				v, err := s.jj.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/revisions/"+url.PathEscape(rev)+"/diff")
+				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/revisions/"+url.PathEscape(rev)+"/diff")
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to view change: %v", "查看变更失败：%v", err)
 				}
@@ -607,7 +607,7 @@ func (s *server) sessionBase(ctx context.Context, args map[string]interface{}, s
 
 // refBase resolves a `ref` argument into (org, repo, rev). `ref` is a full
 // `org:repo:<rev>` path (never a bare bookmark/rev name) — the rev segment is
-// passed verbatim to jjlab, whose resolve_snapshot interprets it as a
+// passed verbatim to easylab, whose resolve_snapshot interprets it as a
 // bookmark, commit hash, tag or change-id. Absent/empty `ref` defaults to the
 // current workspace's (org, repo, bookmark); a `ref` that does not include an
 // org:repo prefix is rejected (a bare `<rev>` cannot locate a repo).
@@ -899,7 +899,7 @@ func toEntries(v map[string]interface{}) []entry {
 		}
 		p, _ := m["path"].(string)
 		isDir := false
-		// jjlab contents entries use `type` ("file"/"dir"); some surfaces also
+		// easylab contents entries use `type` ("file"/"dir"); some surfaces also
 		// carry `kind` ("tree"/"dir"). `kind`/`type` may be absent or nil
 		// (interface zero value), so read them nil-safely.
 		kind, _ := m["kind"].(string)

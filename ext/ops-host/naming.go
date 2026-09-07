@@ -22,13 +22,13 @@ func validComponent(s string) bool {
 		return false // reserved as the separator
 	}
 	if strings.Contains(s, "..") {
-		return false // path traversal / jj rule
+		return false // path traversal / ref rule
 	}
 	if strings.HasPrefix(s, "/") || strings.HasSuffix(s, "/") || strings.Contains(s, "//") {
 		return false // '//' or leading/trailing '/' would break URL segment round-trips
 	}
 	if strings.HasSuffix(s, ".") || strings.HasSuffix(s, ".lock") {
-		return false // jj/git ref rules
+		return false // git ref rules
 	}
 	return true
 }

@@ -64,7 +64,7 @@ func jobArgs(args map[string]interface{}) map[string]interface{} {
 }
 
 func (s *server) fetchService(ctx context.Context, name, namespace string) (map[string]interface{}, error) {
-	u := s.jj + "/api/v1/ops/services/" + url.PathEscape(name)
+	u := s.base + "/api/v1/ops/services/" + url.PathEscape(name)
 	if namespace != "" {
 		u += "?namespace=" + url.QueryEscape(namespace)
 	}
@@ -252,7 +252,7 @@ func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx
 	}
 
 	commitsPath := fmt.Sprintf("%s/api/v1/repos/%s/%s/commits",
-		s.jj, urlPathEscape(sc.ws.org), urlPathEscape(sc.ws.repo))
+		s.base, urlPathEscape(sc.ws.org), urlPathEscape(sc.ws.repo))
 
 	// Determine whether sandbox_path is a directory.
 	info, err := s.sandboxFileStat(ctx, sc.cid, sandboxPath)
@@ -338,7 +338,7 @@ func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx
 
 func (s *server) repoBlobSha(ctx context.Context, org, repo, path, ref string) (string, error) {
 	url := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents/%s?ref=%s",
-		s.jj, urlPathEscape(org), urlPathEscape(repo), escapePath(path), urlPathEscape(ref))
+		s.base, urlPathEscape(org), urlPathEscape(repo), escapePath(path), urlPathEscape(ref))
 	var v map[string]interface{}
 	if err := s.httpGetJSONMap(ctx, url, &v); err != nil {
 		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {

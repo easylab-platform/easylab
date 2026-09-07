@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # ops-extension: single binary with embedded Svelte SPA, built from this repo's
 # own directory as the build context (no shared parent context). The Go SDK
-# dependency is resolved from go.mod via jjlab GOPROXY, not copied from a
+# dependency is resolved from go.mod via easylab GOPROXY, not copied from a
 # sibling directory.
 ARG REGISTRY=docker.io
 ARG NODE_IMAGE=26-alpine
@@ -26,7 +26,7 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     HTTPS_PROXY=${HTTPS_PROXY} \
     NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc \
 
-    GOPROXY=http://jj-lab.temp.svc.cluster.local/pkgs/go|direct \
+    GOPROXY=http://easylab/pkgs/go|direct \
     GOSUMDB=off \
     GONOSUMDB=abep.dev/sdk,abep.dev/sdk/nats,abep.dev/sdk/ws \
     GOFLAGS=-mod=mod

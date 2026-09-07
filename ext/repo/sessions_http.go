@@ -98,7 +98,7 @@ func (s *server) adoptBookmark(ctx context.Context, org, repo, bookmark string) 
 	if row != nil {
 		return row.SessionName, false, nil
 	}
-	tree, err := s.jj.GetRepoTree(ctx)
+	tree, err := s.lab.GetRepoTree(ctx)
 	if err != nil {
 		return "", false, err
 	}
@@ -143,10 +143,10 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "name": "repo-extension"})
 }
 
-// listRepos: GET /repos — jj tree annotated with managed flag and session binding.
+// listRepos: GET /repos — easylab tree annotated with managed flag and session binding.
 func (s *server) listRepos(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	tree, err := s.jj.GetRepoTree(ctx)
+	tree, err := s.lab.GetRepoTree(ctx)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -193,7 +193,7 @@ func (s *server) listRepos(w http.ResponseWriter, r *http.Request) {
 func (s *server) listBookmarks(w http.ResponseWriter, r *http.Request) {
 	org, repo := chi.URLParam(r, "org"), chi.URLParam(r, "repo")
 	ctx := r.Context()
-	tree, err := s.jj.GetRepoTree(ctx)
+	tree, err := s.lab.GetRepoTree(ctx)
 	if err != nil {
 		writeErr(w, err)
 		return

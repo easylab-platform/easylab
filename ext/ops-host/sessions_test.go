@@ -49,9 +49,9 @@ func readArchive(data []byte) []string {
 	}
 }
 
-// --- jj branch resolution ---------------------------------------------
+// --- branch resolution ---------------------------------------------
 
-func newFakeJJ(t *testing.T, branchs string) *httptest.Server {
+func newFakeLab(t *testing.T, branchs string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/repos/verify/exists/branchs", func(w http.ResponseWriter, r *http.Request) {
@@ -71,24 +71,24 @@ func newFakeJJ(t *testing.T, branchs string) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-func TestJJBranchHead(t *testing.T) {
-	jj := newFakeJJ(t, `{"branchs":[{"name":"main","sha":"abc123"}]}`)
-	defer jj.Close()
-	s := &server{jj: jj.URL, wsCache: map[string]wsCacheEntry{}}
+func TestBranchHead(t *testing.T) {
+	lab := newFakeLab(t, `{"branchs":[{"name":"main","sha":"abc123"}]}`)
+	defer lab.Close()
+	s := &server{base: lab.URL, wsCache: map[string]wsCacheEntry{}}
 
-	rev, err := s.jjBranchHead(context.Background(), "verify", "exists", "main")
+	rev, err := s.easylabBranchHead(context.Background(), "verify", "exists", "main")
 	if err != nil || rev != "abc123" {
 		t.Fatalf("rev=%q err=%v", rev, err)
 	}
-	if _, err := s.jjBranchHead(context.Background(), "verify", "nope", "main"); err == nil {
+	if _, err := s.easylabBranchHead(context.Background(), "verify", "nope", "main"); err == nil {
 		t.Fatal("missing branch should error")
 	}
 }
 
 func TestResolveWorkspaceSessionName(t *testing.T) {
-	jj := newFakeJJ(t, `{"branchs":[{"name":"main","sha":"abc123"}]}`)
-	defer jj.Close()
-	s := &server{jj: jj.URL, wsCache: map[string]wsCacheEntry{}}
+	lab := newFakeLab(t, `{"branchs":[{"name":"main","sha":"abc123"}]}`)
+	defer lab.Close()
+	s := &server{base: lab.URL, wsCache: map[string]wsCacheEntry{}}
 
 	ws, sid, err := s.resolveWorkspace(context.Background(), map[string]interface{}{}, "verify:exists:main")
 	if err != nil || ws.org != "verify" || ws.repo != "exists" || ws.branch != "main" || ws.rev != "abc123" || sid != "verify:exists:main" {
@@ -104,7 +104,7 @@ func TestSyncStateMachine(t *testing.T) {
 	var syncs int32
 	var lastBody []byte
 	var lastPath string
-	fakeJJ := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fakeLab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/sync") {
 			http.NotFound(w, r)
 			return
@@ -114,9 +114,9 @@ func TestSyncStateMachine(t *testing.T) {
 		lastBody, _ = io.ReadAll(r.Body)
 		_, _ = w.Write([]byte(`{"ok":true,"skipped":false,"files":1}`))
 	}))
-	defer fakeJJ.Close()
+	defer fakeLab.Close()
 
-	s := &server{jjops: easylab.New(fakeJJ.URL, "devtoken"), runtimeNamespace: "temp",
+	s := &server{ops: easylab.New(fakeLab.URL, "devtoken"), runtimeNamespace: "temp",
 		wsCache: map[string]wsCacheEntry{}, synced: map[string]string{}}
 	ws := workspace{org: "verify", repo: "ws", branch: "main", rev: "rev1"}
 
@@ -178,12 +178,12 @@ func TestSyncStateMachine(t *testing.T) {
 }
 
 func TestSyncWorkerRejectsBadResponse(t *testing.T) {
-	fakeJJ := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fakeLab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(`{"ok":false,"error":"worker sync 500: boom"}`))
 	}))
-	defer fakeJJ.Close()
-	s := &server{jjops: easylab.New(fakeJJ.URL, "devtoken"), runtimeNamespace: "temp",
+	defer fakeLab.Close()
+	s := &server{ops: easylab.New(fakeLab.URL, "devtoken"), runtimeNamespace: "temp",
 		synced: map[string]string{}}
 	ws := workspace{org: "o", repo: "r", branch: "main", rev: "v"}
 	if err := s.ensureSynced(context.Background(), "cid", "o:r:main", ws); err == nil {

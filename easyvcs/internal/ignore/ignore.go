@@ -1,7 +1,7 @@
 // Package ignore implements gitignore/.vcsignore handling.
 //
 // It layers a single gitignore matcher that honors both .gitignore and
-// .vcsignore files at every directory, mirroring how jj/git exclude files from
+// .vcsignore files at every directory, mirroring how git exclude files from
 // the tree. The matcher is path-based and supports the standard gitignore
 // grammar (globs, directory-only, negation with `!`, nested files).
 package ignore

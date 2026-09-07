@@ -5,13 +5,11 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
-	"time"
 
-	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/extension"
-	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/manifest"
-	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/transport/nats"
+	"github.com/abcp-sdk/abc-protocol-go/extension"
+	"github.com/abcp-sdk/abc-protocol-go/manifest"
+	"github.com/abcp-sdk/abc-protocol-go/transport/nats"
 )
 
 //go:embed code.manifest.yaml
@@ -34,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	c := &client{base: base, http: &http.Client{Timeout: 30 * time.Second}}
+	c := newClient(base)
 
 	cfg := m.BuildConfig(manifest.Bindings{
 		Handlers: map[string]extension.ToolSpec{

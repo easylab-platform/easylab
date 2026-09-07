@@ -76,7 +76,7 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 				body["resources"] = res
 			}
 			body["namespace"] = s.runtimeNamespace
-			resp, err := s.httpPostJSON(ctx, s.jj+"/api/v1/ops/services", body)
+			resp, err := s.httpPostJSON(ctx, s.base+"/api/v1/ops/services", body)
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "service-deploy failed: %v", "service-deploy 失败：%v", err)
 			}
@@ -103,7 +103,7 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 			org := strArg(args, "org")
 			repo := strArg(args, "repo")
 			kind := strArg(args, "kind")
-			u := s.jj + "/api/v1/ops/services"
+			u := s.base + "/api/v1/ops/services"
 			if ns := strArg(args, "namespace"); ns != "" {
 				u += "?namespace=" + url.QueryEscape(ns)
 			}

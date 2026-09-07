@@ -1,9 +1,10 @@
 go 1.26.5
 
 use (
-	./deps/abc-protocol-go
-	./deps/abc-sdk-go
-	./deps/go-shared
+	../proto/gen/agent-go
+	../proto/gen/go
+	./deps/abc-agent-sdk
+	./deps/easylab-client-sdk
 	./easyvcs
 	./ext/code
 	./ext/ops-host

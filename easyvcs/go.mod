@@ -16,8 +16,18 @@ require (
 )
 
 require (
+	connectrpc.com/connect v1.20.0
+	forgejo.develop.10.199.64.20.nip.io/easylab/easylab-proto v0.0.0
+	forgejo.develop.10.199.64.20.nip.io/abc-protocol/agent-proto v0.0.0
+)
+
+require (
+	google.golang.org/protobuf v1.36.12 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+replace forgejo.develop.10.199.64.20.nip.io/easylab/easylab-proto => ../../proto/gen/go
 

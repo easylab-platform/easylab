@@ -35,12 +35,12 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 
 	deps := []map[string]interface{}{
 		check("artifact", s.artifact+"/v2/"),
-		check("easylab", s.jj+"/api/v1/health"),
+		check("easylab", s.base+"/api/v1/health"),
 	}
-	_, cfgErr := s.jjops.Config(ctx)
+	_, cfgErr := s.ops.Config(ctx)
 	deps = append(deps, map[string]interface{}{"name": "easylab-ops", "ok": cfgErr == nil, "error": errStr(cfgErr)})
 
-	svcs, _ := s.jjops.ListServices(ctx, s.runtimeNamespace)
+	svcs, _ := s.ops.ListServices(ctx, s.runtimeNamespace)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":        true,
 		"version":   version,
@@ -60,7 +60,7 @@ func errStr(err error) string {
 // sandboxesList returns worker pods with their session labels and the repo rev
 // each is synced to.
 func (s *server) sandboxesList(w http.ResponseWriter, r *http.Request) {
-	list, err := s.jjops.ListServices(r.Context(), s.runtimeNamespace)
+	list, err := s.ops.ListServices(r.Context(), s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -121,7 +121,7 @@ func (s *server) sandboxGet(w http.ResponseWriter, r *http.Request) {
 		"synced_rev":   syncedRev,
 	}
 
-	svcs, err := s.jjops.ListServices(r.Context(), s.runtimeNamespace)
+	svcs, err := s.ops.ListServices(r.Context(), s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -145,7 +145,7 @@ func (s *server) sandboxGet(w http.ResponseWriter, r *http.Request) {
 
 // deploymentsList returns the deployments (services) this ops-extension owns.
 func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
-	list, err := s.jjops.ListServices(r.Context(), s.runtimeNamespace)
+	list, err := s.ops.ListServices(r.Context(), s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -162,7 +162,7 @@ func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
 // deploymentPods returns the pods of one deployment.
 func (s *server) deploymentPods(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	pods, err := s.jjops.ServicePods(r.Context(), name, s.runtimeNamespace)
+	pods, err := s.ops.ServicePods(r.Context(), name, s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -173,7 +173,7 @@ func (s *server) deploymentPods(w http.ResponseWriter, r *http.Request) {
 // deploymentStatus reports the rollout state of one deployment.
 func (s *server) deploymentStatus(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	st, err := s.jjops.Service(r.Context(), name, s.runtimeNamespace)
+	st, err := s.ops.Service(r.Context(), name, s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -191,7 +191,7 @@ func (s *server) deploymentStatus(w http.ResponseWriter, r *http.Request) {
 // deploymentDelete removes a deployment + service.
 func (s *server) deploymentDelete(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := s.jjops.DeleteService(r.Context(), name, s.runtimeNamespace); err != nil {
+	if err := s.ops.DeleteService(r.Context(), name, s.runtimeNamespace); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -202,7 +202,7 @@ func (s *server) deploymentDelete(w http.ResponseWriter, r *http.Request) {
 // annotation on the pod template).
 func (s *server) deploymentRestart(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := s.jjops.RestartService(r.Context(), name, s.runtimeNamespace); err != nil {
+	if err := s.ops.RestartService(r.Context(), name, s.runtimeNamespace); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -216,7 +216,7 @@ func (s *server) deploymentScale(w http.ResponseWriter, r *http.Request) {
 		Replicas int32 `json:"replicas"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
-	if err := s.jjops.ScaleService(r.Context(), name, int(b.Replicas), s.runtimeNamespace); err != nil {
+	if err := s.ops.ScaleService(r.Context(), name, int(b.Replicas), s.runtimeNamespace); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -230,7 +230,7 @@ func (s *server) deploymentRollback(w http.ResponseWriter, r *http.Request) {
 		Revision int64 `json:"revision"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
-	if err := s.jjops.RollbackService(r.Context(), name, b.Revision, s.runtimeNamespace); err != nil {
+	if err := s.ops.RollbackService(r.Context(), name, b.Revision, s.runtimeNamespace); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -240,7 +240,7 @@ func (s *server) deploymentRollback(w http.ResponseWriter, r *http.Request) {
 // deploymentEvents lists k8s events for a deployment (rollout debugging).
 func (s *server) deploymentEvents(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	events, err := s.jjops.ServiceEvents(r.Context(), name, s.runtimeNamespace)
+	events, err := s.ops.ServiceEvents(r.Context(), name, s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -251,7 +251,7 @@ func (s *server) deploymentEvents(w http.ResponseWriter, r *http.Request) {
 // deploymentRevisions lists the ReplicaSet revisions of a deployment.
 func (s *server) deploymentRevisions(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	revs, err := s.jjops.ServiceRevisions(r.Context(), name, s.runtimeNamespace)
+	revs, err := s.ops.ServiceRevisions(r.Context(), name, s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

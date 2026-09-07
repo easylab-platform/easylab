@@ -63,7 +63,7 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 			if all {
 				q.Set("all", "1")
 			}
-			u := s.jj + "/api/v1/ops/images"
+			u := s.base + "/api/v1/ops/images"
 			if s := q.Encode(); s != "" {
 				u += "?" + s
 			}
@@ -98,7 +98,7 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 	}
 	m["package-search"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-			u := s.jj + "/api/v1/ops/packages"
+			u := s.base + "/api/v1/ops/packages"
 			if p := strArg(args, "protocol"); p != "" {
 				u += "?protocol=" + url.QueryEscape(p)
 			}
@@ -123,7 +123,7 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 			if org == "" {
 				org = "external"
 			}
-			v, err := s.httpPostJSON(ctx, s.jj+"/api/v1/repos/"+urlPathEscape(org)+"/"+urlPathEscape(repo)+"/clone",
+			v, err := s.httpPostJSON(ctx, s.base+"/api/v1/repos/"+urlPathEscape(org)+"/"+urlPathEscape(repo)+"/clone",
 				map[string]interface{}{"url": gitURL})
 			return extension.ToolResultData{Content: v}, err
 		},

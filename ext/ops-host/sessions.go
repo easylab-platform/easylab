@@ -72,7 +72,7 @@ func (s *server) lookupWorkspace(ctx context.Context, sid, org, repo, bm string)
 	s.sweepExpiredLocked()
 	s.wsMu.Unlock()
 
-	rev, err := s.jjBranchHead(ctx, org, repo, bm)
+	rev, err := s.easylabBranchHead(ctx, org, repo, bm)
 	if err != nil {
 		return workspace{}, err
 	}
@@ -101,12 +101,12 @@ func (s *server) invalidateWorkspace(sid string) {
 	s.wsMu.Unlock()
 }
 
-// jjBranchHead fetches a branch's target commit id from easylab.
-func (s *server) jjBranchHead(ctx context.Context, org, repo, bm string) (string, error) {
-	u := fmt.Sprintf("%s/api/v1/repos/%s/%s/branchs", s.jj, urlPathEscape(org), urlPathEscape(repo))
+// easylabBranchHead fetches a branch's target commit id from easylab.
+func (s *server) easylabBranchHead(ctx context.Context, org, repo, bm string) (string, error) {
+	u := fmt.Sprintf("%s/api/v1/repos/%s/%s/branchs", s.base, urlPathEscape(org), urlPathEscape(repo))
 	body, err := s.httpGetRaw(ctx, u)
 	if err != nil {
-		return "", fmt.Errorf("jj branchs %s/%s: %w", org, repo, err)
+		return "", fmt.Errorf("easylab branchs %s/%s: %w", org, repo, err)
 	}
 	var out struct {
 		Branchs []struct {
@@ -115,7 +115,7 @@ func (s *server) jjBranchHead(ctx context.Context, org, repo, bm string) (string
 		} `json:"branchs"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
-		return "", fmt.Errorf("jj branchs %s/%s: bad response: %w", org, repo, err)
+		return "", fmt.Errorf("easylab branchs %s/%s: bad response: %w", org, repo, err)
 	}
 	for _, b := range out.Branchs {
 		if b.Name == bm {
@@ -164,7 +164,7 @@ const sandboxWorkerPort = 48080
 // `zergx/sandbox.image` annotation which easylab uses to derive the worker image.
 func (s *server) createWorker(ctx context.Context, sid, baseImage string) (ContainerInfo, error) {
 	key := labelKey(sid)
-	st, err := s.jjops.EnsureService(ctx, easylab.ServiceRequest{
+	st, err := s.ops.EnsureService(ctx, easylab.ServiceRequest{
 		Name:  key,
 		Image: baseImage,
 		Kind:  "bare",
@@ -205,7 +205,7 @@ func statusFromReady(st easylab.ServiceStatus) string {
 
 // workerInfo fetches the current sandbox state from easylab.
 func (s *server) workerInfo(ctx context.Context, key string) (ContainerInfo, error) {
-	st, err := s.jjops.Service(ctx, key, s.runtimeNamespace)
+	st, err := s.ops.Service(ctx, key, s.runtimeNamespace)
 	if err != nil {
 		return ContainerInfo{}, err
 	}
@@ -222,7 +222,7 @@ func (s *server) workerInfo(ctx context.Context, key string) (ContainerInfo, err
 // destroyWorker deletes the sandbox through easylab. The ID may be the raw
 // session name, the derived key, or a pod/short name.
 func (s *server) destroyWorker(ctx context.Context, id string) error {
-	return s.jjops.DeleteService(ctx, labelKey(id), s.runtimeNamespace)
+	return s.ops.DeleteService(ctx, labelKey(id), s.runtimeNamespace)
 }
 
 // ensureSynced pushes the repo tree at ws.rev into the worker unless easylab
@@ -233,7 +233,7 @@ func (s *server) ensureSynced(ctx context.Context, cid, session string, ws works
 	if s.syncedRev(cid) == ws.rev {
 		return nil
 	}
-	if _, err := s.jjops.Sync(ctx, labelKey(session), easylab.SyncRequest{
+	if _, err := s.ops.Sync(ctx, labelKey(session), easylab.SyncRequest{
 		Org:       ws.org,
 		Repo:      ws.repo,
 		Rev:       ws.rev,

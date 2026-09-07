@@ -17,17 +17,17 @@ variables:
       zh: 会话沙箱的状态。
 tools:
   - name: sandbox-create
-    description: Create the session sandbox from a chosen base image. The worker binary is injected automatically; you must call this before any other sandbox-* tool. Choose an image jjlab can pull (e.g. docker.io/library/alpine:3.20, docker.io/library/node:22-alpine, docker.io/library/golang:1.26-alpine). The workspace is synced into it once ready.
+    description: Create the session sandbox from a chosen base image. The worker binary is injected automatically; you must call this before any other sandbox-* tool. Choose an image easylab can pull (e.g. docker.io/library/alpine:3.20, docker.io/library/node:22-alpine, docker.io/library/golang:1.26-alpine). The workspace is synced into it once ready.
     descriptions:
-      zh: 从所选基础镜像创建会话沙箱。worker 二进制会被自动注入；必须先调用本工具再使用其他 sandbox-* 工具。请选择 jjlab 可拉取的镜像（如 docker.io/library/alpine:3.20、docker.io/library/node:22-alpine、docker.io/library/golang:1.26-alpine）。就绪后工作区会同步进去。
+      zh: 从所选基础镜像创建会话沙箱。worker 二进制会被自动注入；必须先调用本工具再使用其他 sandbox-* 工具。请选择 easylab 可拉取的镜像（如 docker.io/library/alpine:3.20、docker.io/library/node:22-alpine、docker.io/library/golang:1.26-alpine）。就绪后工作区会同步进去。
     input_schema:
       type: object
       properties:
         image:
           type: string
-          description: Base image for the sandbox (jjlab-reachable, e.g. docker.io/library/<toolchain>:<tag>). The worker binary is injected automatically.
+          description: Base image for the sandbox (easylab-reachable, e.g. docker.io/library/<toolchain>:<tag>). The worker binary is injected automatically.
           descriptions:
-            zh: 沙箱的基础镜像（jjlab 可拉取，如 docker.io/library/<工具链>:<tag>）。worker 二进制会被自动注入。
+            zh: 沙箱的基础镜像（easylab 可拉取，如 docker.io/library/<工具链>:<tag>）。worker 二进制会被自动注入。
       required: [image]
   - name: sandbox-run
     description: Run a shell command in the session sandbox. The workspace is synced to the repo bookmark head first (repo files refreshed; sandbox-only files kept).
@@ -426,9 +426,9 @@ tools:
 
 
   - name: pull-git-repo
-    description: Clone a remote git repository into jjlab local storage (org 'external').
+    description: Clone a remote git repository into easylab local storage (org 'external').
     descriptions:
-      zh: 把远程 git 仓库克隆进 jjlab 本地存储（org 'external'）。
+      zh: 把远程 git 仓库克隆进 easylab 本地存储（org 'external'）。
     input_schema:
       type: object
       properties:

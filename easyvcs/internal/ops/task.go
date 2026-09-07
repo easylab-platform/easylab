@@ -1,8 +1,8 @@
 // Package ops implements the EasyVCS dev/deploy platform runtime substrate.
 //
 // It is the shared seam that lets easylab schedule work either as local
-// subprocesses (default, self-contained) or on a Kubernetes cluster (jj-lab
-// parity, optional). Following jj-lab's rule, the server process never
+// subprocesses (default, self-contained) or on a Kubernetes cluster (easylab
+// parity, optional). Following easylab's rule, the server process never
 // executes user code: a Run is dispatched to a Runtime backend (a local worker
 // subprocess or a cluster sandbox), and its progress is streamed through an
 // in-memory Task registry.

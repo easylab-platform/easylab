@@ -393,7 +393,7 @@ func supportedProtocols() string {
 // fetchRepoFile reads one file from a repo snapshot via easylab's contents API.
 func (s *server) fetchRepoFile(ctx context.Context, org, repo, rev, path string) ([]byte, error) {
 	u := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents/%s?ref=%s",
-		s.jj, urlPathEscape(org), urlPathEscape(repo), escapePath(path), urlPathEscape(rev))
+		s.base, urlPathEscape(org), urlPathEscape(repo), escapePath(path), urlPathEscape(rev))
 	body, err := s.httpGetRaw(ctx, u)
 	if err != nil {
 		return nil, err

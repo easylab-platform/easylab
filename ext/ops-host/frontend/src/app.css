@@ -2,7 +2,7 @@
 @plugin '@tailwindcss/typography';
 
 /*
- * Shared rucoder dark theme (registry / jjlab / agent-ui).
+ * Shared rucoder dark theme (registry / easylab / agent-ui).
  * Standard shadcn-svelte palette so components and Tailwind utilities share
  * one source of truth.
  */
@@ -117,9 +117,9 @@ body {
   }
 }
 
-/* ---- jjlab specific ---- */
+/* ---- easylab specific ---- */
 
-/* header / shadows used by the jjlab shell */
+/* header / shadows used by the easylab shell */
 :root {
   --header-bg: #010409;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);

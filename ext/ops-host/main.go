@@ -26,15 +26,15 @@ import (
 var manifestYaml []byte
 
 type server struct {
-	jjops             *easylab.Client // easylab /ops client (owns all k8s access)
+	ops               *easylab.Client // easylab /ops client (owns all k8s access)
 	workerImage       string          // sandbox worker image (easylab runs it)
 	runtimeNamespace  string          // namespace where easylab creates sandboxes/deployments
 	ext               *extension.Extension
 	artifact          string // artifact registry base URL (packages + OCI + metadata)
 	artifactImageHost string // TLS ingress host for image refs (FROM/push via buildkit)
 	artifactToken     string // optional bearer/basic token for artifact write auth
-	jj                string // easylab URL (repo archive + contents + clone)
-	jjToken           string // easylab write token (Authorization: token <…>)
+	base              string // easylab URL (repo archive + contents + clone)
+	easylabToken      string // easylab write token (Authorization: token <…>)
 
 	wsMu    sync.Mutex              // guards wsCache
 	wsCache map[string]wsCacheEntry // session -> workspace (short TTL)
@@ -50,33 +50,33 @@ type server struct {
 
 func main() {
 	ns := envOr("ZERGX_K8S_NAMESPACE", "zergx")
-	img := envOr("ZERGX_WORKER_IMAGE", "jj-lab.temp.svc.cluster.local/zergx-worker:v0.0.1")
+	img := envOr("ZERGX_WORKER_IMAGE", "zergx-service/zergx-worker:v0.0.1")
 	natsURL := envOr("NATS_URL", "nats://nats.zergx.svc.cluster.local:4222")
 	port := envOr("ZERGX_PORT", "8080")
 	// easylab replaces the old repo-manager (archive + contents + clone).
 	// The cluster service is named repo (easylab is the binary).
-	jj := envOr("ZERGX_JJ_SERVER_URL", envOr("ZERGX_REPO_MANAGER_URL", "http://jj-lab.temp.svc.cluster.local:80"))
+	base := envOr("EASYLAB_URL", envOr("ZERGX_REPO_MANAGER_URL", "http://easylab:80"))
 	// Artifact registry replaces zot (OCI store) + the legacy registry (metadata):
 	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
 	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base
 	// used for API calls and in-container CLI uploads.
-	artifact := trimTrailingSlash(envOr("ZERGX_ARTIFACT_URL", "http://jj-lab.temp.svc.cluster.local"))
+	artifact := trimTrailingSlash(envOr("ZERGX_ARTIFACT_URL", "http://easylab"))
 	// Image references (buildkit FROM/push) must go through the TLS ingress
 	// host configured as insecure in buildkitd's registry config — the svc
 	// host is plain HTTP which buildkit cannot pull/push to.
-	artifactImageHost := envOr("ZERGX_ARTIFACT_IMAGE_HOST", "jj-lab.temp.svc.cluster.local")
+	artifactImageHost := envOr("ZERGX_ARTIFACT_IMAGE_HOST", "easylab")
 	artifactToken := envOr("ZERGX_ARTIFACT_TOKEN", "")
-	jjToken := envOr("JJLAB_TOKEN", envOr("ZERGX_JJLAB_TOKEN", "devtoken"))
+	easylabToken := envOr("EASYLAB_TOKEN", "devtoken")
 
 	runtimeNS := envOr("ZERGX_RUNTIME_NAMESPACE", ns)
 
 	s := &server{
-		jjops:             easylab.New(jj, jjToken),
+		ops:               easylab.New(base, easylabToken),
 		artifact:          artifact,
 		artifactImageHost: artifactImageHost,
 		artifactToken:     artifactToken,
-		jj:                jj,
-		jjToken:           jjToken,
+		base:              base,
+		easylabToken:      easylabToken,
 		workerImage:       img,
 		runtimeNamespace:  runtimeNS,
 		wsCache:           map[string]wsCacheEntry{},
@@ -124,7 +124,7 @@ func main() {
 				Port:    port,
 				Run: func(runCtx context.Context, ext *extension.Extension) {
 					s.ext = ext
-					slog.Info("listening", "svc", "ops-extension", "addr", ":"+port, "artifact", artifact, "jj", jj, "runtime-ns", runtimeNS)
+					slog.Info("listening", "svc", "ops-extension", "addr", ":"+port, "artifact", artifact, "easylab", base, "runtime-ns", runtimeNS)
 				},
 			},
 		); err != nil {
@@ -136,7 +136,7 @@ func main() {
 
 	r := s.router(true)
 	addr := ":" + port
-	slog.Info("listening", "svc", "ops-extension", "addr", addr, "artifact", artifact, "jj", jj, "runtime-ns", runtimeNS)
+	slog.Info("listening", "svc", "ops-extension", "addr", addr, "artifact", artifact, "easylab", base, "runtime-ns", runtimeNS)
 	if err := http.ListenAndServe(addr, r); err != nil {
 		slog.Error("http server failed", "svc", "ops-extension", "err", err)
 		os.Exit(1)

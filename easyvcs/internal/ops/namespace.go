@@ -8,7 +8,7 @@ import (
 )
 
 // NamespaceRegistry is the set of approved ops target namespaces plus the
-// default. It mirrors jj-lab's namespace.rs: every /ops run/service/helm
+// default. It mirrors easylab's namespace.rs: every /ops run/service/helm
 // request must land in an approved namespace, and the HTTP layer gates it.
 type NamespaceRegistry struct {
 	mu        sync.RWMutex

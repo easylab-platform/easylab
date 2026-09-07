@@ -195,7 +195,7 @@ func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
 	if b.Port == 0 {
 		b.Port = 8080
 	}
-	if _, err := s.jjops.EnsureService(r.Context(), s.deploymentRequest(b)); err != nil {
+	if _, err := s.ops.EnsureService(r.Context(), s.deploymentRequest(b)); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

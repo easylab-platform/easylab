@@ -37,6 +37,9 @@ import (
 	_ "github.com/pkr/pkr-system"
 	"github.com/pkr/pkrkit"
 
+	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/agent-proto/agent/v1/agentv1connect"
+	"forgejo.develop.10.199.64.20.nip.io/easylab/easylab-proto/easylab/v1/easylabv1connect"
+
 	"easyvcs/internal/object"
 	"easyvcs/internal/revision"
 	"easyvcs/internal/store"
@@ -194,6 +197,21 @@ func (s *server) router() *http.ServeMux {
 
 	// Package registry (pkrkit): OCI /v2 + all language protocols.
 	s.mountPackageRegistry(mux)
+
+	// Typed Connect contract surface. These are the strong-typed RPC endpoints
+	// consumed by the Flutter client and the ext servers. They mount under
+	// /easylab.v1 and /agent.v1 (Connect/ gRPC-compatible).
+	mux.Handle(easylabv1connect.NewLabServiceHandler(&connLab{s}))
+	mux.Handle(easylabv1connect.NewOpsServiceHandler(&connOps{s}))
+	mux.Handle(easylabv1connect.NewRegistryServiceHandler(&connRegistry{s}))
+
+	// agent.v1 gateway: forwards to the real agent backend. Web/flutter talk to
+	// easylab (single entry); ext servers connect to the agent directly.
+	if agentURL := os.Getenv("EASYLAB_AGENT_URL"); agentURL != "" {
+		ca := newConnAgent(agentURL, os.Getenv("EASYLAB_AGENT_TOKEN"))
+		mux.Handle(agentv1connect.NewAgentServiceHandler(ca))
+	}
+
 	return mux
 }
 

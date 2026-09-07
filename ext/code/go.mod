@@ -2,16 +2,21 @@ module easyvcs-ext-code
 
 go 1.26
 
-require forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go v0.0.0
+require (
+	forgejo.develop.10.199.64.20.nip.io/easylab/client-sdk v0.0.0
+	github.com/abcp-sdk/abc-protocol-go v1.0.9
+)
 
 require (
-	github.com/klauspost/compress v1.18.5 // indirect
+	connectrpc.com/connect v1.20.0 // indirect
+	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/nats-io/nats.go v1.53.1 // indirect
 	github.com/nats-io/nkeys v0.4.15 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
-	golang.org/x/crypto v0.49.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go => ../../deps/abc-sdk-go
+replace forgejo.develop.10.199.64.20.nip.io/easylab/client-sdk => ../../deps/easylab-client-sdk

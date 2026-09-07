@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// errNotFoundForHTTP mirrors errNotFoundForHTTP for the jj client.
+// errNotFoundForHTTP mirrors errNotFoundForHTTP for the easylab client.
 var errNotFoundForHTTP = errors.New("not found")
 
 func envOr(k, d string) string {

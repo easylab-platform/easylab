@@ -21,17 +21,17 @@ var manifestYaml []byte
 
 // server wires the two faces of repo-extension:
 //
-//   - tool face (NATS): agent file/git tools forwarding to jjlab, with
+//   - tool face (NATS): agent file/git tools forwarding to easylab, with
 //     the (org, repo, bookmark) triple resolved from the injected `_session`
 //     via the mapping table;
 //   - workspace face: lifecycle events from the agent (durable NATS
-//     subscription) eagerly mirrored into jj bookmarks + mapping rows.
+//     subscription) eagerly mirrored into easylab branches + mapping rows.
 type server struct {
 	base  string // easylab base URL
 	agent string // agent-ts base URL
 	store *Store
 	cache *sessCache
-	jj    *easylabClient
+	lab   *easylabClient
 	ag    *agentClient
 	ext   *extension.Extension
 }
@@ -42,7 +42,7 @@ func main() {
 		base:  envOr("ZERGX_REPO_MANAGER_URL", "http://127.0.0.1:18160"),
 		agent: envOr("ZERGX_AGENT_URL", "http://agent.zergx.svc.cluster.local:80"),
 	}
-	s.jj = newClient(s.base, envOr("EASYLAB_TOKEN", envOr("ZERGX_JJLAB_TOKEN", "devtoken")))
+	s.lab = newClient(s.base, envOr("EASYLAB_TOKEN", "devtoken"))
 	s.ag = newAgentClient(s.agent)
 	s.cache = newSessCache(5 * time.Second)
 

@@ -83,7 +83,7 @@ func main() {
 		// OCI is spec-fixed at /v2; everything else under /pkgs/<name>.
 		if name == "oci" {
 			// Wire the /token auth endpoint the OCI challenges reference.
-			// jjlab serves it under /v2/token (the /v2 mount), so expose both.
+			// easylab serves it under /v2/token (the /v2 mount), so expose both.
 			if auth != nil {
 				tokenH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					serveToken(w, r, auth)

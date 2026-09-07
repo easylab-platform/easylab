@@ -179,14 +179,14 @@ func (s *server) ensureForkedAt(ctx context.Context, org, repo, newBM, newSessio
 	} else if row != nil {
 		return nil // already bound (retry path)
 	}
-	if err := s.jj.EnsureRepo(ctx, org, repo); err != nil {
+	if err := s.lab.EnsureRepo(ctx, org, repo); err != nil {
 		return err
 	}
 	anchor := baseRev
 	if anchor == "" {
 		anchor = parentBM
 	}
-	if err := s.jj.EnsureBookmark(ctx, org, repo, anchor, newBM); err != nil {
+	if err := s.lab.EnsureBookmark(ctx, org, repo, anchor, newBM); err != nil {
 		return err
 	}
 	return s.bindRow(ctx, org, repo, newBM, newSession)
@@ -226,7 +226,7 @@ func execDeleteBookmark(ctx context.Context, s *server, session string, args map
 		}
 	} else {
 		// No mapping row: orphan bookmark cleanup only.
-		if err := s.jj.DeleteBookmark(ctx, org, repo, bm); err != nil {
+		if err := s.lab.DeleteBookmark(ctx, org, repo, bm); err != nil {
 			return "", "", err
 		}
 	}

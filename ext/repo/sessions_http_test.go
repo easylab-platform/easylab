@@ -17,16 +17,16 @@ import (
 
 // ---- in-memory fakes ----
 
-// fakeJJ emulates the jjlab REST surface repo-extension depends on.
-type fakeJJ struct {
+// fakeLab emulates the easylab REST surface repo-extension depends on.
+type fakeLab struct {
 	mu     sync.Mutex
 	repos  map[string]map[string][]string // org -> repo -> bookmarks
 	anchor map[string]string              // "org/repo/new_bm" -> source it was created from
 	server *httptest.Server
 }
 
-func newFakeJJ() *fakeJJ {
-	f := &fakeJJ{
+func newFakeLab() *fakeLab {
+	f := &fakeLab{
 		repos:  map[string]map[string][]string{},
 		anchor: map[string]string{},
 	}
@@ -141,15 +141,15 @@ func newFakeJJ() *fakeJJ {
 	return f
 }
 
-func (f *fakeJJ) Close()      { f.server.Close() }
-func (f *fakeJJ) URL() string { return f.server.URL }
-func (f *fakeJJ) hasRepo(org, repo string) bool {
+func (f *fakeLab) Close()      { f.server.Close() }
+func (f *fakeLab) URL() string { return f.server.URL }
+func (f *fakeLab) hasRepo(org, repo string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	_, ok := f.repos[org][repo]
 	return ok
 }
-func (f *fakeJJ) hasBM(org, repo, bm string) bool {
+func (f *fakeLab) hasBM(org, repo, bm string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, b := range f.repos[org][repo] {
@@ -159,7 +159,7 @@ func (f *fakeJJ) hasBM(org, repo, bm string) bool {
 	}
 	return false
 }
-func (f *fakeJJ) bmAnchor(org, repo, bm string) string {
+func (f *fakeLab) bmAnchor(org, repo, bm string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.anchor[org+"/"+repo+"/"+bm]
@@ -239,14 +239,14 @@ func testStore(t *testing.T) *Store {
 	return store
 }
 
-func newTestServer(t *testing.T, jj *fakeJJ, ag *fakeAgent, store *Store) *server {
+func newTestServer(t *testing.T, lab *fakeLab, ag *fakeAgent, store *Store) *server {
 	t.Helper()
 	return &server{
-		base:  jj.URL(),
+		base:  lab.URL(),
 		agent: ag.URL(),
 		store: store,
 		cache: newSessCache(50 * time.Millisecond),
-		jj:    newClient(jj.URL(), "test-token"),
+		lab:   newClient(lab.URL(), "test-token"),
 		ag:    newAgentClient(ag.URL()),
 	}
 }
@@ -279,16 +279,16 @@ func (s *server) emit(t *testing.T, ctx context.Context, event string, env abcpr
 // ---- lifecycle event tests ----
 
 func TestLifecycleCreated(t *testing.T) {
-	jj, ag := newFakeJJ(), newFakeAgent()
-	defer jj.Close()
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
 	defer ag.Close()
-	s := newTestServer(t, jj, ag, testStore(t))
+	s := newTestServer(t, lab, ag, testStore(t))
 	ctx := context.Background()
 
 	if err := s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"}); err != nil {
 		t.Fatal(err)
 	}
-	if !jj.hasRepo("acme", "api") || !jj.hasBM("acme", "api", "main") {
+	if !lab.hasRepo("acme", "api") || !lab.hasBM("acme", "api", "main") {
 		t.Fatal("created did not materialize repo/bookmark")
 	}
 	if row, _ := s.store.GetRow(ctx, "acme", "api", "main"); row == nil {
@@ -310,10 +310,10 @@ func TestLifecycleCreated(t *testing.T) {
 }
 
 func TestLifecycleForkedInheritsParentBookmark(t *testing.T) {
-	jj, ag := newFakeJJ(), newFakeAgent()
-	defer jj.Close()
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
 	defer ag.Close()
-	s := newTestServer(t, jj, ag, testStore(t))
+	s := newTestServer(t, lab, ag, testStore(t))
 	ctx := context.Background()
 
 	mustEmit := func(ev abcprotocol.LifecycleEvent) {
@@ -326,10 +326,10 @@ func TestLifecycleForkedInheritsParentBookmark(t *testing.T) {
 	mustEmit(abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:dev"})
 	mustEmit(abcprotocol.LifecycleEvent{Kind: "forked", SessionName: "acme:api:feat", Parent: strptr("acme:api:dev")})
 
-	if !jj.hasBM("acme", "api", "feat") {
+	if !lab.hasBM("acme", "api", "feat") {
 		t.Fatal("fork bookmark missing")
 	}
-	if got := jj.bmAnchor("acme", "api", "feat"); got != "dev" {
+	if got := lab.bmAnchor("acme", "api", "feat"); got != "dev" {
 		t.Fatalf("fork anchored at %q, want parent bookmark %q", got, "dev")
 	}
 	if row, _ := s.store.GetRow(ctx, "acme", "api", "feat"); row == nil || row.SessionName != "acme:api:feat" {
@@ -339,7 +339,7 @@ func TestLifecycleForkedInheritsParentBookmark(t *testing.T) {
 	mustEmit(abcprotocol.LifecycleEvent{Kind: "forked", SessionName: "acme:api:feat", Parent: strptr("acme:api:dev")})
 	// fork from unmapped parent materializes the parent first
 	mustEmit(abcprotocol.LifecycleEvent{Kind: "forked", SessionName: "acme:api:f2", Parent: strptr("acme:api:legacy")})
-	if !jj.hasBM("acme", "api", "legacy") {
+	if !lab.hasBM("acme", "api", "legacy") {
 		t.Fatal("unmapped parent should be materialized first")
 	}
 	// cross-repo fork is rejected (permanent)
@@ -349,20 +349,20 @@ func TestLifecycleForkedInheritsParentBookmark(t *testing.T) {
 }
 
 func TestLifecycleRenamedDual(t *testing.T) {
-	jj, ag := newFakeJJ(), newFakeAgent()
-	defer jj.Close()
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
 	defer ag.Close()
-	s := newTestServer(t, jj, ag, testStore(t))
+	s := newTestServer(t, lab, ag, testStore(t))
 	ctx := context.Background()
 
 	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:old"})
 	if err := s.emit(t, ctx, "renamed", abcprotocol.LifecycleEvent{Kind: "renamed", From: strptr("acme:api:old"), To: strptr("acme:api:new")}); err != nil {
 		t.Fatal(err)
 	}
-	if jj.hasBM("acme", "api", "old") || !jj.hasBM("acme", "api", "new") {
+	if lab.hasBM("acme", "api", "old") || !lab.hasBM("acme", "api", "new") {
 		t.Fatal("bookmark rename not dual")
 	}
-	if got := jj.bmAnchor("acme", "api", "new"); got != "old" {
+	if got := lab.bmAnchor("acme", "api", "new"); got != "old" {
 		t.Fatalf("renamed bookmark should anchor at old, got %q", got)
 	}
 	if row, _ := s.store.GetRow(ctx, "acme", "api", "new"); row == nil || row.SessionName != "acme:api:new" {
@@ -375,23 +375,23 @@ func TestLifecycleRenamedDual(t *testing.T) {
 	if err := s.emit(t, ctx, "renamed", abcprotocol.LifecycleEvent{Kind: "renamed", From: strptr("acme:api:ghost"), To: strptr("acme:api:revived")}); err != nil {
 		t.Fatal(err)
 	}
-	if !jj.hasBM("acme", "api", "revived") {
+	if !lab.hasBM("acme", "api", "revived") {
 		t.Fatal("rename-as-create failed")
 	}
 }
 
 func TestLifecycleDeleted(t *testing.T) {
-	jj, ag := newFakeJJ(), newFakeAgent()
-	defer jj.Close()
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
 	defer ag.Close()
-	s := newTestServer(t, jj, ag, testStore(t))
+	s := newTestServer(t, lab, ag, testStore(t))
 	ctx := context.Background()
 
 	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:tmp"})
 	if err := s.emit(t, ctx, "deleted", abcprotocol.LifecycleEvent{Kind: "deleted", SessionName: "acme:api:tmp"}); err != nil {
 		t.Fatal(err)
 	}
-	if jj.hasBM("acme", "api", "tmp") {
+	if lab.hasBM("acme", "api", "tmp") {
 		t.Fatal("bookmark survived delete")
 	}
 	if row, _ := s.store.GetRow(ctx, "acme", "api", "tmp"); row != nil {
@@ -404,10 +404,10 @@ func TestLifecycleDeleted(t *testing.T) {
 }
 
 func TestResolveSessionStrict(t *testing.T) {
-	jj, ag := newFakeJJ(), newFakeAgent()
-	defer jj.Close()
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
 	defer ag.Close()
-	s := newTestServer(t, jj, ag, testStore(t))
+	s := newTestServer(t, lab, ag, testStore(t))
 	ctx := context.Background()
 
 	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"})
@@ -416,7 +416,7 @@ func TestResolveSessionStrict(t *testing.T) {
 	if _, _, _, err := s.resolveSession(ctx, "acme:api:pending"); err == nil {
 		t.Fatal("unmapped session should fail (no lazy creation)")
 	}
-	if !jj.hasBM("acme", "api", "pending") {
+	if !lab.hasBM("acme", "api", "pending") {
 		// sanity: nothing was created
 		t.Log("ok: no lazy creation")
 	} else {
@@ -438,16 +438,16 @@ func TestResolveSessionStrict(t *testing.T) {
 // ---- ops-surface endpoint tests ----
 
 func TestLazyAdoptEndpoint(t *testing.T) {
-	jj, ag := newFakeJJ(), newFakeAgent()
-	defer jj.Close()
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
 	defer ag.Close()
-	s := newTestServer(t, jj, ag, testStore(t))
+	s := newTestServer(t, lab, ag, testStore(t))
 	h := s.router()
 
-	// orphan bookmark created directly in jj
-	jj.mu.Lock()
-	jj.repos["acme"] = map[string][]string{"api": {"main", "orphan-bm"}}
-	jj.mu.Unlock()
+	// orphan bookmark created directly in lab
+	lab.mu.Lock()
+	lab.repos["acme"] = map[string][]string{"api": {"main", "orphan-bm"}}
+	lab.mu.Unlock()
 
 	code, v := doReq(t, h, "POST", "/api/v1/repos/acme/api/bookmarks/orphan-bm/session", nil)
 	if code != 200 || v["adopted"] != true {
@@ -466,10 +466,10 @@ func TestLazyAdoptEndpoint(t *testing.T) {
 }
 
 func TestGetSessionMap(t *testing.T) {
-	jj, ag := newFakeJJ(), newFakeAgent()
-	defer jj.Close()
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
 	defer ag.Close()
-	s := newTestServer(t, jj, ag, testStore(t))
+	s := newTestServer(t, lab, ag, testStore(t))
 	h := s.router()
 	ctx := context.Background()
 
@@ -484,10 +484,10 @@ func TestGetSessionMap(t *testing.T) {
 }
 
 func TestListReposAnnotates(t *testing.T) {
-	jj, ag := newFakeJJ(), newFakeAgent()
-	defer jj.Close()
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
 	defer ag.Close()
-	s := newTestServer(t, jj, ag, testStore(t))
+	s := newTestServer(t, lab, ag, testStore(t))
 	h := s.router()
 
 	s.emit(t, context.Background(), "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"})
@@ -504,18 +504,18 @@ func TestListReposAnnotates(t *testing.T) {
 // ---- reconcile tests ----
 
 func TestReconcileConvergesDrift(t *testing.T) {
-	jj, ag := newFakeJJ(), newFakeAgent()
-	defer jj.Close()
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
 	defer ag.Close()
-	s := newTestServer(t, jj, ag, testStore(t))
+	s := newTestServer(t, lab, ag, testStore(t))
 	ctx := context.Background()
 
 	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"})
 
-	// drift 1: bookmark deleted directly in jj → row removed
-	jj.mu.Lock()
-	jj.repos["acme"]["api"] = []string{}
-	jj.mu.Unlock()
+	// drift 1: bookmark deleted directly in lab → row removed
+	lab.mu.Lock()
+	lab.repos["acme"]["api"] = []string{}
+	lab.mu.Unlock()
 	if err := reconcileOnce(ctx, s); err != nil {
 		t.Fatal(err)
 	}
@@ -534,16 +534,16 @@ func TestReconcileConvergesDrift(t *testing.T) {
 	if row, _ := s.store.GetRow(ctx, "acme", "api", "bm2"); row != nil {
 		t.Fatal("row survived session deletion")
 	}
-	if !jj.hasBM("acme", "api", "bm2") {
+	if !lab.hasBM("acme", "api", "bm2") {
 		t.Fatal("bookmark must survive as orphan (work preserved)")
 	}
 }
 
 func TestReconcileBackfillsLostEvents(t *testing.T) {
-	jj, ag := newFakeJJ(), newFakeAgent()
-	defer jj.Close()
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
 	defer ag.Close()
-	s := newTestServer(t, jj, ag, testStore(t))
+	s := newTestServer(t, lab, ag, testStore(t))
 	ctx := context.Background()
 
 	// sessions created in the agent while every lifecycle event was lost
@@ -562,7 +562,7 @@ func TestReconcileBackfillsLostEvents(t *testing.T) {
 		if row, _ := s.store.GetRow(ctx, org, repo, bm); row == nil || row.SessionName != name {
 			t.Fatalf("backfill missing row for %s", name)
 		}
-		if !jj.hasBM(org, repo, bm) {
+		if !lab.hasBM(org, repo, bm) {
 			t.Fatalf("backfill missing bookmark for %s", name)
 		}
 	}
@@ -577,10 +577,10 @@ func TestReconcileBackfillsLostEvents(t *testing.T) {
 }
 
 func TestReconcileBackfillAndUnmapDoNotFight(t *testing.T) {
-	jj, ag := newFakeJJ(), newFakeAgent()
-	defer jj.Close()
+	lab, ag := newFakeLab(), newFakeAgent()
+	defer lab.Close()
 	defer ag.Close()
-	s := newTestServer(t, jj, ag, testStore(t))
+	s := newTestServer(t, lab, ag, testStore(t))
 	ctx := context.Background()
 
 	// row exists, session gone (drift) — unmap must win over backfill paths
@@ -594,7 +594,7 @@ func TestReconcileBackfillAndUnmapDoNotFight(t *testing.T) {
 	if row, _ := s.store.GetRow(ctx, "acme", "api", "x"); row != nil {
 		t.Fatal("row should be unmapped (session gone)")
 	}
-	if !jj.hasBM("acme", "api", "x") {
+	if !lab.hasBM("acme", "api", "x") {
 		t.Fatal("bookmark should remain as orphan")
 	}
 }

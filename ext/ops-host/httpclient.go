@@ -231,9 +231,9 @@ func (s *server) httpGetRaw(ctx context.Context, url string) ([]byte, error) {
 // reads are fine without a token.
 func (s *server) addAuth(req *http.Request) {
 	u := req.URL.String()
-	isJJ := strings.HasPrefix(u, s.jj+"/") || u == s.jj
-	if isJJ && s.jjToken != "" {
-		req.Header.Set("Authorization", "token "+s.jjToken)
+	isEasylab := strings.HasPrefix(u, s.base+"/") || u == s.base
+	if isEasylab && s.easylabToken != "" {
+		req.Header.Set("Authorization", "token "+s.easylabToken)
 		return
 	}
 	if strings.HasPrefix(u, s.artifact+"/") && s.artifactToken != "" {

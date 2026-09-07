@@ -57,7 +57,7 @@ func (s *server) ensureCreated(ctx context.Context, org, repo, bm, sid string) e
 	} else if row != nil {
 		return nil // already mirrored
 	}
-	if err := s.jj.EnsureRepo(ctx, org, repo); err != nil {
+	if err := s.lab.EnsureRepo(ctx, org, repo); err != nil {
 		return err
 	}
 	if err := s.ensureBookmarkAnchored(ctx, org, repo, bm); err != nil {
@@ -95,7 +95,7 @@ func (s *server) ensureForked(ctx context.Context, org, repo, bm, sid, parentSid
 		parentBM = "main" // non-derived parent: anchor at main
 	}
 
-	if err := s.jj.EnsureBookmark(ctx, org, repo, parentBM, bm); err != nil {
+	if err := s.lab.EnsureBookmark(ctx, org, repo, parentBM, bm); err != nil {
 		return err
 	}
 	return s.bindRow(ctx, org, repo, bm, sid)
@@ -124,7 +124,7 @@ func (s *server) ensureRenamed(ctx context.Context, fromSid, toSid string) error
 		// Old name never had a workspace; treat as a plain create.
 		return s.ensureCreated(ctx, toOrg, toRepo, toBM, toSid)
 	}
-	if err := s.jj.EnsureBookmark(ctx, fromOrg, fromRepo, fromBM, toBM); err != nil {
+	if err := s.lab.EnsureBookmark(ctx, fromOrg, fromRepo, fromBM, toBM); err != nil {
 		return err
 	}
 	if err := s.store.RenameRow(ctx, fromOrg, fromRepo, fromBM, toBM, toSid); err != nil {
@@ -134,7 +134,7 @@ func (s *server) ensureRenamed(ctx context.Context, fromSid, toSid string) error
 		return errDownstream("postgres", err)
 	}
 	s.cache.evict(fromSid)
-	return s.jj.DeleteBookmark(ctx, fromOrg, fromRepo, fromBM)
+	return s.lab.DeleteBookmark(ctx, fromOrg, fromRepo, fromBM)
 }
 
 // ensureDeleted: bookmark + mapping row removed (bookmark-first order: a
@@ -151,7 +151,7 @@ func (s *server) ensureDeleted(ctx context.Context, sid string) error {
 	if row == nil {
 		return nil
 	}
-	if err := s.jj.DeleteBookmark(ctx, org, repo, bm); err != nil {
+	if err := s.lab.DeleteBookmark(ctx, org, repo, bm); err != nil {
 		return err
 	}
 	if err := s.store.DeleteRow(ctx, org, repo, bm); err != nil {
@@ -165,12 +165,12 @@ func (s *server) ensureDeleted(ctx context.Context, sid string) error {
 // repo head when `main` itself does not exist (fresh repo bootstrap order).
 func (s *server) ensureBookmarkAnchored(ctx context.Context, org, repo, bm string) error {
 	anchor := "main"
-	if ok, err := s.jj.CanResolve(ctx, org, repo, anchor); err != nil {
+	if ok, err := s.lab.CanResolve(ctx, org, repo, anchor); err != nil {
 		return err
 	} else if !ok {
-		anchor = "" // jj resolves "" as the repo head
+		anchor = "" // easylab resolves "" as the repo head
 	}
-	return s.jj.EnsureBookmark(ctx, org, repo, anchor, bm)
+	return s.lab.EnsureBookmark(ctx, org, repo, anchor, bm)
 }
 
 // strp safely derefs the optional lifecycle fields (parent/from/to).

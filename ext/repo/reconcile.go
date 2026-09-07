@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-// runReconciler converges drift between jjlab bookmarks, the mapping
+// runReconciler converges drift between easylab bookmarks, the mapping
 // table, and agent sessions. It is the correctness backstop for the
 // best-effort lifecycle events — every rule is idempotent:
 //
-//   - row + bookmark gone (jj-side delete): drop the row;
+//   - row + bookmark gone (easylab-side delete): drop the row;
 //   - row + session gone (agent-side delete): drop the row; the bookmark
 //     becomes a legal orphan, adoptable by a future same-name session;
 //   - session (derived name) without a row (lost lifecycle event — publish
@@ -48,7 +48,7 @@ func reconcileOnce(ctx context.Context, s *server) error {
 }
 
 // convergeDrift enforces row-level consistency for managed repos. It only
-// ever deletes mapping rows — never agent sessions or jj state.
+// ever deletes mapping rows — never agent sessions or easylab state.
 func convergeDrift(ctx context.Context, s *server, sessions map[string]bool) error {
 	managed, err := s.store.ListManaged(ctx)
 	if err != nil {
@@ -57,7 +57,7 @@ func convergeDrift(ctx context.Context, s *server, sessions map[string]bool) err
 	if len(managed) == 0 {
 		return nil
 	}
-	tree, err := s.jj.GetRepoTree(ctx)
+	tree, err := s.lab.GetRepoTree(ctx)
 	if err != nil {
 		return err
 	}

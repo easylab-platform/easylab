@@ -9,7 +9,7 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     HTTPS_PROXY=${HTTPS_PROXY} \
     NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc \
 
-    GOPROXY=http://jj-lab.temp.svc.cluster.local/pkgs/go \
+    GOPROXY=http://easylab/pkgs/go \
     GOSUMDB=off \
     GONOSUMDB=abep.dev/sdk,abep.dev/sdk/nats,abep.dev/sdk/ws \
     GONOSUMCHECK=1 \

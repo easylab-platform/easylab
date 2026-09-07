@@ -23,7 +23,7 @@ type HistoryOpt struct {
 	// snapshot hash, "@", or "" for the newest revision). The walk begins at
 	// the resolved revision and goes back through its ancestors.
 	Start string
-	// Desc orders the result newest-first (jjlab-aligned). Default is
+	// Desc orders the result newest-first (easylab-aligned). Default is
 	// chronological (root first), matching the historical behaviour.
 	Desc bool
 	// Limit truncates the returned edits (0 = no limit).

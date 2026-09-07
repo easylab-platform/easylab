@@ -2,42 +2,28 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/base64"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"strings"
 
-	abcprotocol "forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go"
-	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/extension"
+	easylabv1 "forgejo.develop.10.199.64.20.nip.io/easylab/easylab-proto/easylab/v1"
+	"forgejo.develop.10.199.64.20.nip.io/easylab/client-sdk"
+	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
+	"github.com/abcp-sdk/abc-protocol-go/extension"
 )
 
-// client is a thin HTTP client for easyvcsd's Lab API.
+// client bridges ext/code onto the easylab Lab API via the typed
+// easylab-client-sdk (Connect). Bookmarks are gone upstream — they map to
+// branches. A thin REST helper is retained only for tool-specific read-only
+// endpoints that have no proto RPC yet (search / compare / history / blame),
+// so the ext still works end-to-end.
 type client struct {
 	base string
-	http *http.Client
+	sdk  *easylabsdk.Client
 }
 
-func (c *client) do(ctx context.Context, method, path string, body any) ([]byte, error) {
-	var rdr io.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
-		rdr = strings.NewReader(string(b))
-	}
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(c.base, "/")+path, rdr)
-	if err != nil {
-		return nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+func newClient(base string) *client {
+	return &client{base: base, sdk: easylabsdk.New(base, envOr("EASYLAB_TOKEN", "devtoken"))}
 }
 
 func sessionOf(args map[string]any) (org, repo, rev string) {
@@ -47,49 +33,21 @@ func sessionOf(args map[string]any) (org, repo, rev string) {
 	return
 }
 
-func repoOr(org, repo string) string {
-	return url.PathEscape(org) + "/" + url.PathEscape(repo)
-}
-
-func escPath(p string) string {
-	segs := strings.Split(p, "/")
-	for i, s := range segs {
-		segs[i] = url.PathEscape(s)
-	}
-	return strings.Join(segs, "/")
-}
-
 func (c *client) list(ctx context.Context, args map[string]any, _ string, _ string) (extension.ToolResultData, error) {
 	org, repo, rev := sessionOf(args)
 	if org == "" || repo == "" {
 		return toolResult("missing org/repo", map[string]any{}), nil
 	}
-	q := url.Values{}
-	if rev != "" {
-		q.Set("ref", rev)
-	}
-	pathArg := abcprotocol.ArgString(args, "path")
-	if pathArg != "" {
-		q.Set("path", pathArg)
-	}
-	rd, err := c.do(ctx, "GET", "/api/v1/repositories/"+repoOr(org, repo)+"/tree?"+q.Encode(), nil)
+	entries, err := c.sdk.ListReposTreeEntries(ctx, org, repo, rev, abcprotocol.ArgString(args, "path"))
 	if err != nil {
 		return extension.ToolResultData{}, err
 	}
-	var out struct {
-		Entries []struct {
-			Name string `json:"name"`
-			Kind string `json:"kind"`
-			ID   string `json:"id"`
-		} `json:"entries"`
-	}
-	_ = json.Unmarshal(rd, &out)
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "entries (%d):\n", len(out.Entries))
-	for _, e := range out.Entries {
+	fmt.Fprintf(&sb, "entries (%d):\n", len(entries))
+	for _, e := range entries {
 		fmt.Fprintf(&sb, "  [%s] %s\n", e.Kind, e.Name)
 	}
-	return toolResult(sb.String(), map[string]any{"entries": out.Entries}), nil
+	return toolResult(sb.String(), map[string]any{"entries": entries}), nil
 }
 
 func (c *client) read(ctx context.Context, args map[string]any, _ string, _ string) (extension.ToolResultData, error) {
@@ -98,15 +56,10 @@ func (c *client) read(ctx context.Context, args map[string]any, _ string, _ stri
 	if path == "" {
 		return toolResult("missing 'path'", map[string]any{}), nil
 	}
-	q := url.Values{"path": []string{path}}
-	if rev != "" {
-		q.Set("ref", rev)
-	}
-	rd, err := c.do(ctx, "GET", "/api/v1/repositories/"+repoOr(org, repo)+"/blob?"+q.Encode(), nil)
+	text, err := c.sdk.ReadBlobText(ctx, org, repo, path, rev)
 	if err != nil {
 		return extension.ToolResultData{}, err
 	}
-	text := string(rd)
 	offset := int(abcprotocol.ArgInt(args, "offset", 1))
 	limit := int(abcprotocol.ArgInt(args, "limit", 0))
 	if offset > 1 || limit > 0 {
@@ -127,22 +80,34 @@ func (c *client) read(ctx context.Context, args map[string]any, _ string, _ stri
 			text += fmt.Sprintf("\n... (%d lines total)", total)
 		}
 	}
-	return toolResult(text, map[string]any{"path": path, "size": len(rd)}), nil
+	return toolResult(text, map[string]any{"path": path, "size": len(text)}), nil
 }
 
 func (c *client) commit(ctx context.Context, org, repo, rev, message string, changes []map[string]any) (string, error) {
-	body := map[string]any{
-		"parent_hash": "", "description": message, "changes": changes,
+	// easylab-sdk WriteBlob writes one file per call; a multi-change commit is
+	// modeled as successive writes onto the same branch.
+	var rid string
+	for _, ch := range changes {
+		path, _ := ch["path"].(string)
+		del, _ := ch["delete"].(bool)
+		content, _ := ch["content"].(string)
+		if del {
+			content = ""
+		} else {
+			// content may be base64-encoded by the caller.
+			if dec, e := base64.StdEncoding.DecodeString(content); e == nil {
+				content = string(dec)
+			}
+		}
+		ok, err := c.sdk.WriteBlob(ctx, org, repo, rev, path, content, message)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			rid = path
+		}
 	}
-	rd, err := c.do(ctx, "POST", "/api/v1/repositories/"+repoOr(org, repo)+"/commits", body)
-	if err != nil {
-		return "", err
-	}
-	var out struct {
-		RevisionID string `json:"revision_id"`
-	}
-	_ = json.Unmarshal(rd, &out)
-	return out.RevisionID, nil
+	return rid, nil
 }
 
 func (c *client) write(ctx context.Context, args map[string]any, _ string, _ string) (extension.ToolResultData, error) {
@@ -175,22 +140,16 @@ func (c *client) edit(ctx context.Context, args map[string]any, _ string, _ stri
 	if message == "" {
 		message = "edit " + path
 	}
-	// Read current, apply line edit, commit.
-	q := url.Values{"path": []string{path}}
-	if rev != "" {
-		q.Set("ref", rev)
-	}
-	rd, err := c.do(ctx, "GET", "/api/v1/repositories/"+repoOr(org, repo)+"/blob?"+q.Encode(), nil)
+	cur, err := c.sdk.ReadBlobText(ctx, org, repo, path, rev)
 	if err != nil {
 		return extension.ToolResultData{}, err
 	}
-	lines := strings.Split(string(rd), "\n")
-	// applyLineEdit: replace [start,end] with content (1-based inclusive).
+	lines := strings.Split(cur, "\n")
 	newLines, err := applyLineEdit(lines, start, end, content)
 	if err != nil {
 		return extension.ToolResultData{}, err
 	}
-	rid, err := c.commit(ctx, org, repo, "", message, []map[string]any{
+	rid, err := c.commit(ctx, org, repo, rev, message, []map[string]any{
 		{"path": path, "content": strings.Join(newLines, "\n")},
 	})
 	if err != nil {
@@ -237,25 +196,17 @@ func (c *client) delete(ctx context.Context, args map[string]any, _ string, _ st
 
 func (c *client) search(ctx context.Context, args map[string]any, _ string, _ string) (extension.ToolResultData, error) {
 	org, repo, rev := sessionOf(args)
-	q0 := abcprotocol.ArgString(args, "q")
-	q := url.Values{"q": []string{q0}}
-	if rev != "" {
-		q.Set("ref", rev)
-	}
-	rd, err := c.do(ctx, "GET", "/api/v1/repositories/"+repoOr(org, repo)+"/search?"+q.Encode(), nil)
+	q := abcprotocol.ArgString(args, "q")
+	matches, err := c.sdk.Search(ctx, org, repo, rev, q)
 	if err != nil {
 		return extension.ToolResultData{}, err
 	}
-	var out struct {
-		Matches []map[string]any `json:"matches"`
-	}
-	_ = json.Unmarshal(rd, &out)
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%d match(es):\n", len(out.Matches))
-	for _, mt := range out.Matches {
-		fmt.Fprintf(&sb, "  %v\n", mt["path"])
+	fmt.Fprintf(&sb, "%d match(es):\n", len(matches))
+	for _, mt := range matches {
+		fmt.Fprintf(&sb, "  %v\n", pathOf(mt))
 	}
-	return toolResult(sb.String(), map[string]any{"matches": out.Matches}), nil
+	return toolResult(sb.String(), map[string]any{"matches": matches}), nil
 }
 
 func (c *client) revisionDiff(ctx context.Context, args map[string]any, _ string, _ string) (extension.ToolResultData, error) {
@@ -263,112 +214,122 @@ func (c *client) revisionDiff(ctx context.Context, args map[string]any, _ string
 	revA := abcprotocol.ArgString(args, "rev_a")
 	revB := abcprotocol.ArgString(args, "rev_b")
 	if revA != "" && revB != "" {
-		q := url.Values{"from": []string{revA}, "to": []string{revB}}
-		rd, err := c.do(ctx, "GET", "/api/v1/repositories/"+repoOr(org, repo)+"/compare?"+q.Encode(), nil)
+		diff, err := c.sdk.Compare(ctx, org, repo, revA, revB)
 		if err != nil {
 			return extension.ToolResultData{}, err
 		}
-		return toolResult(fmt.Sprintf("diff %s..%s:\n%s", revA, revB, string(rd)), map[string]any{"rev_a": revA, "rev_b": revB}), nil
+		return toolResult(fmt.Sprintf("diff %s..%s:\n%s", revA, revB, diff), map[string]any{"rev_a": revA, "rev_b": revB}), nil
 	}
 	if rev := abcprotocol.ArgString(args, "rev"); rev != "" {
-		rd, err := c.do(ctx, "GET", "/api/v1/repositories/"+repoOr(org, repo)+"/revisions/"+url.PathEscape(rev)+"/diff", nil)
+		diff, err := c.sdk.RevisionDiff(ctx, org, repo, rev)
 		if err != nil {
 			return extension.ToolResultData{}, err
 		}
-		return toolResult(fmt.Sprintf("diff of %s:\n%s", rev, string(rd)), map[string]any{"rev": rev}), nil
+		return toolResult(fmt.Sprintf("diff of %s:\n%s", rev, diff), map[string]any{"rev": rev}), nil
 	}
 	return toolResult("need rev_a/rev_b or rev", map[string]any{}), nil
 }
 
 func (c *client) log(ctx context.Context, args map[string]any, _ string, _ string) (extension.ToolResultData, error) {
 	org, repo, rev := sessionOf(args)
-	q := url.Values{}
-	if rev != "" {
-		q.Set("ref", rev)
-	}
-	rd, err := c.do(ctx, "GET", "/api/v1/repositories/"+repoOr(org, repo)+"/revisions?"+q.Encode(), nil)
+	revs, err := c.sdk.Revisions(ctx, org, repo, rev, 200)
 	if err != nil {
 		return extension.ToolResultData{}, err
 	}
-	var revs []map[string]any
-	_ = json.Unmarshal(rd, &revs)
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%d revision(s):\n", len(revs))
 	for _, rv := range revs {
-		fmt.Fprintf(&sb, "  %s %s\n", shortID(strOf(rv, "revision_id")), strOf(rv, "description"))
+		desc := rv.GetMessage()
+		if desc == "" {
+			desc = rv.GetSha()
+		}
+		fmt.Fprintf(&sb, "  %s %s\n", shortID(rv.GetRev()), desc)
 	}
-	return toolResult(sb.String(), map[string]any{"revisions": revs}), nil
+	var meta []map[string]any
+	for _, rv := range revs {
+		meta = append(meta, map[string]any{
+			"revision_id": rv.GetRev(), "description": rv.GetMessage(), "sha": rv.GetSha(),
+		})
+	}
+	return toolResult(sb.String(), map[string]any{"revisions": meta}), nil
 }
 
 func (c *client) blame(ctx context.Context, args map[string]any, _ string, _ string) (extension.ToolResultData, error) {
 	org, repo, rev := sessionOf(args)
 	path := abcprotocol.ArgString(args, "path")
-	q := url.Values{"path": []string{path}}
-	if rev != "" {
-		q.Set("ref", rev)
-	}
-	rd, err := c.do(ctx, "GET", "/api/v1/repositories/"+repoOr(org, repo)+"/blame?"+q.Encode(), nil)
+	lines, err := c.sdk.Blame(ctx, org, repo, path, rev)
 	if err != nil {
 		return extension.ToolResultData{}, err
 	}
-	var lines []map[string]any
-	_ = json.Unmarshal(rd, &lines)
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "per-line origin of '%s':\n", path)
 	for _, ln := range lines {
-		content, _ := ln["content"].(string)
-		fmt.Fprintf(&sb, "  %s | %s\n", shortID(strOf(ln, "revision_id")), content)
+		content := ofStr(ln, "_content")
+		fmt.Fprintf(&sb, "  %s | %s\n", shortID(ofStr(ln, "_rev")), content)
 	}
 	return toolResult(sb.String(), map[string]any{"lines": lines}), nil
 }
 
 func (c *client) refs(ctx context.Context, args map[string]any, _ string, _ string) (extension.ToolResultData, error) {
 	org, repo, _ := sessionOf(args)
-	rd, err := c.do(ctx, "GET", "/api/v1/repositories/"+repoOr(org, repo)+"/bookmarks", nil)
+	bms, err := c.sdk.Branches(ctx, org, repo)
 	if err != nil {
 		return extension.ToolResultData{}, err
 	}
-	var bms []map[string]any
-	_ = json.Unmarshal(rd, &bms)
-	rd2, _ := c.do(ctx, "GET", "/api/v1/repositories/"+repoOr(org, repo)+"/tags", nil)
-	var tags []map[string]any
-	_ = json.Unmarshal(rd2, &tags)
+	tags, err := c.sdk.Tags(ctx, org, repo)
+	if err != nil {
+		return extension.ToolResultData{}, err
+	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "bookmarks (%d):\n", len(bms))
+	fmt.Fprintf(&sb, "branches (%d):\n", len(bms))
 	for _, b := range bms {
-		fmt.Fprintf(&sb, "  %s -> %s\n", strOf(b, "name"), shortID(strOf(b, "revision_id")))
+		fmt.Fprintf(&sb, "  %s -> %s\n", b.GetName(), shortID(b.GetSha()))
 	}
 	fmt.Fprintf(&sb, "tags (%d):\n", len(tags))
 	for _, t := range tags {
-		fmt.Fprintf(&sb, "  %s -> %s\n", strOf(t, "name"), shortID(strOf(t, "revision_id")))
+		fmt.Fprintf(&sb, "  %s -> %s\n", t.GetName(), shortID(t.GetTarget()))
 	}
-	return toolResult(sb.String(), map[string]any{"bookmarks": bms, "tags": tags}), nil
+	var bmsMeta []map[string]any
+	for _, b := range bms {
+		bmsMeta = append(bmsMeta, map[string]any{"name": b.GetName(), "revision_id": b.GetSha()})
+	}
+	var tagsMeta []map[string]any
+	for _, t := range tags {
+		tagsMeta = append(tagsMeta, map[string]any{"name": t.GetName(), "revision_id": t.GetTarget()})
+	}
+	return toolResult(sb.String(), map[string]any{"branches": bmsMeta, "tags": tagsMeta}), nil
 }
 
 func (c *client) history(ctx context.Context, args map[string]any, _ string, _ string) (extension.ToolResultData, error) {
 	org, repo, _ := sessionOf(args)
 	path := abcprotocol.ArgString(args, "path")
-	q := url.Values{"path": []string{path}}
-	rd, err := c.do(ctx, "GET", "/api/v1/repositories/"+repoOr(org, repo)+"/history?"+q.Encode(), nil)
+	edits, err := c.sdk.FileHistory(ctx, org, repo, path, "")
 	if err != nil {
 		return extension.ToolResultData{}, err
 	}
-	var edits []map[string]any
-	_ = json.Unmarshal(rd, &edits)
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%d edit(s) of '%s':\n", len(edits), path)
 	for _, e := range edits {
-		fmt.Fprintf(&sb, "  %s %s\n", shortID(strOf(e, "RevisionID")), strOf(e, "Status"))
+		fmt.Fprintf(&sb, "  %s %s\n", shortID(ofStr(e, "_rev")), ofStr(e, "_status"))
 	}
 	return toolResult(sb.String(), map[string]any{"edits": edits}), nil
 }
 
-func strOf(m map[string]any, key string) string {
+func ofStr(m map[string]any, key string) string {
 	if v, ok := m[key].(string); ok {
 		return v
 	}
 	return ""
 }
+
+func pathOf(m map[string]any) string {
+	if v, ok := m["path"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+var _ = easylabv1.BranchInfo{}
 
 func shortID(id string) string {
 	if len(id) > 8 {

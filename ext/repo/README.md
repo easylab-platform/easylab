@@ -1,8 +1,8 @@
 # repo-extension
 
 Go extension server (NATS tool layer) replacing the Rust `repo-tools`
-service. It forwards agent file/git tools to the jjlab Contents API and
-keeps every coding session's jj workspace in a strict **1:1 with its
+service. It forwards agent file/git tools to the easylab Contents API and
+keeps every coding session's workspace in a strict **1:1 with its
 bookmark**, maintained eagerly via the agent's lifecycle trigger hooks.
 
 ## Model: lifecycle events (eager, no lazy creation)
@@ -22,7 +22,7 @@ repo-extension consumes them via a **durable consumer with manual acks**
 (events emitted while it is down are delivered on restart). Every step is
 idempotent, so at-least-once redeliveries converge:
 
-- `created` → jj ensure org/repo + bookmark from `main` (head fallback) + row
+- `created` → ensure org/repo + bookmark from `main` (head fallback) + row
 - `forked` → bookmark from the **parent's bookmark** (true workspace
   inheritance at fork time; the parent is materialized first when unmapped)
 - `renamed` → new bookmark at the old one's position + row update + old
@@ -34,7 +34,7 @@ Non-derived session names (not `org:repo:bookmark`) are discarded with a log.
 Session names derive strictly: `session_name = org:repo:bookmark`, each
 component matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` and never containing
 `:` (reserved as the separator; bijection) nor `..`/trailing `.`/`.lock`
-(jj/git ref rules — inner dots ARE allowed, `my.repo` is fine). `:` needs no
+(git ref rules — inner dots ARE allowed, `my.repo` is fine). `:` needs no
 URL encoding and is never embedded in NATS subjects or KV keys (the agent
 hashes the name into a safe token there; payloads carry the real name).
 The tool path is **strict**: an unmapped session resolves to
@@ -44,7 +44,7 @@ a "workspace not ready" error — no lazy creation, no fallbacks.
 
 Lifecycle events are the fast path; a background reconciler (default 60s) is
 the correctness backstop. All rules idempotent, row-level only — the
-reconciler never destroys agent sessions or jj state:
+reconciler never destroys agent sessions or easylab state:
 
 - row + bookmark gone → unmap (a later lifecycle event re-creates it);
 - row + session gone → unmap; the bookmark becomes a legal orphan, adoptable
@@ -76,12 +76,12 @@ event-driven; there are no workspace-write endpoints.
 | Endpoint | Meaning |
 | --- | --- |
 | `GET /api/v1/health` | probe |
-| `GET /api/v1/repos` | jj tree with `managed`/`session_name` annotations |
+| `GET /api/v1/repos` | easylab tree with `managed`/`session_name` annotations |
 | `GET /api/v1/repos/{o}/{r}/bookmarks` | bookmarks with session binding |
 | `GET /api/v1/session-map?session=NAME` | reverse lookup |
 | `POST /api/v1/repos/{o}/{r}/bookmarks/{bm}/session` | bind an orphan bookmark to a (created) session, idempotent |
 
-## jjlab requirement
+## easylab requirement
 
 `POST /api/v1/repos/{org}/{repo}/bookmarks` must accept `rev` resolving
 bookmarks, commit-id prefixes, change-id prefixes, and `""` (head).

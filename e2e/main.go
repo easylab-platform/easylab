@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	natsbus "forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/transport/nats"
-	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/agent"
+	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
+	"github.com/abcp-sdk/abc-protocol-go/agent"
 )
 
 var (

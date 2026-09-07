@@ -21,7 +21,7 @@ func (s *server) opsSubmitBuild(ctx context.Context, req map[string]interface{})
 	if req["namespace"] == nil {
 		req["namespace"] = s.runtimeNamespace
 	}
-	body, err := s.httpPostJSON(ctx, s.jj+"/api/v1/ops/builds", req)
+	body, err := s.httpPostJSON(ctx, s.base+"/api/v1/ops/builds", req)
 	if err != nil {
 		return "", err
 	}
@@ -39,7 +39,7 @@ func (s *server) opsTask(ctx context.Context, id string) (map[string]interface{}
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	for {
-		body, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/tasks/"+url.PathEscape(id))
+		body, err := s.httpGetJSON(ctx, s.base+"/api/v1/ops/tasks/"+url.PathEscape(id))
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +134,7 @@ func (s *server) awaitOpsTaskProgress(ctx context.Context, kind, tag, id, callID
 
 // opsTaskOnce polls a easylab ops task once (no loop); opsTask is the loop form.
 func (s *server) opsTaskOnce(ctx context.Context, id string) (map[string]interface{}, error) {
-	body, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/tasks/"+url.PathEscape(id))
+	body, err := s.httpGetJSON(ctx, s.base+"/api/v1/ops/tasks/"+url.PathEscape(id))
 	if err != nil {
 		return nil, err
 	}

@@ -76,7 +76,7 @@ func TestManifestBinding(t *testing.T) {
 
 // manifestHandlers returns the handler map without needing a live server.
 func manifestHandlers() map[string]extension.ToolSpec {
-	return (&server{jj: newClient("http://unused", "t")}).handlers()
+	return (&server{lab: newClient("http://unused", "t")}).handlers()
 }
 
 // ---- wire-level e2e over the inproc transport ----
@@ -128,15 +128,15 @@ func TestDiscoverWire(t *testing.T) {
 }
 
 // TestExploreWire drives the explore tool (no session context required)
-// through the abep envelope against a fake jjlab.
+// through the abep envelope against a fake easylab.
 func TestExploreWire(t *testing.T) {
-	jj := newFakeJJ()
-	defer jj.Close()
+	lab := newFakeLab()
+	defer lab.Close()
 	// Seed org/repo through the fake's HTTP surface (same paths the explore
 	// tool reads from).
 	post := func(path string, body map[string]interface{}) {
 		b, _ := json.Marshal(body)
-		resp, err := http.Post(jj.URL()+path, "application/json", strings.NewReader(string(b)))
+		resp, err := http.Post(lab.URL()+path, "application/json", strings.NewReader(string(b)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,7 +144,7 @@ func TestExploreWire(t *testing.T) {
 	}
 	post("/api/v1/repos/acme/api", map[string]interface{}{"default_bookmark": "main"})
 
-	s := &server{base: jj.URL(), jj: newClient(jj.URL(), "t")}
+	s := &server{base: lab.URL(), lab: newClient(lab.URL(), "t")}
 
 	m, err := manifest.ParseManifest(manifestYaml)
 	if err != nil {
