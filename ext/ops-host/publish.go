@@ -74,11 +74,11 @@ var publishSpecs = map[string]publishSpec{
 	},
 	"cargo": {
 		// Cargo matches CARGO_REGISTRIES_<NAME>_* env vars by uppercasing the
-		// --registry name, so the env key must be uppercase (ZERGX).
+		// --registry name, so the env key must be uppercase (EASYLAB registry alias).
 		image: "rust:1-alpine",
-		steps: `RUN export CARGO_REGISTRIES_ZERGX_INDEX="sparse+$ARTIFACT_URL/pkgs/cargo/index/" \
- && export CARGO_REGISTRIES_ZERGX_TOKEN="${ARTIFACT_TOKEN:-dummy}" \
- && cargo publish --registry zergx --allow-dirty \
+		steps: `RUN export CARGO_REGISTRIES_EASYLAB_INDEX="sparse+$ARTIFACT_URL/pkgs/cargo/index/" \
+ && export CARGO_REGISTRIES_EASYLAB_TOKEN="${ARTIFACT_TOKEN:-dummy}" \
+ && cargo publish --registry easylab --allow-dirty \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"rubygems": {
@@ -219,10 +219,10 @@ EOF`,
  && pip config set global.trusted-host "$(echo "$ARTIFACT_URL" | sed 's|.*://||; s|[:/].*||')" \
  && pip install --no-cache-dir 'conan>=2' \
  && conan profile detect --force \
- && conan remote add zergx "$ARTIFACT_URL/pkgs/conan" --force \
- && { [ -z "$ARTIFACT_TOKEN" ] || conan remote login zergx agent -p "$ARTIFACT_TOKEN"; } \
+ && conan remote add easylab "$ARTIFACT_URL/pkgs/conan" --force \
+ && { [ -z "$ARTIFACT_TOKEN" ] || conan remote login easylab agent -p "$ARTIFACT_TOKEN"; } \
  && conan create . \
- && conan upload '*' -r zergx -c \
+ && conan upload '*' -r easylab -c \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"pub": {

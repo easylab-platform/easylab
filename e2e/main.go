@@ -1,6 +1,6 @@
 // Command e2e drives EasyLab's agent extension surface over real NATS by
 // simulating agent tool calls (abc.discover + tool.call.{ext}.{tool}),
-// asserting correctness. It is modeled on zergx's deploy/e2e-live but targets
+// asserting correctness. It is modeled on the upstream deploy/e2e-live but targets
 // the EasyLab extensions (easyvcs-code / easyvcs-ops) and easylab's aggregate
 // API, with no mocks/inproc.
 package main

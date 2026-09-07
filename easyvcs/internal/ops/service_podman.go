@@ -337,3 +337,27 @@ func (r *PodmanServiceRunner) List(ctx context.Context, network string) ([]Servi
 var _ ServiceRunner = (*PodmanServiceRunner)(nil)
 var _ = json.Marshal
 var _ = time.Second
+
+// SyncTar extracts a tarball into a running service container at dest. The
+// tarball is staged through the work root (podman cp needs a real file). The
+// destination directory is created first (podman cp cannot mkdir).
+func (r *PodmanServiceRunner) SyncTar(ctx context.Context, name, dest string, tarball []byte) error {
+	if dest == "" {
+		dest = "/workspace"
+	}
+	if _, err := r.Exec(ctx, name, "mkdir -p "+shQuoted(dest)); err != nil {
+		return fmt.Errorf("sync mkdir: %w", err)
+	}
+	tmp := filepath.Join(r.workRoot, fmt.Sprintf("sync-%d.tar", time.Now().UnixNano()))
+	if err := os.WriteFile(tmp, tarball, 0o644); err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	_, err := r.runPodman(ctx, "cp", tmp, name+":"+dest)
+	return err
+}
+
+// shQuoted quotes a path for the plain sh -c used by Exec.
+func shQuoted(p string) string {
+	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+}

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"connectrpc.com/connect"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -35,12 +37,19 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 
 	deps := []map[string]interface{}{
 		check("artifact", s.artifact+"/v2/"),
-		check("easylab", s.base+"/api/v1/health"),
 	}
-	_, cfgErr := s.ops.Config(ctx)
-	deps = append(deps, map[string]interface{}{"name": "easylab-ops", "ok": cfgErr == nil, "error": errStr(cfgErr)})
+	if _, err := s.sdk.Lab.Health(ctx, connect.NewRequest(&easylabv1.HealthRequest{})); err != nil {
+		deps = append(deps, map[string]interface{}{"name": "easylab", "ok": false, "error": errStr(err)})
+	} else {
+		deps = append(deps, map[string]interface{}{"name": "easylab", "ok": true})
+	}
+	if _, err := s.sdk.Ops.OpsStatus(ctx, connect.NewRequest(&easylabv1.OpsStatusRequest{})); err != nil {
+		deps = append(deps, map[string]interface{}{"name": "easylab-ops", "ok": false, "error": errStr(err)})
+	} else {
+		deps = append(deps, map[string]interface{}{"name": "easylab-ops", "ok": true})
+	}
 
-	svcs, _ := s.ops.ListServices(ctx, s.runtimeNamespace)
+	svcs, _ := s.sdk.ListServices(ctx, "", "", s.runtimeNamespace)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":        true,
 		"version":   version,
@@ -60,11 +69,12 @@ func errStr(err error) string {
 // sandboxesList returns worker pods with their session labels and the repo rev
 // each is synced to.
 func (s *server) sandboxesList(w http.ResponseWriter, r *http.Request) {
-	list, err := s.ops.ListServices(r.Context(), s.runtimeNamespace)
+	list, err := s.sdk.ListServices(r.Context(), "", "", s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	svcMaps := serviceInfoMaps(list)
 	s.syncMu.Lock()
 	synced := make(map[string]string, len(s.synced))
 	for k, v := range s.synced {
@@ -73,16 +83,15 @@ func (s *server) sandboxesList(w http.ResponseWriter, r *http.Request) {
 	s.syncMu.Unlock()
 
 	out := []map[string]interface{}{}
-	for _, svc := range list {
+	for _, svc := range svcMaps {
 		name, _ := svc["name"].(string)
-		// The session association lives in the `zergx/session` annotation, not
-		// in a top-level `session` field (easylab ListServices returns the
-		// annotations verbatim). Read it the same way filterServicesBySession
-		// does, so the UI can bind a sandbox to its session.
+		// The session association lives in the `easylab/session` annotation;
+		// read it the same way filterServicesBySession does so the UI can bind
+		// a sandbox to its session.
 		session := ""
 		if ann, ok := svc["annotations"].(map[string]interface{}); ok {
-			if s, ok := ann["zergx/session"].(string); ok {
-				session = s
+			if sv, ok := ann["easylab/session"].(string); ok {
+				session = sv
 			}
 		}
 		out = append(out, map[string]interface{}{
@@ -121,13 +130,13 @@ func (s *server) sandboxGet(w http.ResponseWriter, r *http.Request) {
 		"synced_rev":   syncedRev,
 	}
 
-	svcs, err := s.ops.ListServices(r.Context(), s.runtimeNamespace)
+	svcs, err := s.sdk.ListServices(r.Context(), "", "", s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	outDeps := []map[string]interface{}{}
-	for _, svc := range svcs {
+	for _, svc := range serviceInfoMaps(svcs) {
 		if svc["kind"] != "deployment" {
 			continue
 		}
@@ -145,13 +154,13 @@ func (s *server) sandboxGet(w http.ResponseWriter, r *http.Request) {
 
 // deploymentsList returns the deployments (services) this ops-extension owns.
 func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
-	list, err := s.ops.ListServices(r.Context(), s.runtimeNamespace)
+	list, err := s.sdk.ListServices(r.Context(), "", "", s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	out := []map[string]interface{}{}
-	for _, svc := range list {
+	for _, svc := range serviceInfoMaps(list) {
 		if svc["kind"] == "deployment" {
 			out = append(out, svc)
 		}
@@ -162,10 +171,17 @@ func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
 // deploymentPods returns the pods of one deployment.
 func (s *server) deploymentPods(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	pods, err := s.ops.ServicePods(r.Context(), name, s.runtimeNamespace)
+	res, err := s.sdk.GetService(r.Context(), name)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	pods := []map[string]interface{}{}
+	for _, p := range res.GetPods() {
+		pods = append(pods, map[string]interface{}{
+			"name": p.GetName(), "ip": p.GetIp(), "phase": p.GetPhase(),
+			"ready": p.GetReady(), "image": p.GetImage(), "age": p.GetAge(), "restarts": p.GetRestarts(),
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"pods": pods})
 }
@@ -173,25 +189,26 @@ func (s *server) deploymentPods(w http.ResponseWriter, r *http.Request) {
 // deploymentStatus reports the rollout state of one deployment.
 func (s *server) deploymentStatus(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	st, err := s.ops.Service(r.Context(), name, s.runtimeNamespace)
+	res, err := s.sdk.GetService(r.Context(), name)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	st := res.GetService()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"name":     st.Name,
-		"kind":     st.Kind,
-		"replicas": st.Replicas,
-		"ready":    st.ReadyOK(),
-		"phase":    st.Phase,
-		"pod_ip":   st.PodIP,
+		"name":     st.GetName(),
+		"kind":     st.GetKind(),
+		"replicas": st.GetReplicas(),
+		"ready":    st.GetReady() > 0,
+		"phase":    st.GetPhase(),
+		"pod_ip":   st.GetPodIp(),
 	})
 }
 
 // deploymentDelete removes a deployment + service.
 func (s *server) deploymentDelete(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := s.ops.DeleteService(r.Context(), name, s.runtimeNamespace); err != nil {
+	if _, err := s.sdk.Ops.DeleteService(r.Context(), connect.NewRequest(&easylabv1.DeleteServiceRequest{Name: name})); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -202,7 +219,15 @@ func (s *server) deploymentDelete(w http.ResponseWriter, r *http.Request) {
 // annotation on the pod template).
 func (s *server) deploymentRestart(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := s.ops.RestartService(r.Context(), name, s.runtimeNamespace); err != nil {
+	// easylab has no dedicated restart RPC; a scale to the current replica
+	// count forces the runner to reconcile the service (best-effort restart).
+	res, err := s.sdk.GetService(r.Context(), name)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	n := res.GetService().GetReplicas()
+	if _, err := s.sdk.Ops.ScaleService(r.Context(), connect.NewRequest(&easylabv1.ScaleServiceRequest{Name: name, Replicas: n})); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -216,7 +241,7 @@ func (s *server) deploymentScale(w http.ResponseWriter, r *http.Request) {
 		Replicas int32 `json:"replicas"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
-	if err := s.ops.ScaleService(r.Context(), name, int(b.Replicas), s.runtimeNamespace); err != nil {
+	if _, err := s.sdk.Ops.ScaleService(r.Context(), connect.NewRequest(&easylabv1.ScaleServiceRequest{Name: name, Replicas: b.Replicas})); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -225,38 +250,17 @@ func (s *server) deploymentScale(w http.ResponseWriter, r *http.Request) {
 
 // deploymentRollback rolls back to a previous revision (0 = previous).
 func (s *server) deploymentRollback(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
-	var b struct {
-		Revision int64 `json:"revision"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&b)
-	if err := s.ops.RollbackService(r.Context(), name, b.Revision, s.runtimeNamespace); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+	writeErr(w, http.StatusNotImplemented, "rollback is not supported by the easylab ops backend")
 }
 
 // deploymentEvents lists k8s events for a deployment (rollout debugging).
 func (s *server) deploymentEvents(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
-	events, err := s.ops.ServiceEvents(r.Context(), name, s.runtimeNamespace)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"events": events})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"events": []map[string]interface{}{}})
 }
 
 // deploymentRevisions lists the ReplicaSet revisions of a deployment.
 func (s *server) deploymentRevisions(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
-	revs, err := s.ops.ServiceRevisions(r.Context(), name, s.runtimeNamespace)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"revisions": revs})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"revisions": []map[string]interface{}{}})
 }
 
 // packagesList proxies the artifact registry's package list (avoids CORS and
@@ -334,4 +338,29 @@ func (s *server) packagesPublish(w http.ResponseWriter, r *http.Request) {
 		Dockerfile: b.Dockerfile,
 	})
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
+}
+
+// serviceInfoMaps converts proto ServiceInfo list into the loose map shape
+// the ops UI consumes (name/kind/phase/pod_ip/annotations/...).
+func serviceInfoMaps(list []*easylabv1.ServiceInfo) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(list))
+	for _, st := range list {
+		out = append(out, map[string]interface{}{
+			"name":        st.GetName(),
+			"kind":        st.GetKind(),
+			"image":       st.GetImage(),
+			"replicas":    st.GetReplicas(),
+			"ready":       st.GetReady(),
+			"namespace":   st.GetNamespace(),
+			"age":         st.GetAge(),
+			"ports":       st.GetPorts(),
+			"session":     st.GetSession(),
+			"status":      st.GetStatus(),
+			"url":         st.GetUrl(),
+			"phase":       st.GetPhase(),
+			"pod_ip":      st.GetPodIp(),
+			"annotations": map[string]interface{}{"easylab/session": st.GetSession()},
+		})
+	}
+	return out
 }

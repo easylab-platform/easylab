@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -433,3 +434,191 @@ func (c *connLab) refs(ctx context.Context, org, repo string, kind store.RefKind
 
 var _ = errors.New
 var _ = time.Now
+
+// ---- search / graph / compare / rebase (Connect surface) ----
+
+func (c *connLab) Search(ctx context.Context, req *connect.Request[easylabv1.SearchRequest]) (*connect.Response[easylabv1.SearchResponse], error) {
+	if req.Msg.Q == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("q required"))
+	}
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	ws := revision.NewWorkspace(repo)
+	treeID, err := treeOfRef(ws, repo, req.Msg.Ref)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	paths, err := ws.CollectPaths(treeID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	tree := ws.MustTree(treeID)
+	var matches []string
+	for _, p := range paths {
+		entry, err := ws.FindEntry(tree, p)
+		if err != nil {
+			continue
+		}
+		data, err := ws.ReadBlob(entry.ID)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), req.Msg.Q) {
+			matches = append(matches, p)
+		}
+	}
+	return connect.NewResponse(&easylabv1.SearchResponse{Matches: matches}), nil
+}
+
+func (c *connLab) Graph(ctx context.Context, req *connect.Request[easylabv1.GraphRequest]) (*connect.Response[easylabv1.GraphResponse], error) {
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	ws := revision.NewWorkspace(repo)
+	revs, err := ws.Log()
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	limit := int(req.Msg.Limit)
+	if limit <= 0 {
+		limit = 100
+	}
+	byID := map[string]*store.Revision{}
+	snapOf := map[string]*store.Snapshot{}
+	snapOwner := map[string]string{}
+	for _, re := range revs {
+		snap, err := repo.GetSnapshot(re.Hash)
+		if err != nil {
+			continue
+		}
+		byID[re.ID] = re
+		snapOf[re.ID] = snap
+		snapOwner[snap.RevisionHash.String()] = re.ID
+	}
+	// Topological order: parents before children (chronological).
+	var order []*store.Revision
+	visited := map[string]bool{}
+	var visit func(id string)
+	visit = func(id string) {
+		re, ok := byID[id]
+		if !ok || visited[id] {
+			return
+		}
+		visited[id] = true
+		snap := snapOf[id]
+		for _, p := range snap.Parents {
+			if owner, ok := snapOwner[p.String()]; ok {
+				visit(owner)
+			}
+		}
+		order = append(order, re)
+	}
+	starts := make([]string, 0, len(revs))
+	for _, re := range revs {
+		starts = append(starts, re.ID)
+	}
+	sort.SliceStable(starts, func(i, j int) bool {
+		return byID[starts[i]].Created.After(byID[starts[j]].Created)
+	})
+	for _, id := range starts {
+		visit(id)
+	}
+	// Heads: nodes that are not anyone's parent.
+	heads := map[string]bool{}
+	for _, re := range revs {
+		heads[re.ID] = true
+	}
+	for _, re := range revs {
+		for _, p := range snapOf[re.ID].Parents {
+			if owner, ok := snapOwner[p.String()]; ok {
+				delete(heads, owner)
+			}
+		}
+	}
+	nodes := make([]*easylabv1.GraphNode, 0, len(order))
+	for _, re := range order {
+		snap := snapOf[re.ID]
+		parents := make([]string, 0, len(snap.Parents))
+		for _, p := range snap.Parents {
+			if owner, ok := snapOwner[p.String()]; ok {
+				parents = append(parents, owner)
+			} else {
+				parents = append(parents, p.String())
+			}
+		}
+		nodes = append(nodes, &easylabv1.GraphNode{
+			RevisionId: re.ID,
+			Snapshot:   re.Hash.String(),
+			Message:    snap.Description,
+			Author:     snap.Author.String(),
+			Parents:    parents,
+			IsHead:     heads[re.ID],
+			CreatedMs:  snap.CommitTime.UnixMilli(),
+		})
+	}
+	if len(nodes) > limit {
+		nodes = nodes[:limit]
+	}
+	return connect.NewResponse(&easylabv1.GraphResponse{Nodes: nodes}), nil
+}
+
+func (c *connLab) Compare(ctx context.Context, req *connect.Request[easylabv1.CompareRequest]) (*connect.Response[easylabv1.CompareResponse], error) {
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	ws := revision.NewWorkspace(repo)
+	aTree, err := treeOfRef(ws, repo, req.Msg.From)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	bTree, err := treeOfRef(ws, repo, req.Msg.To)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	diffs, err := ws.DiffContent(aTree, bTree)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	files := make([]*easylabv1.DiffFile, 0, len(diffs))
+	for _, d := range diffs {
+		files = append(files, &easylabv1.DiffFile{
+			Path:      d.Path,
+			Diff:      d.Content,
+			Additions: int32(d.AddedLines),
+			Deletions: int32(d.RemovedLines),
+		})
+	}
+	return connect.NewResponse(&easylabv1.CompareResponse{Files: files}), nil
+}
+
+func (c *connLab) Rebase(ctx context.Context, req *connect.Request[easylabv1.RebaseRequest]) (*connect.Response[easylabv1.RebaseResponse], error) {
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	ws := revision.NewWorkspace(repo)
+	id, err := resolveRevID(ws, repo, req.Msg.Rev)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	var parents []object.ID
+	for _, p := range req.Msg.NewParents {
+		pid, err := object.HexToID(p)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		parents = append(parents, pid)
+	}
+	snap, ch, err := ws.Rebase(id, parents)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	return connect.NewResponse(&easylabv1.RebaseResponse{
+		RevisionId: ch.ID,
+		Snapshot:   snap.RevisionHash.String(),
+	}), nil
+}

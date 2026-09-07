@@ -1,6 +1,8 @@
 package main
 
 import (
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
+	easylabsdk "github.com/easylab-platform/easylab-client-sdk"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -16,33 +18,16 @@ import (
 // easylab REST surface. Descriptions/schemas live in manifest.yaml (the single
 // declarative protocol source); each handler is bound by tool name.
 func (s *server) handlers() map[string]extension.ToolSpec {
-	// contentsPath addresses a file at the session bookmark via the
-	// Gitea-style `?ref=` snapshot query.
-	contentsPath := func(o, r, b, path string) string {
-		return "/api/v1/repo/" + url.PathEscape(o) + "/" + url.PathEscape(r) +
-			"/contents/" + escPath(path) + "?ref=" + url.QueryEscape(b)
-	}
-
 	// readFileRaw fetches a file and returns (raw utf8, sha, size) or error.
 	// easylab responds with `encoding: base64` + base64 `content` (Gitea shape),
 	// never with a plain-text body.
 	readFileRaw := func(ctx context.Context, o, r, b, path string) (string, string, int64, error) {
-		v, err := s.lab.get(ctx, contentsPath(o, r, b, path))
+		data, err := s.sdk.ReadBlob(ctx, o, r, path, b)
 		if err != nil {
 			return "", "", 0, err
 		}
-		rawContent, _ := v["content"].(string)
-		raw, derr := base64.StdEncoding.DecodeString(rawContent)
-		if derr != nil {
-			return "", "", 0, fmt.Errorf("failed to base64-decode file content")
-		}
-		text := string(raw)
-		sha, _ := v["sha"].(string)
-		size := int64(len(text))
-		if sz, ok := v["size"].(float64); ok {
-			size = int64(sz)
-		}
-		return text, sha, size, nil
+		text := string(data)
+		return text, "", int64(len(text)), nil
 	}
 
 	// fileBody builds the atomic-commit action body for a create/update.
@@ -242,25 +227,17 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, err
 				}
 				path := abcprotocol.ArgString(args, "path")
-				endpoint := "/contents" + pathWithSlash(path)
-				if path == "" {
-					endpoint = "/contents"
-				}
-				sep := "/"
-				if endpoint == "/contents" {
-					sep = ""
-				}
-				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+endpoint+sep+"?ref="+url.QueryEscape(b))
+				files, err := s.sdk.ListReposTreeEntries(ctx, o, r, b, path)
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to list directory: %v", "列出目录失败：%v", err)
 				}
-				entries := toEntries(v)
-				dirs, files := 0, 0
+				entries := treeEntries(files)
+				dirs, nfiles := 0, 0
 				for _, e := range entries {
 					if e.isDir {
 						dirs++
 					} else {
-						files++
+						nfiles++
 					}
 				}
 				max := abcprotocol.ArgInt(args, "max", 0)
@@ -271,9 +248,9 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				var sb strings.Builder
 				if path == "" {
-					fmt.Fprintf(&sb, "rev '%s' has %d entries (%d dirs, %d files):\n", b, len(entries), dirs, files)
+					fmt.Fprintf(&sb, "rev '%s' has %d entries (%d dirs, %d files):\n", b, len(entries), dirs, nfiles)
 				} else {
-					fmt.Fprintf(&sb, "rev '%s' path '%s' has %d entries (%d dirs, %d files):\n", b, path, len(entries), dirs, files)
+					fmt.Fprintf(&sb, "rev '%s' path '%s' has %d entries (%d dirs, %d files):\n", b, path, len(entries), dirs, nfiles)
 				}
 				for _, e := range entries {
 					if e.isDir {
@@ -298,15 +275,10 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if pattern == "" {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'pattern' argument", "缺少 'pattern' 参数")
 				}
-				q := url.Values{"pattern": {pattern}, "ref": {b}}
-				if path := abcprotocol.ArgString(args, "path"); path != "" {
-					q.Set("path", path)
-				}
-				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/search?"+q.Encode())
+				matches, err := s.sdk.Search(ctx, o, r, b, pattern)
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "search failed: %v", "搜索失败：%v", err)
 				}
-				matches := strSlice(v, "matches")
 				if len(matches) == 0 {
 					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("no matches for '%s' in rev '%s'.", b, pattern), fmt.Sprintf("在版本 '%s' 中未找到 '%s' 的匹配。", b, pattern)), Data: map[string]interface{}{"matches": []interface{}{}, "count": 0}}, nil
 				}
@@ -378,23 +350,18 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, err
 				}
 				limit := abcprotocol.ArgInt(args, "limit", 0)
-				q := url.Values{}
-				if limit > 0 {
-					q.Set("limit", fmt.Sprintf("%d", limit))
-				}
-				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/graph?"+q.Encode())
+				nodes, err := s.sdk.Graph(ctx, o, r, int32(limit))
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get graph: %v", "获取图失败：%v", err)
 				}
-				arr, _ := v["graph"].([]interface{})
+				arr := graphNodeMaps(nodes)
 				if len(arr) == 0 {
 					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, "no commits in graph.", "图中无提交。"), Data: map[string]interface{}{"graph": []interface{}{}}}, nil
 				}
 				var sb strings.Builder
 				fmt.Fprintf(&sb, "commit graph (%d nodes):\n", len(arr))
 				meta := make([]interface{}, 0, len(arr))
-				for _, e := range arr {
-					m, _ := e.(map[string]interface{})
+				for _, m := range arr {
 					isHead, _ := m["is_head"].(bool)
 					commit := strFrom(m, "commit_id")
 					bmks := bookmarkLabels(m["bookmarks"])
@@ -420,12 +387,11 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "rev_a and rev_b are required", "rev_a 与 rev_b 均为必填")
 				}
 				path := abcprotocol.ArgString(args, "path")
-				q := url.Values{"base": {revA}, "head": {revB}}
-				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/compare?"+q.Encode())
+				files, err := s.sdk.Compare(ctx, o, r, revA, revB)
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get diff: %v", "获取差异失败：%v", err)
 				}
-				diff := strVal(v, "diff")
+				diff := compareDiffText(files)
 				scope := "tree"
 				if path != "" {
 					diff = diffForPath(diff, path)
@@ -447,15 +413,15 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if source == "" {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'source' argument", "缺少 'source' 参数")
 				}
-				body := map[string]interface{}{"source": source, "dest": b}
-				v, err := s.lab.post(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/rebase", body)
+				destSha, derr := s.lab.GetBookmarkHead(ctx, o, r, b)
+				if derr != nil {
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "rebase failed: %v", "变基失败：%v", derr)
+				}
+				changeID, commitID, err := s.lab.Rebase(ctx, o, r, source, []string{destSha})
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "rebase failed: %v", "变基失败：%v", err)
 				}
-				sum, _ := v["rebase"].(map[string]interface{})
-				commitID := strVal(sum, "commit_id")
-				changeID := strVal(sum, "change_id")
-				conflicts := strSlice(sum, "conflicts")
+				conflicts := []string{}
 				if len(conflicts) > 0 {
 					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("rebased '%s' onto '%s' with %d conflict(s): %s", source, b, len(conflicts), strings.Join(conflicts, ", ")), fmt.Sprintf("已将 '%s' 变基到 '%s' 上，共 %d 个冲突：%s", source, b, len(conflicts), strings.Join(conflicts, ", "))), Data: map[string]interface{}{"commit_id": commitID, "change_id": changeID, "conflicts": conflicts}}, nil
 				}
@@ -506,8 +472,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if path == "" {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'path' argument", "缺少 'path' 参数")
 				}
-				q := url.Values{"ref": {rev}}
-				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/blame?path="+url.QueryEscape(path)+"&"+q.Encode())
+				v, err := s.lab.Blame(ctx, o, r, path, rev)
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get blame: %v", "获取 blame 失败：%v", err)
 				}
@@ -544,15 +509,11 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, err
 				}
 				limit := abcprotocol.ArgInt(args, "limit", 50)
-				q := url.Values{"limit": {fmt.Sprintf("%d", limit)}}
-				if b != "" {
-					q.Set("ref", b)
-				}
-				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/revisions?"+q.Encode())
+				revs, err := s.sdk.Revisions(ctx, o, r, b, int32(limit))
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get commit history: %v", "获取提交历史失败：%v", err)
 				}
-				commits := toCommits(v)
+				commits := revisionCommits(revs)
 				var sb strings.Builder
 				if len(commits) == 0 {
 					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, "no commits.", "无提交。"), Data: map[string]interface{}{"commits": []interface{}{}}}, nil
@@ -580,11 +541,11 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if rev == "" {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'rev' argument", "缺少 'rev' 参数")
 				}
-				v, err := s.lab.get(ctx, "/api/v1/repo/"+url.PathEscape(o)+"/"+url.PathEscape(r)+"/revisions/"+url.PathEscape(rev)+"/diff")
+				files, err := s.lab.Diff(ctx, o, r, rev, "")
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to view change: %v", "查看变更失败：%v", err)
 				}
-				patch := renderFileDiffs(v)
+				patch := diffFilesText(files)
 				if strings.TrimSpace(patch) == "" {
 					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("change '%s' has no content diff.", rev), fmt.Sprintf("变更 '%s' 没有内容差异。", rev)), Data: map[string]interface{}{"rev": rev}}, nil
 				}
@@ -1055,4 +1016,68 @@ func toInt64(v interface{}) int64 {
 		return int64(n)
 	}
 	return 0
+}
+
+// ---- proto → tool-shape converters ----
+
+// treeEntries converts SDK FileEntry list into the ls tool's entry shape.
+func treeEntries(files []easylabsdk.FileEntry) []entry {
+	out := make([]entry, 0, len(files))
+	for _, f := range files {
+		out = append(out, entry{path: f.Path, isDir: f.Kind == "dir" || f.Kind == "tree"})
+	}
+	return out
+}
+
+// revisionCommits converts proto revisions into the history tool's commit shape.
+func revisionCommits(revs []*easylabv1.RevisionInfo) []commitInfo {
+	out := make([]commitInfo, 0, len(revs))
+	for _, rv := range revs {
+		out = append(out, commitInfo{
+			changeID: rv.GetRev(),
+			author:   rv.GetAuthor(),
+			message:  rv.GetMessage(),
+		})
+	}
+	return out
+}
+
+// diffFilesText renders proto DiffFile list as the unified patch text.
+func diffFilesText(files []*easylabv1.DiffFile) string {
+	var sb strings.Builder
+	for _, f := range files {
+		sb.WriteString(f.GetDiff())
+	}
+	return sb.String()
+}
+
+// compareDiffText renders Compare DiffFile list (tree scope).
+func compareDiffText(files []*easylabv1.DiffFile) string {
+	var sb strings.Builder
+	for _, f := range files {
+		sb.WriteString(f.GetDiff())
+	}
+	return sb.String()
+}
+
+// graphNodeMaps converts proto graph nodes into the loose map shape the graph
+// tool renders from.
+func graphNodeMaps(nodes []*easylabv1.GraphNode) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(nodes))
+	for _, n := range nodes {
+		parents := make([]interface{}, 0, len(n.GetParents()))
+		for _, p := range n.GetParents() {
+			parents = append(parents, p)
+		}
+		out = append(out, map[string]interface{}{
+			"revision_id": n.GetRevisionId(),
+			"change_id":   n.GetRevisionId(),
+			"commit_id":   n.GetSnapshot(),
+			"message":     n.GetMessage(),
+			"author":      n.GetAuthor(),
+			"parents":     parents,
+			"is_head":     n.GetIsHead(),
+		})
+	}
+	return out
 }

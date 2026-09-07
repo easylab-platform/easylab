@@ -204,7 +204,7 @@ func (c *client) search(ctx context.Context, args map[string]any, _ string, _ st
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%d match(es):\n", len(matches))
 	for _, mt := range matches {
-		fmt.Fprintf(&sb, "  %v\n", pathOf(mt))
+		fmt.Fprintf(&sb, "  %s\n", mt)
 	}
 	return toolResult(sb.String(), map[string]any{"matches": matches}), nil
 }
@@ -317,13 +317,6 @@ func (c *client) history(ctx context.Context, args map[string]any, _ string, _ s
 
 func ofStr(m map[string]any, key string) string {
 	if v, ok := m[key].(string); ok {
-		return v
-	}
-	return ""
-}
-
-func pathOf(m map[string]any) string {
-	if v, ok := m["path"].(string); ok {
 		return v
 	}
 	return ""

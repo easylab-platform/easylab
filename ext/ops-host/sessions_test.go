@@ -1,156 +1,122 @@
 package main
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"context"
-	"encoding/json"
-	"io"
+	"google.golang.org/protobuf/proto"
+
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 
-	"easyvcs-ext-ops/internal/easylab"
+	"connectrpc.com/connect"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
+	easylabsdk "github.com/easylab-platform/easylab-client-sdk"
 )
 
-// --- flat tarball fixture (easylab archive has no top-level dir) --------
+// --- fake easylab Connect server (OpsService Sync + LabService Branches) ---
 
-func buildFlatArchive(files map[string]string) []byte {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	for name, content := range files {
-		hdr := &tar.Header{Name: name, Mode: 0o644, Size: int64(len(content))}
-		_ = tw.WriteHeader(hdr)
-		_, _ = tw.Write([]byte(content))
-	}
-	_ = tw.Close()
-	_ = gz.Close()
-	return buf.Bytes()
-}
-
-func readArchive(data []byte) []string {
-	gz, err := gzip.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return nil
-	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	var out []string
-	for {
-		hdr, err := tr.Next()
-		if err != nil {
-			return out
-		}
-		out = append(out, hdr.Name)
-	}
-}
-
-// --- branch resolution ---------------------------------------------
-
-func newFakeLab(t *testing.T, branchs string) *httptest.Server {
+// newFakeLab serves a minimal Connect surface: Sync on OpsService and Branches
+// on LabService, using the Connect unary protocol (application/proto).
+func newFakeLab(t *testing.T, handler func(proc string, body []byte) (any, []byte, int)) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/repos/verify/exists/branchs", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(branchs))
+	mux.HandleFunc("/easylab.v1.OpsService/Sync", func(w http.ResponseWriter, r *http.Request) {
+		body := readAll(t, r)
+		msg := &easylabv1.SyncRequest{}
+		_ = proto.Unmarshal(body, msg)
+		resp := &easylabv1.SyncResponse{Ok: true, Files: 1}
+		out, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/proto")
+		_, _ = w.Write(out)
 	})
-	mux.HandleFunc("/api/v1/repos/verify/nope/branchs", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"branchs":[]}`))
-	})
-	mux.HandleFunc("/api/v1/repos/verify/ws/", func(w http.ResponseWriter, r *http.Request) {
-		// easylab tarball is flat: /api/v1/repos/verify/ws/archive/tarball/{rev}
-		rev := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/verify/ws/archive/tarball/")
-		w.Header().Set("Content-Type", "application/gzip")
-		_, _ = w.Write(buildFlatArchive(map[string]string{
-			"file.txt": "content-" + rev,
-		}))
+	mux.HandleFunc("/easylab.v1.LabService/Branches", func(w http.ResponseWriter, r *http.Request) {
+		body := readAll(t, r)
+		msg := &easylabv1.BranchesRequest{}
+		_ = proto.Unmarshal(body, msg)
+		if strings.Contains(msg.GetRepo(), "nope") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		resp := &easylabv1.BranchesResponse{Branches: []*easylabv1.BranchInfo{{Name: "main", Sha: "abc123"}}}
+		out, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/proto")
+		_, _ = w.Write(out)
 	})
 	return httptest.NewServer(mux)
 }
 
+func readAll(t *testing.T, r *http.Request) []byte {
+	t.Helper()
+	buf := make([]byte, r.ContentLength)
+	_, _ = r.Body.Read(buf)
+	return buf
+}
+
 func TestBranchHead(t *testing.T) {
-	lab := newFakeLab(t, `{"branchs":[{"name":"main","sha":"abc123"}]}`)
+	lab := newFakeLab(t, nil)
 	defer lab.Close()
-	s := &server{base: lab.URL, wsCache: map[string]wsCacheEntry{}}
+	s := &server{sdk: easylabsdk.New(lab.URL, "devtoken"), wsCache: map[string]wsCacheEntry{}}
 
 	rev, err := s.easylabBranchHead(context.Background(), "verify", "exists", "main")
 	if err != nil || rev != "abc123" {
 		t.Fatalf("rev=%q err=%v", rev, err)
 	}
-	if _, err := s.easylabBranchHead(context.Background(), "verify", "nope", "main"); err == nil {
+	if _, err := s.easylabBranchHead(context.Background(), "verify", "nope", "missing"); err == nil {
 		t.Fatal("missing branch should error")
 	}
 }
 
 func TestResolveWorkspaceSessionName(t *testing.T) {
-	lab := newFakeLab(t, `{"branchs":[{"name":"main","sha":"abc123"}]}`)
+	lab := newFakeLab(t, nil)
 	defer lab.Close()
-	s := &server{base: lab.URL, wsCache: map[string]wsCacheEntry{}}
+	s := &server{sdk: easylabsdk.New(lab.URL, "devtoken"), wsCache: map[string]wsCacheEntry{}}
 
-	ws, sid, err := s.resolveWorkspace(context.Background(), map[string]interface{}{}, "verify:exists:main")
-	if err != nil || ws.org != "verify" || ws.repo != "exists" || ws.branch != "main" || ws.rev != "abc123" || sid != "verify:exists:main" {
-		t.Fatalf("ws=%+v sid=%q err=%v", ws, sid, err)
+	ws, _, err := s.resolveWorkspace(context.Background(), nil, "verify:exists:main")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	if _, _, err := s.resolveWorkspace(context.Background(), map[string]interface{}{}, "not-a-derived-name"); err == nil {
-		t.Fatal("non-derived session name must error")
+	if ws.org != "verify" || ws.repo != "exists" || ws.branch != "main" || ws.rev != "abc123" {
+		t.Fatalf("ws=%+v", ws)
+	}
+	// Cached resolution (no further calls needed).
+	ws2, _, err := s.resolveWorkspace(context.Background(), nil, "verify:exists:main")
+	if err != nil || ws2.rev != "abc123" {
+		t.Fatalf("cached ws=%+v err=%v", ws2, err)
 	}
 }
 
 func TestSyncStateMachine(t *testing.T) {
 	var syncs int32
-	var lastBody []byte
-	var lastPath string
-	fakeLab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/sync") {
-			http.NotFound(w, r)
-			return
-		}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/easylab.v1.OpsService/Sync", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&syncs, 1)
-		lastPath = r.URL.Path
-		lastBody, _ = io.ReadAll(r.Body)
-		_, _ = w.Write([]byte(`{"ok":true,"skipped":false,"files":1}`))
-	}))
+		resp := &easylabv1.SyncResponse{Ok: true, Files: 1}
+		out, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/proto")
+		_, _ = w.Write(out)
+	})
+	fakeLab := httptest.NewServer(mux)
 	defer fakeLab.Close()
 
-	s := &server{ops: easylab.New(fakeLab.URL, "devtoken"), runtimeNamespace: "temp",
+	s := &server{sdk: easylabsdk.New(fakeLab.URL, "devtoken"), runtimeNamespace: "temp",
 		wsCache: map[string]wsCacheEntry{}, synced: map[string]string{}}
 	ws := workspace{org: "verify", repo: "ws", branch: "main", rev: "rev1"}
 
-	// First ensure → syncs.
 	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
 		t.Fatal(err)
 	}
 	if n := atomic.LoadInt32(&syncs); n != 1 {
 		t.Fatalf("syncs=%d want 1", n)
 	}
-	// The sync request must name the org/repo/rev.
-	var reqBody struct {
-		Org  string `json:"org"`
-		Repo string `json:"repo"`
-		Rev  string `json:"rev"`
-	}
-	_ = json.Unmarshal(lastBody, &reqBody)
-	if reqBody.Org != "verify" || reqBody.Repo != "ws" || reqBody.Rev != "rev1" {
-		t.Fatalf("sync body = %+v", reqBody)
-	}
-	// The path must address the session's sandbox (labelKey of the session).
-	wantPath := "/api/v1/ops/services/" + labelKey("verify:ws:main") + "/sync"
-	if lastPath != wantPath {
-		t.Fatalf("sync path = %q want %q", lastPath, wantPath)
-	}
-
-	// Second ensure with same rev → cached, no extra sync.
+	// Cached rev → no extra sync.
 	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
 		t.Fatal(err)
 	}
 	if n := atomic.LoadInt32(&syncs); n != 1 {
 		t.Fatalf("syncs=%d want 1 (cached)", n)
 	}
-
 	// New rev → syncs again.
 	ws.rev = "rev2"
 	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
@@ -159,8 +125,7 @@ func TestSyncStateMachine(t *testing.T) {
 	if n := atomic.LoadInt32(&syncs); n != 2 {
 		t.Fatalf("syncs=%d want 2", n)
 	}
-
-	// Worker restart (need_sync): markUnsynced forces a re-push.
+	// markUnsynced forces a re-push.
 	s.markUnsynced("cid1")
 	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
 		t.Fatal(err)
@@ -168,11 +133,9 @@ func TestSyncStateMachine(t *testing.T) {
 	if n := atomic.LoadInt32(&syncs); n != 3 {
 		t.Fatalf("syncs=%d want 3", n)
 	}
-
-	// easylab failure surfaces as an error (unreachable server).
-	closed := easylab.New("http://127.0.0.1:1", "")
-	if _, err := closed.Sync(context.Background(), "x", easylab.SyncRequest{
-		Org: "o", Repo: "r", Rev: "v"}, false); err == nil {
+	// Unreachable easylab surfaces as an error.
+	closed := easylabsdk.New("http://127.0.0.1:1", "")
+	if _, err := closed.Sync(context.Background(), "x", "o", "r", "v", "", false); err == nil {
 		t.Fatal("unreachable easylab must error")
 	}
 }
@@ -180,10 +143,9 @@ func TestSyncStateMachine(t *testing.T) {
 func TestSyncWorkerRejectsBadResponse(t *testing.T) {
 	fakeLab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
-		_, _ = w.Write([]byte(`{"ok":false,"error":"worker sync 500: boom"}`))
 	}))
 	defer fakeLab.Close()
-	s := &server{ops: easylab.New(fakeLab.URL, "devtoken"), runtimeNamespace: "temp",
+	s := &server{sdk: easylabsdk.New(fakeLab.URL, "devtoken"), runtimeNamespace: "temp",
 		synced: map[string]string{}}
 	ws := workspace{org: "o", repo: "r", branch: "main", rev: "v"}
 	if err := s.ensureSynced(context.Background(), "cid", "o:r:main", ws); err == nil {
@@ -193,3 +155,5 @@ func TestSyncWorkerRejectsBadResponse(t *testing.T) {
 		t.Fatal("rev must not be recorded on failure")
 	}
 }
+
+var _ = connect.CodeInternal

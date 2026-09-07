@@ -349,25 +349,6 @@ func (c *Client) ReadBlobText(ctx context.Context, org, repo, path, ref string) 
 	return string(b), nil
 }
 
-// Search greps a repo at ref for q (REST-only on easylab; SDK shells to the
-// RawSearch helper when the typed service lacks it).
-func (c *Client) Search(ctx context.Context, org, repo, ref, q string) ([]map[string]any, error) {
-	return c.RawSearch(ctx, org, repo, ref, q)
-}
-
-// Compare diffs two revs (REST-only; falls back to Diff on the change).
-func (c *Client) Compare(ctx context.Context, org, repo, from, to string) (string, error) {
-	files, err := c.Diff(ctx, org, repo, to, "")
-	if err != nil {
-		return "", err
-	}
-	var sb strings.Builder
-	for _, f := range files {
-		sb.WriteString(f.GetDiff())
-	}
-	return sb.String(), nil
-}
-
 // RevisionDiff diffs a single rev (REST-only; uses Diff on that change).
 func (c *Client) RevisionDiff(ctx context.Context, org, repo, rev string) (string, error) {
 	files, err := c.Diff(ctx, org, repo, rev, "")
@@ -410,4 +391,81 @@ func (c *Client) FileHistory(ctx context.Context, org, repo, path, ref string) (
 // RawSearch is the REST fallback for the grep tool (no typed RPC yet).
 func (c *Client) RawSearch(ctx context.Context, org, repo, ref, q string) ([]map[string]any, error) {
 	return nil, errDownstream("easylab", fmt.Errorf("search: no typed RPC"))
+}
+
+// ---- search / graph / compare / rebase / sync (v0.3.0 surface) ----
+
+// Search greps a repo at ref for q, returning matching paths.
+func (c *Client) Search(ctx context.Context, org, repo, ref, q string) ([]string, error) {
+	res, err := c.Lab.Search(ctx, connect.NewRequest(&easylabv1.SearchRequest{Org: org, Repo: repo, Ref: ref, Q: q}))
+	if err != nil {
+		return nil, errDownstream("easylab", err)
+	}
+	return res.Msg.GetMatches(), nil
+}
+
+// Graph returns the revision DAG (topological, parents-first).
+func (c *Client) Graph(ctx context.Context, org, repo string, limit int32) ([]*easylabv1.GraphNode, error) {
+	res, err := c.Lab.Graph(ctx, connect.NewRequest(&easylabv1.GraphRequest{Org: org, Repo: repo, Limit: limit}))
+	if err != nil {
+		return nil, errDownstream("easylab", err)
+	}
+	return res.Msg.GetNodes(), nil
+}
+
+// Compare diffs two refs (from/to).
+func (c *Client) Compare(ctx context.Context, org, repo, from, to string) ([]*easylabv1.DiffFile, error) {
+	res, err := c.Lab.Compare(ctx, connect.NewRequest(&easylabv1.CompareRequest{Org: org, Repo: repo, From: from, To: to}))
+	if err != nil {
+		return nil, errDownstream("easylab", err)
+	}
+	return res.Msg.GetFiles(), nil
+}
+
+// Rebase reparents a revision onto new parents (snapshot hashes).
+func (c *Client) Rebase(ctx context.Context, org, repo, rev string, newParents []string) (string, string, error) {
+	res, err := c.Lab.Rebase(ctx, connect.NewRequest(&easylabv1.RebaseRequest{Org: org, Repo: repo, Rev: rev, NewParents: newParents}))
+	if err != nil {
+		return "", "", errDownstream("easylab", err)
+	}
+	return res.Msg.GetRevisionId(), res.Msg.GetSnapshot(), nil
+}
+
+// Sync pushes a repo snapshot into a service container's dest (default
+// /workspace). Returns the file count.
+func (c *Client) Sync(ctx context.Context, name, org, repo, rev, dest string, force bool) (int32, error) {
+	res, err := c.Ops.Sync(ctx, connect.NewRequest(&easylabv1.SyncRequest{
+		Name: name, Org: org, Repo: repo, Rev: rev, Dest: dest, Force: force,
+	}))
+	if err != nil {
+		return 0, errDownstream("easylab", err)
+	}
+	return res.Msg.GetFiles(), nil
+}
+
+// LaunchServiceSpec is the full service launch request (mirrors the proto).
+type LaunchServiceSpec struct {
+	Name, Image, Kind, Command                string
+	Ports                                     []*easylabv1.PortSpec
+	Env                                       map[string]string
+	Replicas                                  int32
+	Group, Network, Namespace, CPUs           string
+	MemoryBytes                               uint64
+	Annotations                               map[string]string
+	Session, Org, Repo                        string
+}
+
+// LaunchServiceFull launches a service with the complete spec.
+func (c *Client) LaunchServiceFull(ctx context.Context, spec LaunchServiceSpec) (*easylabv1.LaunchServiceResponse, error) {
+	res, err := c.Ops.LaunchService(ctx, connect.NewRequest(&easylabv1.LaunchServiceRequest{
+		Name: spec.Name, Image: spec.Image, Kind: spec.Kind, Command: spec.Command,
+		Ports: spec.Ports, Env: spec.Env, Replicas: spec.Replicas,
+		Group: spec.Group, Network: spec.Network, Namespace: spec.Namespace,
+		Cpus: spec.CPUs, MemoryBytes: spec.MemoryBytes, Annotations: spec.Annotations,
+		Session: spec.Session, Org: spec.Org, Repo: spec.Repo,
+	}))
+	if err != nil {
+		return nil, errDownstream("easylab", err)
+	}
+	return res.Msg, nil
 }

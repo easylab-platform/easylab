@@ -72,6 +72,19 @@ func (c *connAgent) Prompt(ctx context.Context, req *connect.Request[agentv1.Pro
 	}
 	return stream.Err()
 }
+func (c *connAgent) WatchSession(ctx context.Context, req *connect.Request[agentv1.WatchSessionRequest], srv *connect.ServerStream[agentv1.WatchSessionResponse]) error {
+	stream, err := c.client.WatchSession(ctx, req)
+	if err != nil {
+		return err
+	}
+	for stream.Receive() {
+		if err := srv.Send(stream.Msg()); err != nil {
+			return err
+		}
+	}
+	return stream.Err()
+}
+
 func (c *connAgent) Fork(ctx context.Context, req *connect.Request[agentv1.ForkRequest]) (*connect.Response[agentv1.ForkResponse], error) {
 	return c.client.Fork(ctx, req)
 }
@@ -165,6 +178,6 @@ func (c *connAgent) ListWorksheets(ctx context.Context, req *connect.Request[age
 func (c *connAgent) DecideWorksheet(ctx context.Context, req *connect.Request[agentv1.DecideWorksheetRequest]) (*connect.Response[agentv1.DecideWorksheetResponse], error) {
 	return c.client.DecideWorksheet(ctx, req)
 }
-func (c *connAgent) GetZergxConfig(ctx context.Context, req *connect.Request[agentv1.GetZergxConfigRequest]) (*connect.Response[agentv1.GetZergxConfigResponse], error) {
-	return c.client.GetZergxConfig(ctx, req)
+func (c *connAgent) GetAgentConfig(ctx context.Context, req *connect.Request[agentv1.GetAgentConfigRequest]) (*connect.Response[agentv1.GetAgentConfigResponse], error) {
+	return c.client.GetAgentConfig(ctx, req)
 }

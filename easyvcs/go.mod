@@ -17,8 +17,8 @@ require (
 
 require (
 	connectrpc.com/connect v1.20.0
-	github.com/easylab-platform/easylab-proto v0.1.0
-	github.com/abcp-sdk/agent-proto v0.1.0
+	github.com/abcp-sdk/agent-proto v0.3.0
+	github.com/easylab-platform/easylab-proto v0.4.0
 )
 
 require (
@@ -28,5 +28,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
-
-

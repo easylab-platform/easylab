@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -10,7 +12,10 @@ import (
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 
 	"connectrpc.com/connect"
+	"easyvcs/internal/object"
 	"easyvcs/internal/ops"
+	"easyvcs/internal/revision"
+	"easyvcs/internal/store"
 )
 
 // connOps implements easylabv1connect.OpsServiceHandler over the EasyLab ops
@@ -62,16 +67,47 @@ func (c *connOps) LaunchService(ctx context.Context, req *connect.Request[easyla
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("services backend unavailable"))
 	}
 	ports := map[int]int{}
-	if len(req.Msg.Ports) > 0 {
-		for _, p := range req.Msg.Ports {
-			ports[int(p)] = 0
+	for _, p := range req.Msg.Ports {
+		if p != nil {
+			ports[int(p.Container)] = int(p.Service)
 		}
 	}
+	env := make([]string, 0, len(req.Msg.Env))
+	for k, v := range req.Msg.Env {
+		env = append(env, k+"="+v)
+	}
+	replicas := int(req.Msg.Replicas)
+	if replicas == 0 {
+		replicas = 1
+	}
+	annotations := req.Msg.Annotations
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	if req.Msg.Session != "" {
+		annotations["easylab/session"] = req.Msg.Session
+	}
+	if req.Msg.Org != "" {
+		annotations["easylab/org"] = req.Msg.Org
+	}
+	if req.Msg.Repo != "" {
+		annotations["easylab/repo"] = req.Msg.Repo
+	}
+	if req.Msg.Kind != "" {
+		annotations["easylab/kind"] = req.Msg.Kind
+	}
 	svc := ops.ServiceRequest{
-		Name:     req.Msg.Name,
-		Image:    req.Msg.Image,
-				Replicas: 1,
-		Env:      []string{},
+		Name:        req.Msg.Name,
+		Image:       req.Msg.Image,
+		Command:     req.Msg.Command,
+		Ports:       ports,
+		Env:         env,
+		Replicas:    replicas,
+		Group:       req.Msg.Group,
+		Network:     req.Msg.Network,
+		CPUs:        req.Msg.Cpus,
+		MemoryBytes: req.Msg.MemoryBytes,
+		Labels:      annotations,
 	}
 	st, err := c.s.ops.services.Launch(ctx, svc, nil)
 	if err != nil {
@@ -228,6 +264,8 @@ func (c *connOps) TaskLog(ctx context.Context, req *connect.Request[easylabv1.Ta
 func serviceInfo(s ops.ServiceStatus) *easylabv1.ServiceInfo {
 	return &easylabv1.ServiceInfo{
 		Name:      s.Name,
+		PodIp:     s.PodIP,
+		Phase:     s.Phase,
 		Image:     s.WorkerURL,
 		Replicas:  int32(s.Replicas),
 		Ready:     int32(s.Ready),
@@ -236,4 +274,78 @@ func serviceInfo(s ops.ServiceStatus) *easylabv1.ServiceInfo {
 		Url:       s.ServiceURL,
 		Kind:      s.Kind,
 	}
+}
+
+// ---- Sync: repo snapshot into a service container ----
+
+func (c *connOps) Sync(ctx context.Context, req *connect.Request[easylabv1.SyncRequest]) (*connect.Response[easylabv1.SyncResponse], error) {
+	pr := c.s.sandboxRunner()
+	if pr == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("sandbox backend unavailable"))
+	}
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	ws := revision.NewWorkspace(repo)
+	treeID, err := treeOfRef(ws, repo, req.Msg.Rev)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	tar, files, err := buildTreeTar(ws, treeID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if err := pr.SyncTar(ctx, req.Msg.Name, req.Msg.Dest, tar); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&easylabv1.SyncResponse{Ok: true, Files: int32(files)}), nil
+}
+
+// buildTreeTar packs the snapshot tree at treeID into an uncompressed tar,
+// returning the archive and the file count.
+func buildTreeTar(ws *revision.Workspace, treeID object.ID) ([]byte, int, error) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	files := 0
+	var walk func(prefix string, id object.ID) error
+	walk = func(prefix string, id object.ID) error {
+		tree, err := ws.ReadTree(id)
+		if err != nil {
+			return err
+		}
+		for _, e := range tree.SortedEntries() {
+			full := e.Name
+			if prefix != "" {
+				full = prefix + "/" + e.Name
+			}
+			switch e.Kind {
+			case object.KindTree:
+				if err := walk(full, e.ID); err != nil {
+					return err
+				}
+			case object.KindBlob:
+				data, err := ws.ReadBlob(e.ID)
+				if err != nil {
+					return err
+				}
+				hdr := &tar.Header{Name: full, Mode: 0o644, Size: int64(len(data))}
+				if err := tw.WriteHeader(hdr); err != nil {
+					return err
+				}
+				if _, err := tw.Write(data); err != nil {
+					return err
+				}
+				files++
+			}
+		}
+		return nil
+	}
+	if err := walk("", treeID); err != nil {
+		return nil, 0, err
+	}
+	if err := tw.Close(); err != nil {
+		return nil, 0, err
+	}
+	return buf.Bytes(), files, nil
 }

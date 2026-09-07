@@ -18,15 +18,18 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"easyvcs-ext-ops/internal/easylab"
 	"easyvcs-ext-ops/internal/worker"
+
+	agentsdk "github.com/abcp-sdk/agent-sdk"
+	easylabsdk "github.com/easylab-platform/easylab-client-sdk"
 )
 
 //go:embed manifest.yaml
 var manifestYaml []byte
 
 type server struct {
-	ops               *easylab.Client // easylab /ops client (owns all k8s access)
+	sdk               *easylabsdk.Client // typed easylab client (lab+ops+registry, owns all k8s access)
+	agent             *agentsdk.Client    // typed abc agent client (files)
 	workerImage       string          // sandbox worker image (easylab runs it)
 	runtimeNamespace  string          // namespace where easylab creates sandboxes/deployments
 	ext               *extension.Extension
@@ -49,41 +52,41 @@ type server struct {
 }
 
 func main() {
-	ns := envOr("ZERGX_K8S_NAMESPACE", "zergx")
-	img := envOr("ZERGX_WORKER_IMAGE", "zergx-service/zergx-worker:v0.0.1")
-	natsURL := envOr("NATS_URL", "nats://nats.zergx.svc.cluster.local:4222")
-	port := envOr("ZERGX_PORT", "8080")
+	img := envOr("WORKER_IMAGE", "easylab-worker:v0.0.1")
+	natsURL := envOr("NATS_URL", "nats://nats.easylab.svc.cluster.local:4222")
+	port := envOr("PORT", "8080")
 	// easylab replaces the old repo-manager (archive + contents + clone).
 	// The cluster service is named repo (easylab is the binary).
-	base := envOr("EASYLAB_URL", envOr("ZERGX_REPO_MANAGER_URL", "http://easylab:80"))
+	base := envOr("EASYLAB_URL", envOr("EASYLAB_URL", "http://easylab:80"))
 	// Artifact registry replaces zot (OCI store) + the legacy registry (metadata):
 	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
 	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base
 	// used for API calls and in-container CLI uploads.
-	artifact := trimTrailingSlash(envOr("ZERGX_ARTIFACT_URL", "http://easylab"))
+	artifact := trimTrailingSlash(envOr("ARTIFACT_URL", "http://easylab"))
 	// Image references (buildkit FROM/push) must go through the TLS ingress
 	// host configured as insecure in buildkitd's registry config — the svc
 	// host is plain HTTP which buildkit cannot pull/push to.
-	artifactImageHost := envOr("ZERGX_ARTIFACT_IMAGE_HOST", "easylab")
-	artifactToken := envOr("ZERGX_ARTIFACT_TOKEN", "")
+	artifactImageHost := envOr("ARTIFACT_IMAGE_HOST", "easylab")
+	artifactToken := envOr("ARTIFACT_TOKEN", "")
 	easylabToken := envOr("EASYLAB_TOKEN", "devtoken")
 
-	runtimeNS := envOr("ZERGX_RUNTIME_NAMESPACE", ns)
+	runtimeNS := envOr("NAMESPACE", "easylab")
 
 	s := &server{
-		ops:               easylab.New(base, easylabToken),
+		sdk:               easylabsdk.New(base, easylabToken),
 		artifact:          artifact,
 		artifactImageHost: artifactImageHost,
 		artifactToken:     artifactToken,
 		base:              base,
 		easylabToken:      easylabToken,
+		agent:             agentsdk.New(envOr("AGENT_URL", envOr("AGENT_API_BASE", "http://agent.easylab.svc.cluster.local:80")), envOr("AGENT_API_KEY", "")),
 		workerImage:       img,
 		runtimeNamespace:  runtimeNS,
 		wsCache:           map[string]wsCacheEntry{},
 		synced:            map[string]string{},
 	}
 
-	// Verification instances must set ZERGX_DISABLE_NATS=1. Tool-call and
+	// Verification instances must set DISABLE_NATS=1. Tool-call and
 	// variable subscriptions use queue groups keyed by the extension id, so a
 	// second replica with the same id would STEAL live tool calls away from
 	// the serving instance (and double-answer abc.discover, which has no
@@ -91,7 +94,7 @@ func main() {
 	// bus, such instances expose them over HTTP at POST /api/v1/tools/{name}
 	// with a JSON args body.
 	toolBridge := false
-	if os.Getenv("ZERGX_DISABLE_NATS") != "1" {
+	if os.Getenv("DISABLE_NATS") != "1" {
 		nbus, err := natsbus.Connect(natsURL)
 		if err != nil {
 			slog.Error("nats connect failed", "svc", "ops-extension", "err", err)
@@ -195,7 +198,7 @@ func (s *server) router(toolBridge bool) http.Handler {
 }
 
 // callTool bridges a NATS tool over HTTP for verification instances
-// (ZERGX_DISABLE_NATS=1). Body: JSON object of tool args.
+// (DISABLE_NATS=1). Body: JSON object of tool args.
 func (s *server) callTool(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	spec, ok := s.handlers()[name]

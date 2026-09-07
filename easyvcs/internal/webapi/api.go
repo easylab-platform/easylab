@@ -27,7 +27,7 @@ var (
 type API struct {
 	CS *store.CentralStore
 	// AgentURL, when set, forwards /sessions|providers|models|presets|config
-	// to the embedded agent session backend (zergx-agent SEA). When empty the
+	// to the embedded agent session backend (easylab-agent SEA). When empty the
 	// UI omits chat/session settings.
 	AgentURL string
 	// Up points back at easylab's own /api/v1 + /v2 so the aggregate surface
@@ -49,7 +49,7 @@ func (a *API) upstreamClient() *upstream {
 // separately via MountSPA.
 func (a *API) MountAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/status", a.status)
-	mux.HandleFunc("/api/v1/zergx-config", a.status)
+	mux.HandleFunc("/api/v1/agent-config", a.status)
 	mux.HandleFunc("/api/v1/repos", a.repos)
 	mux.HandleFunc("/api/v1/repos/ensure", a.ensureRepo)
 	mux.HandleFunc("/api/v1/repos/ensure-org", a.ensureOrg)
