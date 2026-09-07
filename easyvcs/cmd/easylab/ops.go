@@ -19,15 +19,14 @@ import (
 type opsState struct {
 	builders   *ops.TaskRegistry
 	namespaces *ops.NamespaceRegistry
-	runtime    ops.Runtime
 	builder    ops.Builder
 	services   ops.ServiceRunner
 }
 
-// registryHost returns the internal registry host buildah/docker should talk to
-// when no explicit registry is supplied. Defaults to the loopback /v2 (the same
-// pod serves it); override with EASYVCS_REGISTRY (e.g. a service DNS name when
-// EasyLab is a multi-pod deployment).
+// registryHost returns the internal registry host the podman sidecar should
+// build/push against. Defaults to the loopback /v2 (the same pod serves it);
+// override with EASYVCS_REGISTRY (e.g. a service DNS name when EasyLab is a
+// multi-pod deployment).
 func registryHost() string {
 	if v := os.Getenv("EASYVCS_REGISTRY"); v != "" {
 		return v
@@ -35,18 +34,13 @@ func registryHost() string {
 	return "127.0.0.1:8080"
 }
 
-// newOpsState wires the /ops substrate from environment. The build backend is
-// embedded buildah (daemonless, rootless). The ONLY service backend is the
-// internal podman runner (fully self-contained): each service runs as a podman
-// container inside EasyLab — per-service/group network (embedded DNS), real
-// cgroup resource limits, port publishing. Requires the pod to mount
-// /sys/fs/cgroup read-write (privileged + a startup remount).
+// newOpsState wires the /ops substrate from environment. Image builds and
+// container services run in the podman privileged sidecar, driven over the
+// Docker-compatible API via docker/client (static, no embedded tooling).
 func newOpsState() (*opsState, error) {
-	workRoot := registryRoot() + "/ops"
 	return &opsState{
 		builders:   ops.NewTaskRegistry(),
 		namespaces: ops.FromEnv(),
-		runtime:    ops.NewLocalRuntime(workRoot),
 		builder:    ops.NewBuilderFromEnv(),
 		services:   newServiceRunner(),
 	}, nil
@@ -57,14 +51,6 @@ func newServiceRunner() ops.ServiceRunner {
 	workRoot := registryRoot() + "/podman"
 	_ = os.MkdirAll(workRoot, 0o755)
 	return ops.NewPodmanServiceRunner(registryHost(), workRoot)
-}
-
-// opsArgs is a small typed body for runs/builds.
-type opsRunReq struct {
-	Command string   `json:"command"`
-	WorkDir string   `json:"workdir,omitempty"`
-	Env     []string `json:"env,omitempty"`
-	Timeout int      `json:"timeout_secs,omitempty"`
 }
 
 type opsBuildReq struct {
@@ -85,7 +71,6 @@ type opsBuildReq struct {
 func (s *server) opsRouter() *http.ServeMux {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /api/v1/ops/namespaces", s.opsNamespaces)
-	m.HandleFunc("POST /api/v1/ops/runs", s.opsRun)
 	m.HandleFunc("GET /api/v1/ops/tasks", s.opsTasksList)
 	m.HandleFunc("GET /api/v1/ops/tasks/{id}", s.opsTaskGet)
 	m.HandleFunc("GET /api/v1/ops/tasks/{id}/stream", s.opsTaskStream)
@@ -98,47 +83,6 @@ func (s *server) opsNamespaces(w http.ResponseWriter, r *http.Request) {
 		"namespaces": s.ops.namespaces.List(),
 		"default":    s.ops.namespaces.Default(),
 	})
-}
-
-func (s *server) opsRun(w http.ResponseWriter, r *http.Request) {
-	s.labRequireWrite(func(w http.ResponseWriter, r *http.Request) {
-		var req opsRunReq
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			labErr(w, http.StatusBadRequest, err)
-			return
-		}
-		if req.Command == "" {
-			labErr(w, http.StatusBadRequest, fmt.Errorf("command required"))
-			return
-		}
-		ns, ok := s.ops.namespaces.Resolve("")
-		if !ok {
-			labErr(w, http.StatusForbidden, fmt.Errorf("no approved namespace"))
-			return
-		}
-		_ = ns
-		id := s.ops.builders.NewID("run")
-		task := s.ops.builders.Create(id, ops.KindRun)
-
-		spec := ops.RunSpec{
-			Command: req.Command,
-			WorkDir: req.WorkDir,
-			Env:     req.Env,
-			Timeout: time.Duration(req.Timeout) * time.Second,
-		}
-		go func() {
-			res, err := s.ops.runtime.Run(context.Background(), spec, func(line string) {
-				task.Log(line)
-			})
-			if err != nil {
-				task.Finish(false, "", err.Error())
-				return
-			}
-			task.Finish(res.ExitCode == 0, fmt.Sprintf("exit=%d", res.ExitCode), "")
-		}()
-
-		writeJSON(w, http.StatusOK, map[string]any{"run_id": id})
-	})(w, r)
 }
 
 func (s *server) opsTasksList(w http.ResponseWriter, r *http.Request) {
