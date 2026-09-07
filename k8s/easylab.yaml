@@ -29,8 +29,15 @@ spec:
           env:
             - name: EASYVCS_HOME
               value: /data
+            # ---- 对外/给客户端宣告的地址（唯一用域名）：easylab 把 self_base /
+            # OCI /token realm / 各协议 registry 的绝对 URL 写进响应，给 podman
+            # 新拉起并对外暴露的服务 + 外部客户端回连。不可用 loopback。
             - name: EASYVCS_SELF_BASE
               value: http://easylab.temp.svc.cluster.local:8080
+            # ---- 同 Pod 内部一律 loopback：easylab 自己用 docker/client 把
+            # 构建产物 push 到本 Pod 共享 netns 里的 /v2（经 sidecar socket）。
+            # 被拉起的 podman 服务仅被 easylab 单向驱动，无需回连 easylab，
+            # 因此不用给它配域名。
             - name: EASYVCS_REGISTRY
               value: 127.0.0.1:8080
             - name: EASYVCS_SERVICES_BACKEND
