@@ -1,5 +1,6 @@
 connectrpc.com/connect v1.20.0 h1:6TNDAB+WeNd2uolWNlYczB5E0KNNaVMNUEx8JEUsPmQ=
 github.com/abcp-sdk/abc-protocol-go v1.0.9 h1:Je8K78N9nWDkAly/7wi8fk/dQYmQnFtWCOH+SXV4b6Q=
+github.com/easylab-platform/easylab-client-sdk v0.1.0 h1:z2Pc1ytRyMJsuALpUW5xPnKo31GnolHVEn/VesEjz98=
 github.com/easylab-platform/easylab-proto v0.1.0 h1:iX1MmqnxTVmFiD0c5sK7oWniV0dMVNKqLmskZif6nlk=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/klauspost/compress v1.19.1 h1:VsB4HPswih7mmZ8WleSFQ75c/Ui1M4trX5oAsJnhSlk=

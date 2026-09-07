@@ -29,5 +29,4 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 )
 
-replace github.com/easylab-platform/easylab-proto => ../../proto/gen/go
 

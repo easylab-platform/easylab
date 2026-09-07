@@ -1,10 +1,6 @@
 go 1.26.5
 
 use (
-	../proto/gen/agent-go
-	../proto/gen/go
-	./deps/abc-agent-sdk
-	./deps/easylab-client-sdk
 	./easyvcs
 	./ext/code
 	./ext/ops-host
