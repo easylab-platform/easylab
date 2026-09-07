@@ -50,7 +50,11 @@ func newOpsState() (*opsState, error) {
 func newServiceRunner() ops.ServiceRunner {
 	workRoot := registryRoot() + "/podman"
 	_ = os.MkdirAll(workRoot, 0o755)
-	return ops.NewPodmanServiceRunner(registryHost(), workRoot)
+	return ops.NewPodmanServiceRunnerWithProxy(
+		registryHost(), workRoot,
+		os.Getenv("EASYVCS_SELF_BASE"),
+		os.Getenv("EASYLAB_UPSTREAM_PROXY"),
+	)
 }
 
 type opsBuildReq struct {

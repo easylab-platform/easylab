@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
-	imagepkg "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/filters"
+	imagepkg "github.com/docker/docker/api/types/image"
 	networkapi "github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/registry"
-	"github.com/docker/go-connections/nat"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/docker/go-connections/nat"
 )
 
 // PodmanServiceRunner drives service containers through the podman privileged
@@ -36,8 +36,17 @@ import (
 // the same OCI registry graph the sidecar owns (EASYVCS_REGISTRY).
 type PodmanServiceRunner struct {
 	registryHost string
-	workRoot     string
-	cli          *client.Client
+	// selfBase is the externally-reachable easylab base URL (from
+	// EASYVCS_SELF_BASE). Service containers live on their own bridge network,
+	// so they must reach easylab by this domain (not loopback) — used to build
+	// the per-tool registry/proxy env injected into launched containers.
+	selfBase string
+	// upstreamProxy is the HTTP(S) proxy service containers and easylab use for
+	// general outbound traffic (from EASYLAB_UPSTREAM_PROXY). Empty disables
+	// injection.
+	upstreamProxy string
+	workRoot      string
+	cli           *client.Client
 }
 
 // dockerHost returns the podman API socket (or override).
@@ -53,6 +62,14 @@ func dockerHost() string {
 
 // NewPodmanServiceRunner builds a docker/client-backed podman runner.
 func NewPodmanServiceRunner(registryHost, workRoot string) *PodmanServiceRunner {
+	return NewPodmanServiceRunnerWithProxy(registryHost, workRoot,
+		os.Getenv("EASYVCS_SELF_BASE"), os.Getenv("EASYLAB_UPSTREAM_PROXY"))
+}
+
+// NewPodmanServiceRunnerWithProxy builds a runner with explicit self-base and
+// upstream proxy addresses (used to inject registry/proxy env into launched
+// service containers).
+func NewPodmanServiceRunnerWithProxy(registryHost, workRoot, selfBase, upstreamProxy string) *PodmanServiceRunner {
 	cli, err := client.NewClientWithOpts(
 		client.WithHost(dockerHost()),
 		client.WithAPIVersionNegotiation(),
@@ -61,9 +78,11 @@ func NewPodmanServiceRunner(registryHost, workRoot string) *PodmanServiceRunner 
 		panic(fmt.Sprintf("podman API client: %v", err))
 	}
 	return &PodmanServiceRunner{
-		registryHost: registryHost,
-		workRoot:     workRoot,
-		cli:          cli,
+		registryHost:  registryHost,
+		selfBase:      strings.TrimSuffix(selfBase, "/"),
+		upstreamProxy: upstreamProxy,
+		workRoot:      workRoot,
+		cli:           cli,
 	}
 }
 
@@ -178,6 +197,65 @@ func (r *PodmanServiceRunner) containerIP(ctx context.Context, name string) (str
 	return insp.NetworkSettings.IPAddress, nil
 }
 
+// injectedEnv returns the env for a launched service container: the caller's
+// explicit req.Env takes precedence, and any missing registry/proxy knobs are
+// filled in so package managers pull through easylab and general outbound
+// traffic goes through the configured upstream proxy — without the container
+// needing any configuration.
+//
+// Explicit entries never get overwritten, so a caller can override any knob
+// per launch (ServiceRequest.Env), giving per-container customization.
+func (r *PodmanServiceRunner) injectedEnv(explicit []string) []string {
+	exists := map[string]bool{}
+	for _, e := range explicit {
+		if i := strings.Index(e, "="); i > 0 {
+			exists[e[:i]] = true
+		}
+	}
+	add := func(k, v string) []string {
+		if v != "" && !exists[k] {
+			exists[k] = true
+			return append(explicit, k+"="+v)
+		}
+		return explicit
+	}
+
+	base := r.selfBase
+	if base == "" {
+		base = "http://127.0.0.1:8080"
+	}
+	base = strings.TrimSuffix(base, "/")
+	noProxy := "127.0.0.1,localhost,.svc.cluster.local,.svc"
+	if h := hostOf(base); h != "" {
+		noProxy += "," + h
+	}
+	// General outbound: npm/pip/go/cargo are package registries handled below;
+	// everything else (github, generic HTTP) goes through the upstream proxy.
+	if r.upstreamProxy != "" {
+		explicit = add("HTTP_PROXY", r.upstreamProxy)
+		explicit = add("HTTPS_PROXY", r.upstreamProxy)
+		explicit = add("http_proxy", r.upstreamProxy)
+		explicit = add("https_proxy", r.upstreamProxy)
+		explicit = add("NO_PROXY", noProxy)
+		explicit = add("no_proxy", noProxy)
+	} else {
+		explicit = add("NO_PROXY", noProxy)
+		explicit = add("no_proxy", noProxy)
+	}
+
+	// Package registries: pull-through easylab so package downloads reuse the
+	// internal cache instead of reaching the public upstream. The tool-specific
+	// env var is honored by the client so no per-container config is needed.
+	explicit = add("NPM_CONFIG_REGISTRY", base+"/pkgs/npm")
+	explicit = add("PIP_INDEX_URL", base+"/pkgs/pypi/simple")
+	explicit = add("GOPROXY", base+"/pkgs/go")
+	explicit = add("GOSUMDB", "off")
+	// cargo index override (index is a bare crates-io mirror); fall back to the
+	// GitHub-index form which crates is also happy to talk to.
+	explicit = add("CARGO_REGISTRIES_CRATES_IO_INDEX", base+"/pkgs/cargo")
+	return explicit
+}
+
 // Launch creates the network, pulls the image, and starts the requested number
 // of containers with cgroup resource limits.
 func (r *PodmanServiceRunner) Launch(ctx context.Context, req ServiceRequest, log func(string)) (ServiceStatus, error) {
@@ -228,11 +306,11 @@ func (r *PodmanServiceRunner) Launch(ctx context.Context, req ServiceRequest, lo
 			}
 		}
 		hostCfg := &container.HostConfig{
-			RestartPolicy:     container.RestartPolicy{Name: container.RestartPolicyMode(restart)},
-			NetworkMode:       container.NetworkMode(net),
-			PortBindings:      pbinds,
-			Binds:             binds,
-			Resources:         container.Resources{},
+			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(restart)},
+			NetworkMode:   container.NetworkMode(net),
+			PortBindings:  pbinds,
+			Binds:         binds,
+			Resources:     container.Resources{},
 		}
 		if req.CPUs != "" {
 			hostCfg.Resources.NanoCPUs = nanoCPUs(req.CPUs)
@@ -240,7 +318,7 @@ func (r *PodmanServiceRunner) Launch(ctx context.Context, req ServiceRequest, lo
 		if req.MemoryBytes > 0 {
 			hostCfg.Resources.Memory = int64(req.MemoryBytes)
 		}
-		env, cmd := req.Env, []string{}
+		env, cmd := r.injectedEnv(req.Env), []string{}
 		if req.Command != "" {
 			cmd = []string{"sh", "-c", req.Command}
 		}
@@ -391,7 +469,6 @@ func (r *PodmanServiceRunner) SyncTar(ctx context.Context, name, dest string, ta
 var _ ServiceRunner = (*PodmanServiceRunner)(nil)
 
 // ---- helpers ----
-
 
 func nanoCPUs(cpus string) int64 {
 	// Accept "1", "0.5", "250m"; convert to nano-CPUs.
