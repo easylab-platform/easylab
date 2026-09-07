@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: easylab
+  namespace: temp
+  labels:
+    app: easylab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: easylab
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: easylab
+    spec:
+      hostUsers: true
+      serviceAccountName: easylab
+      securityContext: {}
+      containers:
+        # ---- easylab core (Go) — drives podman sidecar via Docker-compatible API
+        - name: easylab
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260907141228
+          imagePullPolicy: IfNotPresent
+          args: ["-addr", "0.0.0.0:8080"]
+          env:
+            - name: EASYVCS_HOME
+              value: /data
+            - name: EASYVCS_SELF_BASE
+              value: http://easylab.temp.svc.cluster.local:8080
+            - name: EASYVCS_REGISTRY
+              value: 127.0.0.1:8080
+            - name: EASYVCS_SERVICES_BACKEND
+              value: podman
+            - name: EASYVCS_BUILD_BACKEND
+              value: podman
+            - name: EASYLAB_PODMAN_URI
+              value: unix:///run/podman/podman.sock
+            - name: DOCKER_HOST
+              value: unix:///run/podman/podman.sock
+            - name: EASYLAB_AGENT_URL
+              value: http://127.0.0.1:8000
+            - name: EASYLAB_OPSEXT_URL
+              value: http://127.0.0.1:18092
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            limits: { cpu: "2", memory: 2Gi }
+            requests: { cpu: 500m, memory: 512Mi }
+          volumeMounts:
+            - { mountPath: /data, name: data }
+            - { mountPath: /run/podman, name: podman-sock }
+
+        # ---- podman privileged sidecar (official) — runs the Docker-compatible service
+        - name: podman
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/podman:official
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "-c", "podman system service --time=0 unix:///run/podman/podman.sock"]
+          env:
+            - name: EASYLAB_EXT_TAG
+              value: "20260907044106"
+            - name: FORGEJO_USER
+              value: root
+            - name: FORGEJO_PASS
+              value: devpassword
+          securityContext:
+            allowPrivilegeEscalation: true
+            privileged: true
+            runAsUser: 0
+            seccompProfile: { type: Unconfined }
+            capabilities:
+              add: [SYS_ADMIN, NET_ADMIN, NET_RAW, SYS_PTRACE]
+          resources:
+            limits: { cpu: "2", memory: 2Gi }
+            requests: { cpu: 500m, memory: 512Mi }
+          volumeMounts:
+            - { mountPath: /data/oci, name: data, subPath: oci }
+            - { mountPath: /data/logs, name: data, subPath: logs }
+            - { mountPath: /sys/fs/cgroup, name: cgroup }
+            - { mountPath: /run/podman, name: podman-sock }
+
+        # ---- nats
+        - name: nats
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/nats:latest
+          imagePullPolicy: IfNotPresent
+          args: ["-js", "-p", "4222", "-m", "8222", "-sd", "/data/nats"]
+          ports:
+            - containerPort: 4222
+              protocol: TCP
+          resources:
+            limits: { cpu: 500m, memory: 512Mi }
+            requests: { cpu: 100m, memory: 64Mi }
+          volumeMounts:
+            - { mountPath: /data/nats, name: data, subPath: nats }
+
+        # ---- agent (abc session backend)
+        - name: agent
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260906184857
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NATS_URL
+              value: nats://127.0.0.1:4222
+            - name: DB_BACKEND
+              value: sqlite
+            - name: DATABASE_URL
+              value: sqlite:///data/agent.db
+            - name: AGENT_PORT
+              value: "8000"
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+          resources:
+            limits: { cpu: "1", memory: 1Gi }
+            requests: { cpu: 100m, memory: 128Mi }
+          volumeMounts:
+            - { mountPath: /data, name: data, subPath: agent-data }
+
+      volumes:
+        - name: data
+          hostPath:
+            path: /home/develop/.easylab
+            type: DirectoryOrCreate
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+            type: Directory
+        - name: podman-sock
+          emptyDir: {}
