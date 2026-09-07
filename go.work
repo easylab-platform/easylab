@@ -2,21 +2,4 @@ go 1.26.5
 
 use (
 	./easyvcs
-	./pkr/pkr-cargo
-	./pkr/pkr-composer
-	./pkr/pkr-conan
-	./pkr/pkr-generic
-	./pkr/pkr-go
-	./pkr/pkr-helm
-	./pkr/pkr-hex
-	./pkr/pkr-maven
-	./pkr/pkr-npm
-	./pkr/pkr-nuget
-	./pkr/pkr-oci
-	./pkr/pkr-pub
-	./pkr/pkr-pypi
-	./pkr/pkr-rubygems
-	./pkr/pkr-swift
-	./pkr/pkr-system
-	./pkr/pkrkit
 )

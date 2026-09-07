@@ -7,7 +7,7 @@ import (
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 
 	"connectrpc.com/connect"
-	"github.com/pkr/pkrkit"
+	"github.com/easylab-platform/artifact/core"
 )
 
 // connRegistry implements easylabv1connect.RegistryServiceHandler over the

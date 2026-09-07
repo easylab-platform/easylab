@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkr/pkrkit"
-	pkrstore "github.com/pkr/pkrkit/store"
+	"github.com/easylab-platform/artifact/core"
+	pkrstore "github.com/easylab-platform/artifact/core/store"
 
 	"easyvcs/internal/store"
 )

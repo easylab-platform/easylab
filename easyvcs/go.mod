@@ -4,6 +4,23 @@ go 1.26.5
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/easylab-platform/artifact/cargo v0.1.0
+	github.com/easylab-platform/artifact/composer v0.1.0
+	github.com/easylab-platform/artifact/conan v0.1.0
+	github.com/easylab-platform/artifact/core v0.1.0
+	github.com/easylab-platform/artifact/generic v0.1.0
+	github.com/easylab-platform/artifact/go v0.1.0
+	github.com/easylab-platform/artifact/helm v0.1.0
+	github.com/easylab-platform/artifact/hex v0.1.0
+	github.com/easylab-platform/artifact/maven v0.1.0
+	github.com/easylab-platform/artifact/npm v0.1.0
+	github.com/easylab-platform/artifact/nuget v0.1.0
+	github.com/easylab-platform/artifact/oci v0.1.0
+	github.com/easylab-platform/artifact/pub v0.1.0
+	github.com/easylab-platform/artifact/pypi v0.1.0
+	github.com/easylab-platform/artifact/rubygems v0.1.0
+	github.com/easylab-platform/artifact/swiftpm v0.1.0
+	github.com/easylab-platform/artifact/system v0.1.0
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

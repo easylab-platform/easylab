@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkr/pkrkit"
+	"github.com/easylab-platform/artifact/core"
 
 	"easyvcs/internal/object"
 	"easyvcs/internal/revision"
