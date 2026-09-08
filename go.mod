@@ -1,13 +1,13 @@
 module easyvcs-ext-repo
 
-go 1.26
+go 1.26.0
 
 require (
 	connectrpc.com/connect v1.20.0
 	github.com/abcp-sdk/abc-protocol-go v1.0.9
 	github.com/abcp-sdk/agent-sdk-go v0.5.1
 	github.com/easylab-platform/easylab-proto v0.5.1
-	github.com/easylab-platform/easylab-sdk-go v0.8.0
+	github.com/easylab-platform/easylab-sdk-go v0.8.1
 	github.com/go-chi/chi/v5 v5.3.2
 	modernc.org/sqlite v1.58.0
 )
