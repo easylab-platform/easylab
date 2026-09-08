@@ -11,8 +11,12 @@
 # git is kept (mirror push). kubectl/helm are no longer needed (no k8s CLI
 # interaction; service-deploy goes through the ops sidecar).
 #
-# Build context: go.work + easyvcs/ only. All Go deps (artifact/*, easylab-proto,
-# abcp-sdk/*) resolve from public sources during the build.
+# Build context: this module (github.com/easylab-platform/easylab) only. The
+# easyvcs engine is a separate public module (github.com/easylab-platform/easyvcs)
+# resolved by GOPROXY - the replace directive in go.mod pins it for local dev
+# but MUST be stripped for the container build so it resolves from the proxy.
+# All Go deps (easyvcs, artifact/*, easylab-proto, abcp-sdk/*) come from public
+# sources during the build.
 ARG REGISTRY=forgejo.develop.10.199.64.20.nip.io/root
 ARG ALPINE=3.24
 
@@ -25,13 +29,17 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io \
     GOPROXY=https://proxy.golang.org \
     GONOSUMDB=github.com/easylab-platform/*,github.com/abcp-sdk/* \
+    GOWORK=off \
     CGO_ENABLED=0
 RUN apk add --no-cache ca-certificates
-WORKDIR /src
-COPY go.work go.work.sum ./
-COPY easyvcs ./easyvcs
-RUN cd easyvcs && go build -trimpath -ldflags="-s -w" -o /out/easylab ./cmd/easylab \
-    && go build -trimpath -ldflags="-s -w" -o /out/easyvcs ./cmd/easyvcs
+WORKDIR /src/app
+COPY go.mod go.sum ./
+# Strip the local-dev replace so easyvcs resolves from the proxy.
+RUN sed -i '/^replace github.com\/easylab-platform\/easyvcs/d' go.mod
+COPY cmd ./cmd
+COPY internal ./internal
+RUN go build -mod=mod -trimpath -ldflags="-s -w" -o /out/easylab ./cmd/easylab
+RUN go build -mod=mod -trimpath -ldflags="-s -w" -o /out/easyvcs github.com/easylab-platform/easyvcs/cmd/easyvcs
 
 # ---- runtime ----
 FROM ${REGISTRY}/alpine:${ALPINE}

@@ -1,7 +1,7 @@
 # build artifacts / binaries
 /easylab
-/easyvcs/easylab
-/easyvcs/easyvcsd
+/cmd/easylab/easylab
+/installer
 /ext/repo/easyvcs-ext-repo
 /ext/code/easyvcs-ext-code
 /ext/ops-host/easyvcs-ext-ops

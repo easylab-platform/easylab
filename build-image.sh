@@ -29,26 +29,16 @@ PROXY="${PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
-# Build context root: holds go.work (./ path) + easyvcs/ + easy-lab/Dockerfile.
-# easyvcs/go.mod requires github.com/easylab-platform/artifact/*,
-# github.com/easylab-platform/easylab-proto, github.com/abcp-sdk/* — all public,
-# resolved by network inside the buildkitd build. No local vendoring.
+# Build context root: the easylab module itself (go.mod + cmd/ + internal/).
+# easyvcs is a separate public module (github.com/easylab-platform/easyvcs)
+# resolved by GOPROXY inside the build. Skip the local-dev replace so the proxy
+# supplies it instead of a local path. No local vendoring, no go.work.
 CTX="${WORK}/ctx"
 mkdir -p "${CTX}"
-if [ -d "${LAB_DIR}/easyvcs" ]; then
-  cp -r "${LAB_DIR}/easyvcs" "${CTX}/easyvcs"
-else
-  cp -r "${LAB_DIR%/easy-lab}/easyvcs" "${CTX}/easyvcs"
-fi
-# The in-container go.work uses './easyvcs' only (context root holds easyvcs/).
-cat > "${CTX}/go.work" <<'GOWORK'
-go 1.26.5
-
-use (
-	./easyvcs
-)
-GOWORK
-[ -f "${LAB_DIR}/go.work.sum" ] && cp "${LAB_DIR}/go.work.sum" "${CTX}/go.work.sum"
+cp "${LAB_DIR}/go.mod" "${CTX}/go.mod"
+cp "${LAB_DIR}/go.sum" "${CTX}/go.sum"
+cp -r "${LAB_DIR}/cmd" "${CTX}/cmd"
+cp -r "${LAB_DIR}/internal" "${CTX}/internal"
 mkdir -p "${CTX}/easy-lab" && cp "${LAB_DIR}/Dockerfile" "${CTX}/easy-lab/Dockerfile"
 
 echo "Building EasyLab image -> ${DEST} (buildkitd=${BUILDKIT})"
@@ -59,7 +49,7 @@ buildctl --addr "${BUILDKIT}" build \
   --opt "filename=easy-lab/Dockerfile" \
   --opt "build-arg:HTTP_PROXY=${PROXY}" \
   --opt "build-arg:HTTPS_PROXY=${PROXY}" \
-  --opt "build-arg:NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,develop.10.199.64.20.nip.io" \
+  --opt "build-arg:NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,develop.10.199.64.20.nip.io,GOWORK=off" \
   --output "type=docker,name=${NAMESPACE}/${NAME}:${TAG},dest=${WORK}/image.tar" \
   --progress plain
 
