@@ -83,8 +83,8 @@ func TestFilterBundle(t *testing.T) {
 	}
 	// Filter for a wanted revision id (none -> empty changes).
 	out2 := filterBundle(b, map[string]bool{"nope": true})
-	if len(out2.Changes) != 0 {
-		t.Fatalf("filter to unknown should drop all changes, got %d", len(out2.Changes))
+	if len(out2.Revisions) != 0 {
+		t.Fatalf("filter to unknown should drop all changes, got %d", len(out2.Revisions))
 	}
 }
 

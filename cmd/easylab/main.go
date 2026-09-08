@@ -856,7 +856,7 @@ func filterBundle(b *transfer.Bundle, wanted map[string]bool) *transfer.Bundle {
 	if len(wanted) == 0 {
 		return b
 	}
-	keptChanges := make([]*store.Revision, 0, len(b.Changes))
+	keptChanges := make([]*store.Revision, 0, len(b.Revisions))
 	keptSnapshots := make([]*store.Snapshot, 0, len(b.Snapshots))
 	keptSnapIDs := map[string]bool{}
 	keptChangeIDs := map[string]bool{}
@@ -865,7 +865,7 @@ func filterBundle(b *transfer.Bundle, wanted map[string]bool) *transfer.Bundle {
 	for _, sn := range b.Snapshots {
 		snapByChange[sn.RevisionID] = sn
 	}
-	for _, ch := range b.Changes {
+	for _, ch := range b.Revisions {
 		if !wanted[ch.ID] {
 			continue
 		}
@@ -884,7 +884,7 @@ func filterBundle(b *transfer.Bundle, wanted map[string]bool) *transfer.Bundle {
 	out := &transfer.Bundle{Version: b.Version, Repo: b.Repo, Objects: b.Objects}
 	_ = keptSnapIDs
 	_ = keptChangeIDs
-	out.Changes = keptChanges
+	out.Revisions = keptChanges
 	out.Snapshots = keptSnapshots
 	out.Refs = b.Refs
 	return out
