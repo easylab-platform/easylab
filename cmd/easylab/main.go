@@ -22,6 +22,7 @@ import (
 	_ "github.com/easylab-platform/artifact/cargo"
 	_ "github.com/easylab-platform/artifact/composer"
 	_ "github.com/easylab-platform/artifact/conan"
+	"github.com/easylab-platform/artifact/core"
 	_ "github.com/easylab-platform/artifact/generic"
 	_ "github.com/easylab-platform/artifact/go"
 	_ "github.com/easylab-platform/artifact/helm"
@@ -35,7 +36,6 @@ import (
 	_ "github.com/easylab-platform/artifact/rubygems"
 	_ "github.com/easylab-platform/artifact/swiftpm"
 	_ "github.com/easylab-platform/artifact/system"
-	"github.com/easylab-platform/artifact/core"
 
 	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
 	"github.com/easylab-platform/easylab-proto/easylab/v1/easylabv1connect"
@@ -44,7 +44,6 @@ import (
 	"github.com/easylab-platform/easyvcs/revision"
 	"github.com/easylab-platform/easyvcs/store"
 	"github.com/easylab-platform/easyvcs/transfer"
-	"github.com/easylab-platform/easyvcs/webapi"
 )
 
 // envOrStr returns env var value or a default.
@@ -61,7 +60,6 @@ type server struct {
 	registry *pkrkit.Registry
 	selfBase string
 	ops      *opsState
-	ui       *webapi.API
 }
 
 func main() {
@@ -97,8 +95,46 @@ func main() {
 	mux := s.router()
 	_ = mux
 
+	// Dual-stack listener: accepts cleartext HTTP/2 (prior knowledge) for the
+	// Connect/rest surface AND HTTP/1.1 for the h1-native registry face
+	// (/v2, /pkgs, git smart protocol). A middleware on the Connect paths
+	// enforces HTTP/2-only when EASYVCS_ENFORCE_H2=1.
+	var handler http.Handler = mux
+	if enforce := os.Getenv("EASYVCS_ENFORCE_H2"); enforce == "1" {
+		handler = s.enforceH2(mux)
+	}
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+	server := &http.Server{
+		Addr:      *addr,
+		Handler:   handler,
+		Protocols: protocols,
+	}
 	log.Printf("easylab listening on %s (db %s)", *addr, store.DBPath())
-	log.Fatal(http.ListenAndServe(*addr, mux))
+	log.Fatal(server.ListenAndServe())
+}
+
+// enforceH2 rejects HTTP/1.x requests to the Connect surface so the RPC
+// contract stays HTTP/2-only. The legacy face (/v2, /pkgs, git smart
+// protocol, /api/v1) is intentionally exempt — those ecosystems are
+// h1-native. Returns 505 HTTP Version Not Supported for the offending paths.
+func (s *server) enforceH2(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 1 && isConnectPath(r.URL.Path) {
+			w.Header().Set("Connection", "close")
+			writeErr(w, http.StatusHTTPVersionNotSupported,
+				fmt.Errorf("HTTP/2 required for %s (protocol %s)", r.URL.Path, r.Proto))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isConnectPath reports whether a path is part of the typed Connect surface.
+func isConnectPath(path string) bool {
+	return strings.HasPrefix(path, "/easylab.v1.") ||
+		strings.HasPrefix(path, "/agent.v1.")
 }
 
 // buildTokenSet collects acceptable bearer tokens from the EASYVCS_TOKEN env
@@ -179,14 +215,6 @@ func (s *server) router() *http.ServeMux {
 	mux.HandleFunc("GET /repo/{ns}/{name}/refs", s.handleListRefs)
 	mux.HandleFunc("GET /repo/{ns}/{name}/diff/{a}/{b}", s.handleDiff)
 	mux.HandleFunc("GET /repo/{ns}/{name}/revision/{id}", s.handleChange)
-
-	// UI-facing aggregate gateway (SPA + unified API). Mounted under "/" and
-	// /api/v1 (facade); core Lab/ops APIs live under their own paths below.
-	ui := &webapi.API{CS: s.cs, AgentURL: os.Getenv("EASYLAB_AGENT_URL"), SelfBase: "http://127.0.0.1:18160"}
-	// UI aggregate API paths (specific) + SPA at "/".
-	ui.MountAPI(mux)
-	ui.MountSPA(mux)
-	s.ui = ui
 
 	// Lab (hosting) API under /api/v1. The Lab mux owns the full /api/v1
 	// subtree and populates its own PathValue fields from its patterns.
