@@ -35,7 +35,7 @@ func newAuthFixture(t *testing.T) (*labTokenAuth, *store.CentralStore) {
 	if _, err := cs.CreateToken("readtok", bob.ID, "read"); err != nil {
 		t.Fatal(err)
 	}
-	return newLabTokenAuth(cs, nil), cs
+	return newLabTokenAuth(cs), cs
 }
 
 // TestIssueTokenNeverEchoesStaticToken verifies the minted-token semantics:

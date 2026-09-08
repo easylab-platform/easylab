@@ -11,7 +11,7 @@ func TestLabMirrorRepoReadOnly(t *testing.T) {
 	s := newLabServer(t)
 	admin := &labClient{t: t, s: s, token: "lab-admin"}
 	// open instance -> use the flat token set
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 
 	// A normal repo to host a push mirror.
 	if rec := admin.do("POST", "/api/v1/repo", map[string]any{
@@ -60,7 +60,7 @@ func TestLabMirrorRepoReadOnly(t *testing.T) {
 func TestLabCreateMirrorRequiresURL(t *testing.T) {
 	s := newLabServer(t)
 	admin := &labClient{t: t, s: s, token: "lab-admin"}
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 	rec := admin.do("POST", "/api/v1/repo", map[string]any{
 		"namespace": "team", "name": "bad", "kind": "mirror",
 	})
@@ -73,7 +73,7 @@ func TestLabCreateMirrorRequiresURL(t *testing.T) {
 func TestLabPushMirrorListOmitsToken(t *testing.T) {
 	s := newLabServer(t)
 	admin := &labClient{t: t, s: s, token: "lab-admin"}
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 	admin.ok("POST", "/api/v1/repo", map[string]any{"namespace": "team", "name": "app"})
 	admin.ok("POST", "/api/v1/repo/team/app/mirrors", map[string]any{
 		"name": "forgejo", "url": "https://example.com/x.git", "token": "secret-token",

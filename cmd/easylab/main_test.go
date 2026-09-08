@@ -28,14 +28,14 @@ func newTestServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &server{cs: cs, registry: reg, ops: opsState}
+	return &server{cs: cs, registry: reg, ops: opsState, auth: newLabTokenAuth(cs)}
 }
 
 // newAuthServer returns a server with auth enabled for a single token.
 func newAuthServer(t *testing.T) *server {
 	t.Helper()
 	s := newTestServer(t)
-	s.tokens = map[string]bool{"secret-token": true}
+	seedTestToken(t, s, "secret-token")
 	return s
 }
 

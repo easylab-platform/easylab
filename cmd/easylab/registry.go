@@ -114,8 +114,7 @@ func defaultUpstreams() map[string]string {
 // privilege (see mintedTokens) instead of echoing a static store/flat token —
 // the long-lived credential never appears in a token response.
 type labTokenAuth struct {
-	cs     *store.CentralStore
-	tokens map[string]bool
+	cs *store.CentralStore
 
 	mintedMu sync.Mutex
 	minted   map[string]*mintedLabToken
@@ -129,17 +128,13 @@ type mintedLabToken struct {
 	expires  time.Time
 }
 
-func newLabTokenAuth(cs *store.CentralStore, tokens map[string]bool) *labTokenAuth {
-	return &labTokenAuth{cs: cs, tokens: tokens, minted: map[string]*mintedLabToken{}}
+func newLabTokenAuth(cs *store.CentralStore) *labTokenAuth {
+	return &labTokenAuth{cs: cs, minted: map[string]*mintedLabToken{}}
 }
 
-// isOpen mirrors the Lab open-instance rule: no users and no legacy tokens.
+// isOpen mirrors the Lab open-instance rule: no users registered.
 func (a *labTokenAuth) isOpen() bool {
-	if a.tokens != nil && len(a.tokens) > 0 {
-		return false
-	}
-	users, err := a.cs.ListUsers()
-	return err == nil && len(users) == 0
+	return a.cs.IsOpenInstance()
 }
 
 // resolve maps a credential (store token, minted token, or legacy flat token)
@@ -158,10 +153,6 @@ func (a *labTokenAuth) resolve(token string) (username string, write bool, ok bo
 			return u.Username, w, true
 		}
 		return "token:" + token, w, true
-	}
-	if a.tokens != nil && a.tokens[token] {
-		// Legacy flat tokens are write credentials.
-		return "token:" + token, true, true
 	}
 	return "", false, false
 }
@@ -284,9 +275,6 @@ func (a *labTokenAuth) IssueToken(ctx context.Context, username string, scopes [
 				}
 			}
 		}
-	} else if a.tokens != nil && len(a.tokens) > 0 {
-		// Legacy flat-token realm: all principals are write-capable.
-		write = true
 	} else if username == "open" {
 		// Open instance: anonymous write allowed.
 		write = true

@@ -12,24 +12,38 @@ import (
 	"github.com/easylab-platform/easyvcs/transfer"
 )
 
-func TestBuildTokenSet(t *testing.T) {
-	t.Setenv("EASYVCS_TOKEN", "a, b,,c")
-	set := buildTokenSet()
-	if !set["a"] || !set["b"] || !set["c"] || set[""] {
-		t.Fatalf("token set: %v", set)
+func TestAuthOKOpenInstance(t *testing.T) {
+	// A server whose store has no users is an open instance: anonymous OK.
+	s := newLabServer(t)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	if !s.authOK(r) {
+		t.Fatal("open instance => authOK should be true")
 	}
 }
 
-func TestAuthOKNoTokens(t *testing.T) {
-	s := &server{tokens: map[string]bool{}}
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	if !s.authOK(r) {
-		t.Fatal("no tokens => authOK should be true")
+func TestAuthOKRequiresStoreToken(t *testing.T) {
+	s := newLabServer(t)
+	seedTestToken(t, s, "storetok")
+	// Anonymous is denied (instance closed).
+	if s.authOK(httptest.NewRequest(http.MethodGet, "/", nil)) {
+		t.Fatal("closed instance should deny anonymous")
+	}
+	// A registered token passes; an unknown one fails.
+	ok := httptest.NewRequest(http.MethodGet, "/", nil)
+	ok.Header.Set("Authorization", "Bearer storetok")
+	if !s.authOK(ok) {
+		t.Fatal("registered token should pass")
+	}
+	bad := httptest.NewRequest(http.MethodGet, "/", nil)
+	bad.Header.Set("Authorization", "Bearer wrong")
+	if s.authOK(bad) {
+		t.Fatal("unknown token must fail")
 	}
 }
 
 func TestAuthOKBearer(t *testing.T) {
-	s := &server{tokens: map[string]bool{"secret": true}}
+	s := newLabServer(t)
+	seedTestToken(t, s, "secret")
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.Header.Set("Authorization", "Bearer secret")
 	if !s.authOK(r) {

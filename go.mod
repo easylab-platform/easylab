@@ -10,7 +10,7 @@ require (
 	github.com/easylab-platform/artifact/cargo v0.2.0
 	github.com/easylab-platform/artifact/composer v0.2.0
 	github.com/easylab-platform/artifact/conan v0.2.0
-	github.com/easylab-platform/artifact/core v0.2.1
+	github.com/easylab-platform/artifact/core v0.3.0
 	github.com/easylab-platform/artifact/generic v0.2.0
 	github.com/easylab-platform/artifact/go v0.2.0
 	github.com/easylab-platform/artifact/helm v0.2.0

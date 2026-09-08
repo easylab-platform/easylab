@@ -55,7 +55,7 @@ func (c *labClient) ok(method, path string, body any) map[string]any {
 func TestLabFullFlow(t *testing.T) {
 	s := newLabServer(t)
 	// Enable auth with an admin token; the client sends it on all requests.
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 	c := &labClient{t: t, s: s, token: "lab-admin"}
 
 	// 1. Create users.
@@ -251,7 +251,7 @@ func newLabServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &server{cs: cs, registry: reg, ops: opsState}
+	return &server{cs: cs, registry: reg, ops: opsState, auth: newLabTokenAuth(cs)}
 }
 
 // TestLabVisibilityEnforced verifies that a private repository is hidden from
@@ -315,3 +315,18 @@ func TestLabVisibilityEnforced(t *testing.T) {
 
 var _ = fmt.Sprintf
 var _ = strings.TrimSpace
+
+// seedTestToken registers a write-level credential in the server's store,
+// replacing the legacy flat-token test wiring. It creates a dedicated user so
+// the instance is closed (authenticated requests required) exactly like the
+// old s.tokens assignment did.
+func seedTestToken(t *testing.T, s *server, token string) {
+	t.Helper()
+	u, err := s.cs.CreateUser("test-admin", "Test Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.cs.CreateToken(token, u.ID, "write"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -28,7 +28,7 @@ func listRevisionsByDesc(t *testing.T, admin *labClient, repo string) map[string
 func TestLabDrop(t *testing.T) {
 	s := newLabServer(t)
 	admin := &labClient{t: t, s: s, token: "lab-admin"}
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 	admin.ok("POST", "/api/v1/repo", map[string]any{"namespace": "team", "name": "app"})
 
 	commit := func(path, content, desc, parentHash string) string {
@@ -84,7 +84,7 @@ func TestLabDrop(t *testing.T) {
 func TestLabRevert(t *testing.T) {
 	s := newLabServer(t)
 	admin := &labClient{t: t, s: s, token: "lab-admin"}
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 	admin.ok("POST", "/api/v1/repo", map[string]any{"namespace": "team", "name": "rev"})
 
 	commit := func(path, content, desc, parentHash string) string {

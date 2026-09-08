@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -57,10 +56,12 @@ func envOrStr(k, def string) string {
 
 type server struct {
 	cs       *store.CentralStore
-	tokens   map[string]bool
 	registry *artifactkit.Registry
 	selfBase string
 	ops      *opsState
+	// auth is the artifactkit Auth over the easyvcs credential store
+	// (minted-token semantics; see registry.go).
+	auth *labTokenAuth
 }
 
 func main() {
@@ -88,7 +89,7 @@ func main() {
 	if err != nil {
 		log.Fatal("init ops:", err)
 	}
-	s := &server{cs: cs, tokens: buildTokenSet(), registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState}
+	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, auth: newLabTokenAuth(cs)}
 
 	// Start the background mirror scheduler (push on-change, pull on-interval).
 	go s.runMirrorLoop(context.Background())
@@ -96,7 +97,7 @@ func main() {
 	// Launch the extension containers (ops + repo) so the agent discovers their
 	// tools via NATS. We drive them through the same ops service runner that
 	// OpsService/LaunchService uses (internal registry, no TLS, no side pull).
-	launchExtensions(s, opsState)
+	go launchExtensions(s, opsState)
 
 	mux := s.router()
 	_ = mux
@@ -143,22 +144,6 @@ func isConnectPath(path string) bool {
 		strings.HasPrefix(path, "/agent.v1.")
 }
 
-// buildTokenSet collects acceptable bearer tokens from the EASYVCS_TOKEN env
-// var (comma-separated). Tokens are compared in constant time to resist timing
-// attacks.
-func buildTokenSet() map[string]bool {
-	set := map[string]bool{}
-	if env := os.Getenv("EASYVCS_TOKEN"); env != "" {
-		for _, t := range strings.Split(env, ",") {
-			t = strings.TrimSpace(t)
-			if t != "" {
-				set[t] = true
-			}
-		}
-	}
-	return set
-}
-
 // requireAuth wraps a handler so that it is denied (401) unless a valid bearer
 // token is present. Read-only endpoints are intentionally left unauthenticated
 // (see router).
@@ -173,24 +158,22 @@ func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) authOK(r *http.Request) bool {
-	if len(s.tokens) == 0 {
-		// No tokens configured: auth is disabled (open server).
+	// Credentials are resolved against the easyvcs token store (SHA-256 at
+	// rest). An open instance (no users) permits anonymous access so a fresh
+	// single-user deployment is frictionless.
+	if s.auth == nil {
+		return true
+	}
+	if s.cs.IsOpenInstance() {
 		return true
 	}
 	header := r.Header.Get("Authorization")
-	if !strings.HasPrefix(header, "Bearer ") {
-		return false
-	}
 	token := strings.TrimPrefix(header, "Bearer ")
-	if token == "" {
+	if token == "" || token == header {
 		return false
 	}
-	for valid := range s.tokens {
-		if subtle.ConstantTimeCompare([]byte(token), []byte(valid)) == 1 {
-			return true
-		}
-	}
-	return false
+	_, _, ok := s.auth.resolve(token)
+	return ok
 }
 
 // router builds the HTTP routing table. It is shared by main and tests so
@@ -289,7 +272,7 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 		return
 	}
 	reg := s.registry
-	auth := newLabTokenAuth(s.cs, s.tokens)
+	auth := newLabTokenAuth(s.cs)
 	for _, name := range artifactkit.Registered() {
 		// Build per-protocol config with the correct self_base: OCI uses the
 		// origin root (its /token realm), everything else prefixes /pkgs/<name>.

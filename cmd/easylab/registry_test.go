@@ -15,7 +15,7 @@ import (
 // returns the original bytes.
 func TestLabReleaseViaPkrkit(t *testing.T) {
 	s := newLabServer(t)
-	s.tokens = map[string]bool{"t": true}
+	seedTestToken(t, s, "t")
 	c := &labClient{t: t, s: s, token: "t"}
 	c.ok("POST", "/api/v1/repo", map[string]any{"namespace": "team", "name": "app"})
 
@@ -81,7 +81,7 @@ func TestLabReleaseViaPkrkit(t *testing.T) {
 // /pkgs/generic and round-trips a raw artifact: PUT then GET.
 func TestLabGenericPackageProxy(t *testing.T) {
 	s := newLabServer(t)
-	s.tokens = map[string]bool{"t": true}
+	seedTestToken(t, s, "t")
 
 	// PUT a raw artifact at /pkgs/generic/team:repo/v1.0.0/file.txt.
 	body := []byte("hello generic")

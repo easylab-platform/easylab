@@ -35,8 +35,8 @@ github.com/easylab-platform/artifact/composer v0.2.0 h1:UDFPssohtCitZoIDIh8eceNs
 github.com/easylab-platform/artifact/composer v0.2.0/go.mod h1:U1YtWRjr9I8k8GfiURmSdvGPOOdmimeReVg71oZtd6k=
 github.com/easylab-platform/artifact/conan v0.2.0 h1:lVfFVNPMZhVXnE4n82FJw/hDeoA+i4Qg9PsUR6OblCg=
 github.com/easylab-platform/artifact/conan v0.2.0/go.mod h1:ksIv9Ux5E6cCkA80jsNpWryxxNB1Ie8ZINepyo+PLAk=
-github.com/easylab-platform/artifact/core v0.2.1 h1:parOjHVjfeAK9cTXdTmqkwZRfgUq4jqeOtIDzLpCKzg=
-github.com/easylab-platform/artifact/core v0.2.1/go.mod h1:f+3LQI8t9mbU2N1pqgX23o4Fob4AV7wY5OmqNkU5gU4=
+github.com/easylab-platform/artifact/core v0.3.0 h1:vtX4cSQn5QYqLdKP3/kJAUuNqIs2/cWfa3d+HhZYfoE=
+github.com/easylab-platform/artifact/core v0.3.0/go.mod h1:f+3LQI8t9mbU2N1pqgX23o4Fob4AV7wY5OmqNkU5gU4=
 github.com/easylab-platform/artifact/generic v0.2.0 h1:XB3ME6YwRieLVr9N70r2JrImR/mIrKGwOUI4Upcu1wc=
 github.com/easylab-platform/artifact/generic v0.2.0/go.mod h1:81E9jWP8BAANoeGPcbevVmDANkF/0QrE2amOZ2NQfeQ=
 github.com/easylab-platform/artifact/go v0.2.0 h1:Hv0vQ5GYmcm/9zwdgEfl+XTG+ubBVQZVQ0LS7Fb1voA=

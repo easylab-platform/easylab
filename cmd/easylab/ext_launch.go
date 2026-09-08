@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"time"
 
 	"github.com/easylab-platform/easylab/internal/ops"
 )
@@ -42,27 +43,41 @@ func launchExtensions(s *server, st *opsState) {
 		{"repo-ext", registry + "/easylab/ext-repo:20260906170000", "18093"},
 	}
 	for _, e := range exts {
-		req := ops.ServiceRequest{
-			Name:     e.name,
-			Image:    e.image,
-			Replicas: 1,
-			Restart:  "unless-stopped",
-			Env: []string{
-				"NATS_URL=" + natsURL,
-				"PORT=" + e.port,
-			},
+		launched := false
+		for attempt := 0; attempt < 12; attempt++ {
+			if err := startExt(st, e.name, e.image, natsURL, e.port); err == nil {
+				launched = true
+				break
+			} else if attempt == 11 {
+				log.Printf("ext-launch: %s failed after retries: %v", e.name, err)
+			} else {
+				time.Sleep(5 * time.Second)
+			}
 		}
-		// Idempotent: if it's already running (informal status) skip re-create.
-		if st, err := st.services.Status(context.Background(), e.name); err == nil && st.Name == e.name {
+		if !launched {
+			// leave for a later boot; not fatal
 			continue
 		}
-		res, err := st.services.Launch(context.Background(), req, func(string) {})
-		if err != nil {
-			log.Printf("ext-launch: %s failed: %v", e.name, err)
-			continue
-		}
-		log.Printf("ext-launch: started %s (image %s, nats %s)", res.Name, e.image, natsURL)
+		log.Printf("ext-launch: started %s (image %s, nats %s)", e.name, e.image, natsURL)
 	}
+}
+
+func startExt(st *opsState, name, image, natsURL, port string) error {
+	req := ops.ServiceRequest{
+		Name:     name,
+		Image:    image,
+		Replicas: 1,
+		Restart:  "unless-stopped",
+		Env: []string{
+			"NATS_URL=" + natsURL,
+			"PORT=" + port,
+		},
+	}
+	if st, err := st.services.Status(context.Background(), name); err == nil && st.Name == name {
+		return nil
+	}
+	_, err := st.services.Launch(context.Background(), req, func(string) {})
+	return err
 }
 
 // podIP returns the pod's IP as seen from inside the container (eth0), used as

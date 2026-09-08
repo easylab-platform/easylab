@@ -12,7 +12,7 @@ import (
 // verifies a build task is created and reaches a running/terminal state.
 func TestOpsBuildEndToEnd(t *testing.T) {
 	s := newTestServer(t)
-	s.tokens = map[string]bool{"t": true}
+	seedTestToken(t, s, "t")
 
 	// Start a build. The podman backend requires a real context dir; use a
 	// temp one so the request validates and creates the task (which is the

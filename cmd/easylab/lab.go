@@ -148,10 +148,6 @@ func (s *server) labPrincipal(r *http.Request) (*store.User, string) {
 			u, _ := s.cs.GetUser(tok.UserID)
 			return u, tok.Level
 		}
-		// Legacy flat-token realm (pre-Lab tokens).
-		if s.tokens != nil && s.tokens[token] {
-			return nil, "write"
-		}
 	}
 	if !s.labHasAuth() {
 		// No authentication in the Lab realm: open access for read; write also
@@ -161,14 +157,10 @@ func (s *server) labPrincipal(r *http.Request) (*store.User, string) {
 	return nil, "read"
 }
 
-// labHasAuth reports whether any users/tokens are registered or a legacy token
-// set is configured, which gates whether anonymous write is permitted.
+// labHasAuth reports whether any users are registered, which gates whether
+// anonymous write is permitted.
 func (s *server) labHasAuth() bool {
-	if s.tokens != nil && len(s.tokens) > 0 {
-		return true
-	}
-	users, err := s.cs.ListUsers()
-	return err == nil && len(users) > 0
+	return !s.cs.IsOpenInstance()
 }
 
 // labAdmin wraps a handler requiring an authenticated (non-anonymous) principal

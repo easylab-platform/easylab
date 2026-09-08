@@ -11,7 +11,7 @@ import (
 func TestLabRebaseMany(t *testing.T) {
 	s := newLabServer(t)
 	admin := &labClient{t: t, s: s, token: "lab-admin"}
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 
 	// Create a repo with a linear mainline.
 	admin.ok("POST", "/api/v1/repo", map[string]any{"namespace": "team", "name": "app"})

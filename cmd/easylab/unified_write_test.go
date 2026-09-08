@@ -12,7 +12,7 @@ import (
 func TestLabUnifiedWriteAmend(t *testing.T) {
 	s := newLabServer(t)
 	admin := &labClient{t: t, s: s, token: "lab-admin"}
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 	admin.ok("POST", "/api/v1/repo", map[string]any{"namespace": "team", "name": "app"})
 
 	// First write: no branch exists yet -> creates a root commit on "main".
@@ -63,7 +63,7 @@ func TestLabUnifiedWriteAmend(t *testing.T) {
 func TestLabContentsRead(t *testing.T) {
 	s := newLabServer(t)
 	admin := &labClient{t: t, s: s, token: "lab-admin"}
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 	admin.ok("POST", "/api/v1/repo", map[string]any{"namespace": "team", "name": "app"})
 	admin.ok("POST", "/api/v1/repo/team/app/files", map[string]any{
 		"changes": []map[string]any{{"path": "dir/hello.txt", "content": "hello\n"}},

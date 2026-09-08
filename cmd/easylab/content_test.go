@@ -29,7 +29,7 @@ func seedLabRepo(t *testing.T, s *server, c *labClient, ns, name string) map[str
 func TestLabRevisionFiles(t *testing.T) {
 	s := newLabServer(t)
 	admin := &labClient{t: t, s: s, token: "lab-admin"}
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 	seedLabRepo(t, s, admin, "team", "app")
 
 	// Find the revision that touched both a.txt and b.txt.
@@ -88,7 +88,7 @@ func containsPathList(ch []any, p string) bool {
 func TestLabGraph(t *testing.T) {
 	s := newLabServer(t)
 	admin := &labClient{t: t, s: s, token: "lab-admin"}
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 	seedLabRepo(t, s, admin, "team", "app")
 
 	rec := httptest.NewRecorder()
@@ -118,7 +118,7 @@ func TestLabGraph(t *testing.T) {
 func TestLabArchive(t *testing.T) {
 	s := newLabServer(t)
 	admin := &labClient{t: t, s: s, token: "lab-admin"}
-	s.tokens = map[string]bool{"lab-admin": true}
+	seedTestToken(t, s, "lab-admin")
 	seedLabRepo(t, s, admin, "team", "app")
 
 	rec := httptest.NewRecorder()
