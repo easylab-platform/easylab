@@ -20,7 +20,7 @@ import (
 
 	"easyvcs-ext-ops/internal/worker"
 
-	agentsdk "github.com/abcp-sdk/agent-sdk"
+	agentsdk "github.com/abcp-sdk/agent-sdk-go"
 	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 )
 

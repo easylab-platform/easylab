@@ -4,8 +4,8 @@ github.com/abcp-sdk/abc-protocol-go v1.0.9 h1:Je8K78N9nWDkAly/7wi8fk/dQYmQnFtWCO
 github.com/abcp-sdk/abc-protocol-go v1.0.9/go.mod h1:Pj40eYsDYx1n8Gf2BiQU7Rf9IESUggv4JIaXJf9u01o=
 github.com/abcp-sdk/agent-proto v0.3.0 h1:+LIdncn2DfjZCwDUU3EyPBtGgXkwGTE+lMrs4fWeG/w=
 github.com/abcp-sdk/agent-proto v0.3.0/go.mod h1:drrTDKXOWLDIc1xXIpuuOZxEeUKjvRgZ46Whdu6vZjk=
-github.com/abcp-sdk/agent-sdk v0.4.1 h1:0O6u7vXHgiULW34h/r1ngbGMK0ajMUp7JC1J3/R2LZs=
-github.com/abcp-sdk/agent-sdk v0.4.1/go.mod h1:Qgf7ieGBGMWFFRo4yQzNzsf/ysTf1oTOfcd2wLUEKTg=
+github.com/abcp-sdk/agent-sdk-go v0.5.0 h1:8lPV9p8GZgA90p3LsX/mHc35mnljg6TgnaOF8fiw9eo=
+github.com/abcp-sdk/agent-sdk-go v0.5.0/go.mod h1:mGm8MEV5WkrHwiCfF/VP+kG2u9XMIJ4teeMLRfx+URI=
 github.com/easylab-platform/easylab-proto v0.5.1 h1:abOdHAVH39b5weJsDg/73tcVFFpp3Imj+xPY08xNJnI=
 github.com/easylab-platform/easylab-proto v0.5.1/go.mod h1:PcZuLRhnUB6ZQmF1/vC8ip2IVhOArtp86+ZnCJfXHoY=
 github.com/easylab-platform/easylab-sdk-go v0.8.0 h1:Uc9Yh8WrhlZ64IGGOWmAQtwNvyXIzathWFMge5iwITI=
