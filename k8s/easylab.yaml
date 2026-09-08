@@ -81,7 +81,7 @@ spec:
         - name: podman
           image: forgejo.develop.10.199.64.20.nip.io/easylab/podman:official
           imagePullPolicy: IfNotPresent
-          command: ["bash", "-c", "cat > /etc/containers/registries.conf.d/100-insecure.conf <<'EOF'\n[[registry]]\nlocation = \"127.0.0.1:8080\"\ninsecure = true\n[[registry]]\nlocation = \"easylab.temp.svc.cluster.local:8080\"\ninsecure = true\nEOF\nexec podman system service --time=0 unix:///run/podman/podman.sock"]
+          command: ["bash", "-c", "cat > /etc/containers/registries.conf.d/100-insecure.conf <<'EOF'\n[[registry]]\nlocation = \"127.0.0.1:8080\"\ninsecure = true\n[[registry]]\nlocation = \"easylab.temp.svc.cluster.local:8080\"\ninsecure = true\n[[registry]]\nlocation = \"forgejo.develop.10.199.64.20.nip.io\"\ninsecure = true\nEOF\nPOD_IP=$(hostname -i)\npodman pull --tls-verify=false forgejo.develop.10.199.64.20.nip.io/easylab/ops-extension:20260908074246 >/dev/null 2>&1 || true\npodman pull --tls-verify=false forgejo.develop.10.199.64.20.nip.io/easylab/repo-extension:20260908074246 >/dev/null 2>&1 || true\npodman rm -f ops-ext repo-ext >/dev/null 2>&1 || true\npodman run -d --name ops-ext -e NATS_URL=nats://${POD_IP}:4222 -e PORT=18092 forgejo.develop.10.199.64.20.nip.io/easylab/ops-extension:20260908074246\npodman run -d --name repo-ext -e NATS_URL=nats://${POD_IP}:4222 -e PORT=18093 forgejo.develop.10.199.64.20.nip.io/easylab/repo-extension:20260908074246\nexec podman system service --time=0 unix:///run/podman/podman.sock"]
           env:
             - name: EASYLAB_EXT_TAG
               value: "20260907044106"
