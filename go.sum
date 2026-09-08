@@ -73,6 +73,8 @@ github.com/easylab-platform/easyvcs v0.1.0 h1:p2Pn6hDKgoQa+gFEo2GiBX9a+2fLvxsfRV
 github.com/easylab-platform/easyvcs v0.1.0/go.mod h1:fg51FBq2+weqdUPXUVIdPSzPYJBL5eLedmV33txTrKg=
 github.com/easylab-platform/easyvcs v0.1.1 h1:piF7ohqp+jEsE5F/2jFvP4eLI0X5TJgXxMoXNwz+7yU=
 github.com/easylab-platform/easyvcs v0.1.1/go.mod h1:fg51FBq2+weqdUPXUVIdPSzPYJBL5eLedmV33txTrKg=
+github.com/easylab-platform/easyvcs v0.1.2 h1:5SZmVZhOGQtE96sO0b+T58Oz7Q8lrOTiDwb6yL37EmU=
+github.com/easylab-platform/easyvcs v0.1.2/go.mod h1:fg51FBq2+weqdUPXUVIdPSzPYJBL5eLedmV33txTrKg=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
