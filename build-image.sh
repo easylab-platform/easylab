@@ -5,7 +5,7 @@
 #   1. Assemble a temp build context rooted at '.', containing go.work +
 #      easyvcs/. The Go module graph now resolves EVERYTHING from public
 #      GitHub (easylab-platform/artifact/*, easylab-proto, abcp-sdk/*) — no
-#      local pkr/ or deps/ needed. go.work only lists ./easyvcs.
+#      local artifact/ or deps/ needed. go.work only lists ./easyvcs.
 #   2. buildctl targets the shared cluster buildkitd (default the temp one) and
 #      builds the image, exporting a docker archive (with a RepoTag). buildkitd
 #      does NOT push.
