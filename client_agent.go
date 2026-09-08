@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	agentsdk "github.com/abcp-sdk/agent-sdk"
+	agentsdk "github.com/abcp-sdk/agent-sdk-go"
 )
 
 // agentClient talks to the abc agent session API via the typed
