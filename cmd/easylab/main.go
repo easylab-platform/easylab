@@ -57,7 +57,7 @@ func envOrStr(k, def string) string {
 type server struct {
 	cs       *store.CentralStore
 	tokens   map[string]bool
-	registry *pkrkit.Registry
+	registry *artifactkit.Registry
 	selfBase string
 	ops      *opsState
 }
@@ -223,7 +223,7 @@ func (s *server) router() *http.ServeMux {
 	// Ops: dev/deploy platform (runs, tasks, builds).
 	s.mountOps(mux)
 
-	// Package registry (pkrkit): OCI /v2 + all language protocols.
+	// Package registry (artifactkit): OCI /v2 + all language protocols.
 	s.mountPackageRegistry(mux)
 
 	// Typed Connect contract surface. These are the strong-typed RPC endpoints
@@ -270,7 +270,7 @@ func (s *server) mountOps(mux *http.ServeMux) {
 	_ = sub
 }
 
-// mountPackageRegistry mounts every enabled pkrkit protocol. The generic
+// mountPackageRegistry mounts every enabled artifactkit protocol. The generic
 // protocol (raw artifacts, used by Lab releases) is always mounted; the OCI
 // registry is mounted at /v2 and each language protocol at /pkgs/<name>.
 //
@@ -284,7 +284,7 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 	}
 	reg := s.registry
 	auth := &labTokenAuth{cs: s.cs, tokens: s.tokens}
-	for _, name := range pkrkit.Registered() {
+	for _, name := range artifactkit.Registered() {
 		// Build per-protocol config with the correct self_base: OCI uses the
 		// origin root (its /token realm), everything else prefixes /pkgs/<name>.
 		cfg := map[string]any{"auth": auth}
@@ -295,7 +295,7 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 				cfg["self_base"] = s.selfBase + "/pkgs/" + name
 			}
 		}
-		h, err := pkrkit.Build(name, reg, cfg)
+		h, err := artifactkit.Build(name, reg, cfg)
 		if err != nil {
 			log.Printf("registry: skip %s: %v", name, err)
 			continue
@@ -317,7 +317,7 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 	}
 }
 
-func (s *server) serveOCIToken(w http.ResponseWriter, r *http.Request, auth pkrkit.Auth) {
+func (s *server) serveOCIToken(w http.ResponseWriter, r *http.Request, auth artifactkit.Auth) {
 	scopes := []string{}
 	for _, v := range r.URL.Query()["scope"] {
 		for _, f := range strings.Fields(v) {

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 
 	"connectrpc.com/connect"
@@ -50,8 +49,8 @@ func (c *connLab) ListRepos(ctx context.Context, req *connect.Request[easylabv1.
 		}
 		meta, _ := rp.RepoMeta()
 		out = append(out, &easylabv1.RepoInfo{
-			Namespace: rr.Namespace,
-			Name:      rr.Name,
+			Namespace:     rr.Namespace,
+			Name:          rr.Name,
 			DefaultBranch: meta.DefaultBranch,
 		})
 	}

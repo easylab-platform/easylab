@@ -1881,7 +1881,7 @@ func (s *server) labFork(w http.ResponseWriter, r *http.Request) {
 	})(w, r)
 }
 
-// ---- releases (backed by the pkrkit generic package registry) ----
+// ---- releases (backed by the artifactkit generic package registry) ----
 //
 // A Lab release maps to an artifact in the "generic" format:
 //   repository = "ns:repo"   (colon, so the generic URL path stays flat)
@@ -1917,8 +1917,8 @@ type labCreateReleaseReq struct {
 	Prerelease  bool   `json:"prerelease,omitempty"`
 }
 
-// releaseFromArtifact renders a pkrkit Artifact into a Lab release view.
-func releaseFromArtifact(a pkrkit.Artifact) labReleaseView {
+// releaseFromArtifact renders a artifactkit Artifact into a Lab release view.
+func releaseFromArtifact(a artifactkit.Artifact) labReleaseView {
 	view := labReleaseView{Tag: a.Version}
 	// Description/name/revision are round-tripped through the artifact's
 	// proprietary bytes as JSON.
@@ -1986,7 +1986,7 @@ func (s *server) labCreateRelease(w http.ResponseWriter, r *http.Request) {
 		}
 		repoName := releaseRepository(repo)
 		// Create/replace the artifact record; attachment uploads happen later.
-		art := pkrkit.Artifact{
+		art := artifactkit.Artifact{
 			Format: "generic", Repository: repoName, Version: req.Tag,
 		}
 		meta := labReleaseMeta{
@@ -2065,7 +2065,7 @@ func (s *server) labUploadReleaseAsset(w http.ResponseWriter, r *http.Request) {
 		if n := r.FormValue("name"); n != "" {
 			name = n
 		}
-		digest := pkrkit.DigestOf(data)
+		digest := artifactkit.DigestOf(data)
 		if _, err := s.registry.Blobs.PutIfAbsent(r.Context(), digest, bytes.NewReader(data)); err != nil {
 			labErr(w, http.StatusInternalServerError, err)
 			return
@@ -2078,7 +2078,7 @@ func (s *server) labUploadReleaseAsset(w http.ResponseWriter, r *http.Request) {
 				kept = append(kept, b)
 			}
 		}
-		art.Blobs = append(kept, pkrkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: name})
+		art.Blobs = append(kept, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: name})
 		if err := s.registry.Meta.Put(r.Context(), art); err != nil {
 			labErr(w, http.StatusInternalServerError, err)
 			return
@@ -2117,7 +2117,7 @@ func (s *server) labDownloadReleaseAsset(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	name := r.PathValue("asset")
-	var chosen pkrkit.Descriptor
+	var chosen artifactkit.Descriptor
 	for _, b := range art.Blobs {
 		if b.Name == name {
 			chosen = b

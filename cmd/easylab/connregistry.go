@@ -11,7 +11,7 @@ import (
 )
 
 // connRegistry implements easylabv1connect.RegistryServiceHandler over the
-// pkrkit index store.
+// artifactkit index store.
 type connRegistry struct {
 	s *server
 }
@@ -98,13 +98,13 @@ func (c *connRegistry) DeletePackageVersion(ctx context.Context, req *connect.Re
 
 func (c *connRegistry) ListPublishSpecs(ctx context.Context, req *connect.Request[easylabv1.ListPublishSpecsRequest]) (*connect.Response[easylabv1.ListPublishSpecsResponse], error) {
 	specs := make([]*easylabv1.PublishSpec, 0)
-	for _, name := range pkrkit.Registered() {
+	for _, name := range artifactkit.Registered() {
 		specs = append(specs, &easylabv1.PublishSpec{Protocol: name})
 	}
 	return connect.NewResponse(&easylabv1.ListPublishSpecsResponse{Specs: specs}), nil
 }
 
-// splitFormat extracts the format portion from a pkrkit repo key. Repos are
+// splitFormat extracts the format portion from a artifactkit repo key. Repos are
 // stored as "{format}/{repository}"; the generic/Lab release protocol uses a
 // single segment "ns:repo" with no format prefix, so it defaults to generic.
 func splitFormat(repo string) string {
@@ -114,7 +114,7 @@ func splitFormat(repo string) string {
 	return "generic"
 }
 
-// splitRepo returns (format, repository) from a pkrkit repo key.
+// splitRepo returns (format, repository) from a artifactkit repo key.
 func splitRepo(repo string) (string, string) {
 	if i := strings.Index(repo, "/"); i > 0 {
 		return repo[:i], repo[i+1:]

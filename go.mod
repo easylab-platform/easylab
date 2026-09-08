@@ -7,23 +7,23 @@ require (
 	github.com/abcp-sdk/agent-proto v0.5.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.1
-	github.com/easylab-platform/artifact/cargo v0.1.0
-	github.com/easylab-platform/artifact/composer v0.1.0
-	github.com/easylab-platform/artifact/conan v0.1.0
-	github.com/easylab-platform/artifact/core v0.1.1
-	github.com/easylab-platform/artifact/generic v0.1.0
-	github.com/easylab-platform/artifact/go v0.1.0
-	github.com/easylab-platform/artifact/helm v0.1.0
-	github.com/easylab-platform/artifact/hex v0.1.0
-	github.com/easylab-platform/artifact/maven v0.1.0
-	github.com/easylab-platform/artifact/npm v0.1.0
-	github.com/easylab-platform/artifact/nuget v0.1.0
-	github.com/easylab-platform/artifact/oci v0.1.0
-	github.com/easylab-platform/artifact/pub v0.1.0
-	github.com/easylab-platform/artifact/pypi v0.1.0
-	github.com/easylab-platform/artifact/rubygems v0.1.0
-	github.com/easylab-platform/artifact/swiftpm v0.1.0
-	github.com/easylab-platform/artifact/system v0.1.0
+	github.com/easylab-platform/artifact/cargo v0.1.1
+	github.com/easylab-platform/artifact/composer v0.1.1
+	github.com/easylab-platform/artifact/conan v0.1.1
+	github.com/easylab-platform/artifact/core v0.1.2
+	github.com/easylab-platform/artifact/generic v0.1.1
+	github.com/easylab-platform/artifact/go v0.1.1
+	github.com/easylab-platform/artifact/helm v0.1.1
+	github.com/easylab-platform/artifact/hex v0.1.1
+	github.com/easylab-platform/artifact/maven v0.1.1
+	github.com/easylab-platform/artifact/npm v0.1.1
+	github.com/easylab-platform/artifact/nuget v0.1.1
+	github.com/easylab-platform/artifact/oci v0.1.1
+	github.com/easylab-platform/artifact/pub v0.1.1
+	github.com/easylab-platform/artifact/pypi v0.1.1
+	github.com/easylab-platform/artifact/rubygems v0.1.1
+	github.com/easylab-platform/artifact/swiftpm v0.1.1
+	github.com/easylab-platform/artifact/system v0.1.1
 	github.com/easylab-platform/easylab-proto v0.5.1
 	github.com/easylab-platform/easyvcs v0.3.1
 )

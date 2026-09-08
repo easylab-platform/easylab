@@ -230,7 +230,7 @@ func TestLabFullFlow(t *testing.T) {
 	}
 }
 
-// newLabServer builds a server with the Lab schema and pkrkit registry
+// newLabServer builds a server with the Lab schema and artifactkit registry
 // initialized and no auth.
 func newLabServer(t *testing.T) *server {
 	t.Helper()

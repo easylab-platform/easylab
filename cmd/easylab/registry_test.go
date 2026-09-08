@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// TestLabReleaseViaPkrkit verifies Lab releases are served by the pkrkit
+// TestLabReleaseViaPkrkit verifies Lab releases are served by the artifactkit
 // generic registry: creating a release writes a generic artifact keyed by
 // repo, uploading an asset stores a content-addressed blob, and the download
 // returns the original bytes.
@@ -77,7 +77,7 @@ func TestLabReleaseViaPkrkit(t *testing.T) {
 	}
 }
 
-// TestLabGenericPackageProxy verifies the pkrkit generic protocol is mounted at
+// TestLabGenericPackageProxy verifies the artifactkit generic protocol is mounted at
 // /pkgs/generic and round-trips a raw artifact: PUT then GET.
 func TestLabGenericPackageProxy(t *testing.T) {
 	s := newLabServer(t)

@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/easylab-platform/artifact/core"
-	pkrstore "github.com/easylab-platform/artifact/core/store"
+	artifactstore "github.com/easylab-platform/artifact/core/store"
 
 	"github.com/easylab-platform/easyvcs/store"
 )
 
-// openRegistry builds the pkrkit package registry substrate rooted under the
+// openRegistry builds the artifactkit package registry substrate rooted under the
 // EasyVCS home dir. Metadata uses a switchable backend shared with the central
 // store (EASYVCS_DB_DRIVER / EASYVCS_DB_DSN; sqlite default, postgres/mysql), so
 // no external process is required for the default. Artifact bytes live on the
@@ -25,13 +25,13 @@ import (
 // Pull-through upstreams are enabled by default so clients can pull packages
 // from their public upstreams (npm, pypi, crates.io, ...) and cache them
 // locally. Set EASYVCS_AIRGAP=1 to disable all upstreams (local-only).
-func openRegistry(home string) (*pkrkit.Registry, error) {
+func openRegistry(home string) (*artifactkit.Registry, error) {
 	root := filepath.Join(home, "registry")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
 	}
 	// Metadata: switchable (shares EASYVCS_DB_* with the easyvcs engine).
-	idx, err := pkrstore.OpenStore(pkrstore.DriverConfig{
+	idx, err := artifactstore.OpenStore(artifactstore.DriverConfig{
 		Kind: envOrStr("EASYVCS_DB_DRIVER", "sqlite"),
 		DSN:  dbDSNOr(filepath.Join(root, "registry.db")),
 	})
@@ -44,15 +44,15 @@ func openRegistry(home string) (*pkrkit.Registry, error) {
 	if blobBackend == "" {
 		blobBackend = "filesystem"
 	}
-	blobs, err := pkrstore.OpenBlobStore(blobBackend, filepath.Join(root, "blobs"))
+	blobs, err := artifactstore.OpenBlobStore(blobBackend, filepath.Join(root, "blobs"))
 	if err != nil {
 		return nil, err
 	}
 	airGap := os.Getenv("EASYVCS_AIRGAP") == "1"
-	return &pkrkit.Registry{
+	return &artifactkit.Registry{
 		Blobs: blobs,
 		Meta:  idx,
-		Upstreams: &pkrkit.Upstreams{
+		Upstreams: &artifactkit.Upstreams{
 			Defaults:  defaultUpstreams(),
 			Overrides: map[string]string{},
 			Proxy:     map[string]string{},
@@ -70,7 +70,7 @@ func dbDSNOr(def string) string {
 	return def
 }
 
-// defaultUpstreams mirrors the pkr reference defaults, mapping each package
+// defaultUpstreams mirrors the artifact reference defaults, mapping each package
 // format (and its sub-endpoints) to its public upstream base URL.
 func defaultUpstreams() map[string]string {
 	return map[string]string{
@@ -100,7 +100,7 @@ func defaultUpstreams() map[string]string {
 }
 
 // labTokenAuth bridges EasyVCS Lab tokens (store tokens + legacy flat-token
-// set) onto pkrkit's Auth interface. A valid write-level token authenticates
+// set) onto artifactkit's Auth interface. A valid write-level token authenticates
 // as its user name; read-level and anonymous return "" (unauthorized).
 //
 // When the instance is open (no registered users and no legacy token set),
@@ -120,7 +120,7 @@ func (a *labTokenAuth) isOpen() bool {
 	return err == nil && len(users) == 0
 }
 
-// Authenticate implements pkrkit.Auth. It returns a username for a valid
+// Authenticate implements artifactkit.Auth. It returns a username for a valid
 // write-level bearer token, or "" when the caller is read-only/anonymous.
 func (a *labTokenAuth) Authenticate(_ context.Context, r *http.Request) string {
 	if a.isOpen() {
@@ -145,7 +145,7 @@ func (a *labTokenAuth) Authenticate(_ context.Context, r *http.Request) string {
 	return ""
 }
 
-// CheckBearer implements pkrkit.Auth for OCI scopes.
+// CheckBearer implements artifactkit.Auth for OCI scopes.
 func (a *labTokenAuth) CheckBearer(_ context.Context, token, _ string) (string, bool) {
 	if a.isOpen() {
 		return "open", true
@@ -162,18 +162,18 @@ func (a *labTokenAuth) CheckBearer(_ context.Context, token, _ string) (string, 
 	return "", false
 }
 
-// CheckToken implements pkrkit.Auth for raw tokens (cargo/npm/publish).
+// CheckToken implements artifactkit.Auth for raw tokens (cargo/npm/publish).
 func (a *labTokenAuth) CheckToken(_ context.Context, token string) (string, bool) {
 	return a.CheckBearer(context.Background(), token, "")
 }
 
-// CheckBasic implements pkrkit.Auth for basic auth (user:token).
+// CheckBasic implements artifactkit.Auth for basic auth (user:token).
 func (a *labTokenAuth) CheckBasic(_ context.Context, _, pass string) bool {
 	_, ok := a.CheckBearer(context.Background(), pass, "")
 	return ok
 }
 
-// IssueToken implements pkrkit.Auth. The Lab realm uses static tokens as
+// IssueToken implements artifactkit.Auth. The Lab realm uses static tokens as
 // credentials, so we return a valid write-level token for the authenticated
 // principal (the client will present it as a Bearer token on subsequent
 // requests, which CheckBearer/CheckToken validate against the store).
