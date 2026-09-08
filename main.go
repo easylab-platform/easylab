@@ -1,7 +1,7 @@
 package main
 
 import (
-	easylabsdk "github.com/easylab-platform/easylab-client-sdk"
+	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 	"context"
 	_ "embed"
 	"log/slog"
@@ -42,7 +42,7 @@ func main() {
 	log := slog.Default().With("svc", "repo-extension")
 	s := &server{
 		base:  envOr("EASYLAB_URL", "http://127.0.0.1:18160"),
-		agent: envOr("AGENT_URL", "http://agent.easylab.svc.cluster.local:80"),
+		agent: envOr("AGENT_URL", "http://abcp-agent.temp.svc.cluster.local"),
 	}
 	s.lab = newClient(s.base, envOr("EASYLAB_TOKEN", "devtoken"))
 	s.sdk = easylabsdk.New(s.base, envOr("EASYLAB_TOKEN", "devtoken"))

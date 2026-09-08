@@ -14,13 +14,13 @@ import (
 	"time"
 
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
-	"github.com/easylab-platform/easylab-client-sdk"
+	"github.com/easylab-platform/easylab-sdk-go"
 )
 
 // easylabClient bridges ext/repo onto the easylab lab API.
 //
 // Core repo/branch/blob/commit operations go through the typed
-// easylab-client-sdk (Connect). Bookmark semantics are gone upstream — they
+// easylab-sdk-go (Connect). Bookmark semantics are gone upstream — they
 // map to branches. A small REST helper is retained only for tool-specific
 // read-only endpoints that have no proto RPC yet (graph / compare / search),
 // so the ext still works end-to-end while the contract grows.
