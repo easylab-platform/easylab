@@ -52,6 +52,10 @@ spec:
               value: http://127.0.0.1:8000
             - name: EASYLAB_OPSEXT_URL
               value: http://127.0.0.1:18092
+            # ---- 访问令牌：开启鉴权后 Flutter/客户端登录需填该值。
+            # 设置为 devtoken，登录界面 token 填 devtoken。
+            - name: EASYVCS_TOKEN
+              value: devtoken
             # ---- 服务容器与 easylab 共同的出站正向代理（部署可替换）。
             # easylab 回源 + 被拉起容器的普速出站（github 等非包流量）都走它；
             # 包制品（npm/pip/go/cargo）经 easylab pull-through 缓存，不走它。
