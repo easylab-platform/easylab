@@ -23,7 +23,7 @@ spec:
       containers:
         # ---- easylab core (Go) — drives podman sidecar via Docker-compatible API
         - name: easylab
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260907184456
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260908021754
           imagePullPolicy: IfNotPresent
           args: ["-addr", "0.0.0.0:8080"]
           env:
@@ -123,7 +123,7 @@ spec:
 
         # ---- agent (abc session backend)
         - name: agent
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260906184857
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260908024211
           imagePullPolicy: IfNotPresent
           env:
             - name: NATS_URL
@@ -132,7 +132,10 @@ spec:
               value: sqlite
             - name: DATABASE_URL
               value: sqlite:///data/agent.db
-            - name: AGENT_PORT
+            # New agent config reads PORT (config.ts). Keep listening on 8000
+            # so easylab's gateway (EASYLAB_AGENT_URL=http://127.0.0.1:8000)
+            # keeps working on the shared pod netns.
+            - name: PORT
               value: "8000"
           ports:
             - containerPort: 8000

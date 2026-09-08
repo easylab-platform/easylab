@@ -23,6 +23,18 @@ var (
 	errNotFound   = errors.New("not found")
 )
 
+// agentHTTPClient speaks unencrypted HTTP/2 (h2c prior knowledge): the agent
+// backend serves RPC/REST exclusively over HTTP/2, so the UI-forwarding proxy
+// must not use the HTTP/1.1 DefaultClient.
+var agentHTTPClient = func() *http.Client {
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(false)
+	protocols.SetUnencryptedHTTP2(true)
+	return &http.Client{
+		Transport: &http.Transport{Protocols: protocols},
+	}
+}()
+
 // API aggregates the EasyLab resources for the UI.
 type API struct {
 	CS *store.CentralStore
@@ -406,7 +418,9 @@ func (a *API) proxy(w http.ResponseWriter, r *http.Request, target string) {
 		return
 	}
 	req.Header = r.Header.Clone()
-	resp, err := http.DefaultClient.Do(req)
+	// The agent speaks HTTP/2 (h2c prior knowledge) exclusively, so the
+	// forwarder needs an unencrypted-h2 transport rather than DefaultClient.
+	resp, err := agentHTTPClient.Do(req)
 	if err != nil {
 		writeErr(w, err)
 		return

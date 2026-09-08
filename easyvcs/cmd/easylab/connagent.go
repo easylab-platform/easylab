@@ -19,10 +19,23 @@ type connAgent struct {
 	client agentv1connect.AgentServiceClient
 }
 
+// h2cClient speaks unencrypted HTTP/2 (prior knowledge): the agent serves
+// RPC/REST exclusively over HTTP/2, so plain HTTP/1.1 clients cannot talk to
+// it. Go only enables h2 over TLS by default; the Protocols knob opts the
+// transport into h2c on plain http:// URLs.
+func h2cClient() *http.Client {
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(false)
+	protocols.SetUnencryptedHTTP2(true)
+	return &http.Client{
+		Transport: &http.Transport{Protocols: protocols},
+	}
+}
+
 func newConnAgent(baseURL, token string) *connAgent {
 	return &connAgent{
 		client: agentv1connect.NewAgentServiceClient(
-			http.DefaultClient,
+			h2cClient(),
 			baseURL,
 			connect.WithInterceptors(agentAuthInterceptor(token)),
 		),
