@@ -93,6 +93,11 @@ func main() {
 	// Start the background mirror scheduler (push on-change, pull on-interval).
 	go s.runMirrorLoop(context.Background())
 
+	// Launch the extension containers (ops + repo) so the agent discovers their
+	// tools via NATS. We drive them through the same ops service runner that
+	// OpsService/LaunchService uses (internal registry, no TLS, no side pull).
+	launchExtensions(s, opsState)
+
 	mux := s.router()
 	_ = mux
 
