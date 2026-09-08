@@ -55,8 +55,8 @@ github.com/easylab-platform/artifact/oci v0.1.1 h1:zGM3X2E4EyvA/rmnheoEbIaYeQUCI
 github.com/easylab-platform/artifact/oci v0.1.1/go.mod h1:DpTYHYOplKfVXyaE2pC78lUCG2Xf3DzipH+/G4xhezA=
 github.com/easylab-platform/artifact/pub v0.1.1 h1:l4WjGlvTWbcGZ3eCeH2oQEuPZHkxda9cpRlEkcdgCdk=
 github.com/easylab-platform/artifact/pub v0.1.1/go.mod h1:Y7NwcLyht/urHxJ0oaDgpGtNmj6Xrk4glQ7n0AIL8NY=
-github.com/easylab-platform/artifact/pypi v0.1.1 h1:7NxmEnl9TN0SaBOfXEA6eR1E17RzTHK1eobH/+RENhE=
-github.com/easylab-platform/artifact/pypi v0.1.1/go.mod h1:3sT98wSWg7Z8maMpLNHvqh3h+YDYwYhbexwvA2rrXq8=
+github.com/easylab-platform/artifact/pypi v0.1.2 h1:HOU7UUufVP89M79utoxjJT12qobuF0KdXW+NMUjK2os=
+github.com/easylab-platform/artifact/pypi v0.1.2/go.mod h1:3sT98wSWg7Z8maMpLNHvqh3h+YDYwYhbexwvA2rrXq8=
 github.com/easylab-platform/artifact/rubygems v0.1.1 h1:J1iRkOCM+oAoRq8lDTzVGwJkvJog4HpeFs9j9vsgPv4=
 github.com/easylab-platform/artifact/rubygems v0.1.1/go.mod h1:p0+Xs28Dv363z5TAglU9XSwQn1gWjQBiKv5T9viUvh4=
 github.com/easylab-platform/artifact/swiftpm v0.1.1 h1:/JzKdQENSo1iVxNN3eeKpR/mOoE8xqmtLscwW0Mlpa4=

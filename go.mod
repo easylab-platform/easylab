@@ -20,7 +20,7 @@ require (
 	github.com/easylab-platform/artifact/nuget v0.1.1
 	github.com/easylab-platform/artifact/oci v0.1.1
 	github.com/easylab-platform/artifact/pub v0.1.1
-	github.com/easylab-platform/artifact/pypi v0.1.1
+	github.com/easylab-platform/artifact/pypi v0.1.2
 	github.com/easylab-platform/artifact/rubygems v0.1.1
 	github.com/easylab-platform/artifact/swiftpm v0.1.1
 	github.com/easylab-platform/artifact/system v0.1.1
