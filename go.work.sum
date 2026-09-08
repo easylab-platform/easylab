@@ -1,7 +1,6 @@
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/abcp-sdk/abc-protocol-go v1.0.9/go.mod h1:Pj40eYsDYx1n8Gf2BiQU7Rf9IESUggv4JIaXJf9u01o=
 github.com/abcp-sdk/agent-proto v0.1.0/go.mod h1:drrTDKXOWLDIc1xXIpuuOZxEeUKjvRgZ46Whdu6vZjk=
-github.com/abcp-sdk/agent-sdk v0.1.0/go.mod h1:UQ3AV2g2C9wGtl9pHFdN/kLFOsV280EsBg6/+KmB8W8=
 github.com/containerd/typeurl/v2 v2.2.0/go.mod h1:8XOOxnyatxSWuG8OfsZXVnAF4iZfedjS/8UHSPJnX4g=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=

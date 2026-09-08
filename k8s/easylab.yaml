@@ -23,7 +23,7 @@ spec:
       containers:
         # ---- easylab core (Go) — drives podman sidecar via Docker-compatible API
         - name: easylab
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260908031800
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260908074057
           imagePullPolicy: IfNotPresent
           args: ["-addr", "0.0.0.0:8080"]
           env:
@@ -52,7 +52,11 @@ spec:
               value: http://127.0.0.1:8000
             - name: EASYLAB_OPSEXT_URL
               value: http://127.0.0.1:18092
-            # ---- 访问令牌：开启鉴权后 Flutter/客户端登录需填该值。
+            # ---- HTTP/2 偏好（默认=0 兼容 h1，客户端支持时用 h2c）；
+            # =1 时才会拒绝 connect 路径上的 HTTP/1.x 请求（强制 h2c）
+            - name: EASYVCS_ENFORCE_H2
+              value: "0"
+            # ---- HTTP/2 执法（可选）：=1 时拒绝 connect 路径上的 HTTP/1.x 请求
             # 设置为 devtoken，登录界面 token 填 devtoken。
             - name: EASYVCS_TOKEN
               value: devtoken
