@@ -15,10 +15,12 @@ import (
 )
 
 // openRegistry builds the pkrkit package registry substrate rooted under the
-// EasyVCS home dir. It reuses the same pure-Go SQLite driver as the central
-// store (one DB file for the metadata index; blobs inline as BLOBs), so no
-// external process is required. The registry backs Lab "releases" (generic
-// format) and, when mounted, language-package protocols.
+// EasyVCS home dir. Metadata uses a switchable backend shared with the central
+// store (EASYVCS_DB_DRIVER / EASYVCS_DB_DSN; sqlite default, postgres/mysql), so
+// no external process is required for the default. Artifact bytes live on the
+// filesystem (EASYVCS_BLOB_BACKEND=filesystem default; s3 is a placeholder that
+// falls back to filesystem). The registry backs Lab "releases" (generic format)
+// and, when mounted, language-package protocols.
 //
 // Pull-through upstreams are enabled by default so clients can pull packages
 // from their public upstreams (npm, pypi, crates.io, ...) and cache them
@@ -28,23 +30,23 @@ func openRegistry(home string) (*pkrkit.Registry, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
 	}
-	idx, err := pkrstore.OpenSQLite(filepath.Join(root, "registry.db"))
+	// Metadata: switchable (shares EASYVCS_DB_* with the easyvcs engine).
+	idx, err := pkrstore.OpenStore(pkrstore.DriverConfig{
+		Kind: envOrStr("EASYVCS_DB_DRIVER", "sqlite"),
+		DSN:  dbDSNOr(filepath.Join(root, "registry.db")),
+	})
 	if err != nil {
 		return nil, err
 	}
-	var blobs pkrkit.BlobStore = pkrstore.NewSQLiteBlobStore(idx.DB())
-	// BLOB_BACKEND selects where artifact content lives. "sqlite" (default)
-	// stores blobs inline in the registry DB; "s3" is the clusterizable seam
-	// (placeholder until an S3/MinIO backend is implemented) so horizontal
-	// scaling can share one object store. The BlobStore is the only seam the
-	// pkrkit Registry needs — swap it without touching the registry logic.
-	switch os.Getenv("EASYVCS_BLOB_BACKEND") {
-	case "s3":
-		// Placeholder: S3/MinIO blob backend. Falls through to sqlite until the
-		// s3 implementation lands, so a misconfigured env never breaks startup.
-		// TODO(agent): implement BlobStore over S3/MinIO.
-	default:
-		// sqlite (default) — inline BLOBs in the registry DB.
+	// Blob content: filesystem default; "s3" is a placeholder that falls back to
+	// the filesystem CAS so a misconfigured deployment never fails to start.
+	blobBackend := strings.ToLower(os.Getenv("EASYVCS_BLOB_BACKEND"))
+	if blobBackend == "" {
+		blobBackend = "filesystem"
+	}
+	blobs, err := pkrstore.OpenBlobStore(blobBackend, filepath.Join(root, "blobs"))
+	if err != nil {
+		return nil, err
 	}
 	airGap := os.Getenv("EASYVCS_AIRGAP") == "1"
 	return &pkrkit.Registry{
@@ -57,6 +59,15 @@ func openRegistry(home string) (*pkrkit.Registry, error) {
 			AirGap:    airGap,
 		},
 	}, nil
+}
+
+// dbDSNOr returns the metadata DSN: EASYVCS_DB_DSN if set, else the given
+// sqlite path (used for the default sqlite backend).
+func dbDSNOr(def string) string {
+	if d := os.Getenv("EASYVCS_DB_DSN"); d != "" {
+		return d
+	}
+	return def
 }
 
 // defaultUpstreams mirrors the pkr reference defaults, mapping each package
