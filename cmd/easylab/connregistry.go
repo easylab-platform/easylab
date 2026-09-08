@@ -104,6 +104,22 @@ func (c *connRegistry) ListPublishSpecs(ctx context.Context, req *connect.Reques
 	return connect.NewResponse(&easylabv1.ListPublishSpecsResponse{Specs: specs}), nil
 }
 
+// OCICatalog returns the OCI repositories in the internal registry.
+func (c *connRegistry) OCICatalog(ctx context.Context, req *connect.Request[easylabv1.OCICatalogRequest]) (*connect.Response[easylabv1.OCICatalogResponse], error) {
+	repos, err := c.s.registry.Meta.ListRepositories(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	out := make([]string, 0, len(repos))
+	for _, r := range repos {
+		if !strings.HasPrefix(r, "oci/") {
+			continue
+		}
+		out = append(out, strings.TrimPrefix(r, "oci/"))
+	}
+	return connect.NewResponse(&easylabv1.OCICatalogResponse{Repositories: out}), nil
+}
+
 // splitFormat extracts the format portion from a artifactkit repo key. Repos are
 // stored as "{format}/{repository}"; the generic/Lab release protocol uses a
 // single segment "ns:repo" with no format prefix, so it defaults to generic.

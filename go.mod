@@ -24,7 +24,7 @@ require (
 	github.com/easylab-platform/artifact/rubygems v0.1.1
 	github.com/easylab-platform/artifact/swiftpm v0.1.1
 	github.com/easylab-platform/artifact/system v0.1.1
-	github.com/easylab-platform/easylab-proto v0.5.1
+	github.com/easylab-platform/easylab-proto v0.5.2
 	github.com/easylab-platform/easyvcs v0.5.1
 )
 
