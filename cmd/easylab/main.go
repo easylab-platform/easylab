@@ -6,6 +6,7 @@
 package main
 
 import (
+	"time"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -283,7 +284,7 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 		return
 	}
 	reg := s.registry
-	auth := &labTokenAuth{cs: s.cs, tokens: s.tokens}
+	auth := newLabTokenAuth(s.cs, s.tokens)
 	for _, name := range artifactkit.Registered() {
 		// Build per-protocol config with the correct self_base: OCI uses the
 		// origin root (its /token realm), everything else prefixes /pkgs/<name>.
@@ -327,20 +328,41 @@ func (s *server) serveOCIToken(w http.ResponseWriter, r *http.Request, auth arti
 		}
 	}
 	username := auth.Authenticate(r.Context(), r)
-	canWrite := false
-	for _, sc := range scopes {
-		if strings.HasSuffix(sc, ":push") || strings.HasSuffix(sc, ":delete") {
-			canWrite = true
-		}
-	}
+	canWrite := scopeRequestsWrite(scopes)
 	if username == "" && canWrite {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"errors": []any{
 			map[string]any{"code": "UNAUTHORIZED", "message": "authentication required"},
 		}})
 		return
 	}
-	tok := auth.IssueToken(r.Context(), username, scopes, 3600)
+	tok := auth.IssueToken(r.Context(), username, scopes, time.Hour)
+	if tok == "" && canWrite {
+		// The auth layer refused to mint for this principal (not privileged
+		// enough for the requested scope).
+		writeJSON(w, http.StatusForbidden, map[string]any{"errors": []any{
+			map[string]any{"code": "DENIED", "message": "insufficient privilege for requested scope"},
+		}})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "access_token": tok, "expires_in": 3600})
+}
+
+// scopeRequestsWrite reports whether any requested scope asks for a write
+// action. OCI scopes may carry comma-separated actions
+// ("repository:name:pull,push"), so the action set is split before matching.
+func scopeRequestsWrite(scopes []string) bool {
+	for _, sc := range scopes {
+		i := strings.LastIndex(sc, ":")
+		if i < 0 {
+			continue
+		}
+		for _, a := range strings.Split(sc[i+1:], ",") {
+			if a == "push" || a == "delete" || a == "*" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
