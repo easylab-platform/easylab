@@ -15,12 +15,12 @@ import (
 	"github.com/abcp-sdk/abc-protocol-go/extension"
 	"github.com/abcp-sdk/abc-protocol-go/manifest"
 	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
+	
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"easyvcs-ext-ops/internal/worker"
 
-	agentsdk "github.com/abcp-sdk/agent-sdk-go"
 	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 )
 
@@ -29,7 +29,7 @@ var manifestYaml []byte
 
 type server struct {
 	sdk               *easylabsdk.Client // typed easylab client (lab+ops+registry, owns all k8s access)
-	agent             *agentsdk.Client   // typed abc agent client (files)
+	bus               *natsbus.Bus          // NATS bus (file store / abc)
 	workerImage       string             // sandbox worker image (easylab runs it)
 	runtimeNamespace  string             // namespace where easylab creates sandboxes/deployments
 	ext               *extension.Extension
@@ -79,8 +79,7 @@ func main() {
 		artifactToken:     artifactToken,
 		base:              base,
 		easylabToken:      easylabToken,
-		agent:             agentsdk.New(envOr("AGENT_URL", envOr("AGENT_API_BASE", "http://abcp-agent.temp.svc.cluster.local")), envOr("AGENT_API_KEY", "")),
-		workerImage:       img,
+			workerImage:       img,
 		runtimeNamespace:  runtimeNS,
 		wsCache:           map[string]wsCacheEntry{},
 		synced:            map[string]string{},
@@ -105,6 +104,7 @@ func main() {
 			slog.Error("load manifest failed", "svc", "ops-extension", "err", err)
 			os.Exit(1)
 		}
+		s.bus = nbus
 
 		r := s.router(toolBridge)
 

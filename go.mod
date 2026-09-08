@@ -4,8 +4,7 @@ go 1.26.3
 
 require (
 	connectrpc.com/connect v1.20.0
-	github.com/abcp-sdk/abc-protocol-go v1.0.9
-	github.com/abcp-sdk/agent-sdk-go v0.5.0
+	github.com/abcp-sdk/abc-protocol-go v1.1.0
 	github.com/easylab-platform/easylab-sdk-go v0.8.0
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/google/uuid v1.6.0
