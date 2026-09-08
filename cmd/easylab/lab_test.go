@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	artifactkit "github.com/easylab-platform/artifact/core"
 	"github.com/easylab-platform/easyvcs/store"
 )
 
@@ -251,7 +252,7 @@ func newLabServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &server{cs: cs, registry: reg, ops: opsState, auth: newLabTokenAuth(cs)}
+	return &server{cs: cs, registry: reg, ops: opsState, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
 }
 
 // TestLabVisibilityEnforced verifies that a private repository is hidden from

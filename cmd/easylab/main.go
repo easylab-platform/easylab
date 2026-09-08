@@ -60,8 +60,8 @@ type server struct {
 	selfBase string
 	ops      *opsState
 	// auth is the artifactkit Auth over the easyvcs credential store
-	// (minted-token semantics; see registry.go).
-	auth *labTokenAuth
+	// (unified minted-token semantics via StoreAuth; see easyvcs_token_store.go).
+	auth artifactkit.Auth
 }
 
 func main() {
@@ -89,7 +89,7 @@ func main() {
 	if err != nil {
 		log.Fatal("init ops:", err)
 	}
-	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, auth: newLabTokenAuth(cs)}
+	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
 
 	// Start the background mirror scheduler (push on-change, pull on-interval).
 	go s.runMirrorLoop(context.Background())
@@ -172,7 +172,7 @@ func (s *server) authOK(r *http.Request) bool {
 	if token == "" || token == header {
 		return false
 	}
-	_, _, ok := s.auth.resolve(token)
+	_, ok := s.auth.CheckToken(r.Context(), token)
 	return ok
 }
 
@@ -263,16 +263,20 @@ func (s *server) mountOps(mux *http.ServeMux) {
 // protocol (raw artifacts, used by Lab releases) is always mounted; the OCI
 // registry is mounted at /v2 and each language protocol at /pkgs/<name>.
 //
-// A labTokenAuth is always supplied so write authentication is decided live
-// against the store: when the instance is open (no registered users/tokens)
-// anonymous write is permitted, otherwise a valid write-level token is
+// A StoreAuth (over the easyvcs credential store) is always supplied to the
+// registry so write authentication is decided live against the store: when the
+// instance is open (no registered users/tokens) anonymous write is permitted,
+// otherwise a valid write-level token is
 // required. This mirrors the Lab's labPrincipal policy.
 func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 	if s.registry == nil {
 		return
 	}
 	reg := s.registry
-	auth := newLabTokenAuth(s.cs)
+	auth := s.auth
+	if auth == nil {
+		auth = artifactkit.NewStoreAuth(newEasyvcsTokenStore(s.cs))
+	}
 	for _, name := range artifactkit.Registered() {
 		// Build per-protocol config with the correct self_base: OCI uses the
 		// origin root (its /token realm), everything else prefixes /pkgs/<name>.
