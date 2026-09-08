@@ -81,15 +81,104 @@ spec:
         - name: podman
           image: forgejo.develop.10.199.64.20.nip.io/easylab/podman:official
           imagePullPolicy: IfNotPresent
-command: ["bash", "-c", "cat > /etc/containers/registries.conf.d/100-insecure.conf <<'EOF'
-[[registry]]
-location = \"127.0.0.1:8080\"
-insecure = true
-[[registry]]
-location = \"easylab.temp.svc.cluster.local:8080\"
-insecure = true
-[[registry]]
-location = \"forgejo.develop.10.199.64.20.nip.io\"
-insecure = true
-EOF
-exec podman system service --time=0 unix:///run/podman/podman.sock"]
+          command: ["bash", "-c", "cat > /etc/containers/registries.conf.d/100-insecure.conf <<'EOF'\n[[registry]]\nlocation = \"127.0.0.1:8080\"\ninsecure = true\n[[registry]]\nlocation = \"easylab.temp.svc.cluster.local:8080\"\ninsecure = true\n[[registry]]\nlocation = \"forgejo.develop.10.199.64.20.nip.io\"\ninsecure = true\nEOF\nexec podman system service --time=0 unix:///run/podman/podman.sock"]
+          env:
+            - name: EASYLAB_EXT_TAG
+              value: "20260907044106"
+            - name: FORGEJO_USER
+              value: root
+            - name: FORGEJO_PASS
+              value: devpassword
+            - name: HTTP_PROXY
+              value: http://mihomo.develop.svc.cluster.local:7890
+            - name: HTTPS_PROXY
+              value: http://mihomo.develop.svc.cluster.local:7890
+            - name: NO_PROXY
+              value: localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io
+          securityContext:
+            allowPrivilegeEscalation: true
+            privileged: true
+            runAsUser: 0
+            seccompProfile: { type: Unconfined }
+            capabilities:
+              add: [SYS_ADMIN, NET_ADMIN, NET_RAW, SYS_PTRACE]
+          resources:
+            limits: { cpu: "2", memory: 2Gi }
+            requests: { cpu: 500m, memory: 512Mi }
+          volumeMounts:
+            - { mountPath: /data/oci, name: data, subPath: oci }
+            - { mountPath: /data/logs, name: data, subPath: logs }
+            - { mountPath: /sys/fs/cgroup, name: cgroup }
+            - { mountPath: /run/podman, name: podman-sock }
+
+        # ---- nats
+        - name: nats
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/nats:latest
+          imagePullPolicy: IfNotPresent
+          args: ["-js", "-p", "4222", "-m", "8222", "-sd", "/data/nats"]
+          ports:
+            - containerPort: 4222
+              protocol: TCP
+          resources:
+            limits: { cpu: 500m, memory: 512Mi }
+            requests: { cpu: 100m, memory: 64Mi }
+          volumeMounts:
+            - { mountPath: /data/nats, name: data, subPath: nats }
+
+        # ---- agent (abc session backend)
+        - name: agent
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260908024211
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NATS_URL
+              value: nats://127.0.0.1:4222
+            - name: DB_BACKEND
+              value: sqlite
+            - name: DATABASE_URL
+              value: sqlite:///data/agent.db
+            # New agent config reads PORT (config.ts). Keep listening on 8000
+            # so easylab's gateway (EASYLAB_AGENT_URL=http://127.0.0.1:8000)
+            # keeps working on the shared pod netns.
+            - name: PORT
+              value: "8000"
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+          resources:
+            limits: { cpu: "1", memory: 1Gi }
+            requests: { cpu: 100m, memory: 128Mi }
+          volumeMounts:
+            - { mountPath: /data, name: data, subPath: agent-data }
+
+      volumes:
+        - name: data
+          hostPath:
+            path: /home/develop/.easylab
+            type: DirectoryOrCreate
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+            type: Directory
+        - name: podman-sock
+          emptyDir: {}
+
+---
+# In-cluster entrypoint for the abc agent (abcp-sdk/agent): cleartext
+# HTTP/2 (h2c prior knowledge) into the easylab pod's agent container.
+# Consumers use the Go agentsdk / TS @easylab/sdk/node createAgentClient.
+# The zergx agent is deprecated — everything targets this service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: abcp-agent
+  namespace: temp
+  labels:
+    app: easylab
+spec:
+  type: ClusterIP
+  selector:
+    app: easylab
+  ports:
+    - name: h2c
+      port: 80
+      targetPort: 8000
