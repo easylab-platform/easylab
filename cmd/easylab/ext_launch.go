@@ -32,15 +32,14 @@ func launchExtensions(s *server, st *opsState) {
 			natsURL = "nats://" + ip + ":4222"
 		}
 	}
-	registry := registryHost()
 	type ext struct {
 		name  string
 		image string
 		port  string
 	}
 	exts := []ext{
-		{"ops-ext", registry + "/easylab/ext-ops:20260906170000", "18092"},
-		{"repo-ext", registry + "/easylab/ext-repo:20260906170000", "18093"},
+		{"ops-ext", "forgejo.develop.10.199.64.20.nip.io/easylab/ops-extension:20260908074246", "18092"},
+		{"repo-ext", "forgejo.develop.10.199.64.20.nip.io/easylab/repo-extension:20260908074246", "18093"},
 	}
 	for _, e := range exts {
 		launched := false
