@@ -102,17 +102,17 @@ func defaultUpstreams() map[string]string {
 	}
 }
 
-// labTokenAuth bridges EasyVCS Lab tokens (store tokens + legacy flat-token
-// set) onto artifactkit's Auth interface. A valid write-level token authenticates
-// as its user name; read-level and anonymous return "" (unauthorized).
+// labTokenAuth bridges EasyVCS Lab tokens (store tokens) onto artifactkit's
+// Auth interface. A valid write-level token authenticates as its user name;
+// read-level and anonymous return "" (unauthorized).
 //
-// When the instance is open (no registered users and no legacy token set),
-// anonymous write is permitted so a fresh single-user deployment is
-// frictionless, matching the Lab's labPrincipal behavior.
+// When the instance is open (no registered users), anonymous write is
+// permitted so a fresh single-user deployment is frictionless, matching the
+// Lab's labPrincipal behavior.
 //
 // IssueToken mints RANDOM short-lived bearer tokens bound to the grantee's
-// privilege (see mintedTokens) instead of echoing a static store/flat token —
-// the long-lived credential never appears in a token response.
+// privilege (see mintedTokens) instead of echoing a static store token — the
+// long-lived credential never appears in a token response.
 type labTokenAuth struct {
 	cs *store.CentralStore
 
