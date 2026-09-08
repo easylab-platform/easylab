@@ -185,12 +185,6 @@ func (c *connAgent) GetFile(ctx context.Context, req *connect.Request[agentv1.Ge
 func (c *connAgent) GetFileMeta(ctx context.Context, req *connect.Request[agentv1.GetFileMetaRequest]) (*connect.Response[agentv1.GetFileMetaResponse], error) {
 	return c.client.GetFileMeta(ctx, req)
 }
-func (c *connAgent) ListWorksheets(ctx context.Context, req *connect.Request[agentv1.ListWorksheetsRequest]) (*connect.Response[agentv1.ListWorksheetsResponse], error) {
-	return c.client.ListWorksheets(ctx, req)
-}
-func (c *connAgent) DecideWorksheet(ctx context.Context, req *connect.Request[agentv1.DecideWorksheetRequest]) (*connect.Response[agentv1.DecideWorksheetResponse], error) {
-	return c.client.DecideWorksheet(ctx, req)
-}
 func (c *connAgent) GetAgentConfig(ctx context.Context, req *connect.Request[agentv1.GetAgentConfigRequest]) (*connect.Response[agentv1.GetAgentConfigResponse], error) {
 	return c.client.GetAgentConfig(ctx, req)
 }
