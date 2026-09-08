@@ -12,7 +12,7 @@ import (
 
 	"connectrpc.com/connect"
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
-	easylabsdk "github.com/easylab-platform/easylab-client-sdk"
+	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 )
 
 // --- fake easylab Connect server (OpsService Sync + LabService Branches) ---
@@ -44,7 +44,15 @@ func newFakeLab(t *testing.T, handler func(proc string, body []byte) (any, []byt
 		w.Header().Set("Content-Type", "application/proto")
 		_, _ = w.Write(out)
 	})
-	return httptest.NewServer(mux)
+	// easylab SDK speaks HTTP/2 only; make the fake gateway dual-stack.
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Config.Protocols = protocols
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 func readAll(t *testing.T, r *http.Request) []byte {
@@ -97,7 +105,12 @@ func TestSyncStateMachine(t *testing.T) {
 		w.Header().Set("Content-Type", "application/proto")
 		_, _ = w.Write(out)
 	})
-	fakeLab := httptest.NewServer(mux)
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+	fakeLab := httptest.NewUnstartedServer(mux)
+	fakeLab.Config.Protocols = protocols
+	fakeLab.Start()
 	defer fakeLab.Close()
 
 	s := &server{sdk: easylabsdk.New(fakeLab.URL, "devtoken"), runtimeNamespace: "temp",

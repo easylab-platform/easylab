@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/abcp-sdk/abc-protocol-go/extension"
+	"connectrpc.com/connect"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"net/url"
+	"strings"
 )
 
 func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
@@ -63,11 +67,12 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 			if all {
 				q.Set("all", "1")
 			}
-			u := s.base + "/api/v1/ops/images"
-			if s := q.Encode(); s != "" {
-				u += "?" + s
+			// OCI catalog via the /v2 registry (h1 artifact face).
+			u := s.artifact + "/v2/_catalog"
+			if repo := strArg(args, "repo"); repo != "" {
+				u += "?repo=" + url.QueryEscape(repo)
 			}
-			v, err := s.httpGetJSON(ctx, u)
+			v, err := s.httpGetJSONArtifact(ctx, u)
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "container-search failed: %v", "container-search 失败：%v", err)
 			}
@@ -98,13 +103,21 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 	}
 	m["package-search"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-			u := s.base + "/api/v1/ops/packages"
-			if p := strArg(args, "protocol"); p != "" {
-				u += "?protocol=" + url.QueryEscape(p)
-			}
-			v, err := s.httpGetJSON(ctx, u)
+			types, err := s.sdk.ListPackageTypes(ctx)
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "package-search failed: %v", "package-search 失败：%v", err)
+			}
+			proto := strArg(args, "protocol")
+			var lines []string
+			for _, t := range types {
+				if proto != "" && t.GetType() != proto {
+					continue
+				}
+				lines = append(lines, t.GetType()+": "+fmt.Sprintf("%d packages", t.GetPackages()))
+			}
+			v := strings.Join(lines, "\n")
+			if v == "" {
+				v = "no packages found"
 			}
 			return extension.ToolResultData{Content: v}, nil
 		},
@@ -123,9 +136,17 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 			if org == "" {
 				org = "external"
 			}
-			v, err := s.httpPostJSON(ctx, s.base+"/api/v1/repos/"+urlPathEscape(org)+"/"+urlPathEscape(repo)+"/clone",
-				map[string]interface{}{"url": gitURL})
-			return extension.ToolResultData{Content: v}, err
+			res, err := s.sdk.Lab.CloneRepo(ctx, connect.NewRequest(&easylabv1.CloneRepoRequest{
+				Org: org, Repo: repo, GitUrl: gitURL,
+			}))
+			if err != nil {
+				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "clone failed: %v", "克隆失败：%v", err)
+			}
+			ok := "failed"
+			if res.Msg.GetOk() {
+				ok = "cloned"
+			}
+			return extension.ToolResultData{Content: ok + " " + org + "/" + repo}, nil
 		},
 	}
 }

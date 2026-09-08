@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
-	easylabsdk "github.com/easylab-platform/easylab-client-sdk"
+	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 	"strings"
 )
 

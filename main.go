@@ -21,7 +21,7 @@ import (
 	"easyvcs-ext-ops/internal/worker"
 
 	agentsdk "github.com/abcp-sdk/agent-sdk"
-	easylabsdk "github.com/easylab-platform/easylab-client-sdk"
+	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 )
 
 //go:embed manifest.yaml
@@ -29,9 +29,9 @@ var manifestYaml []byte
 
 type server struct {
 	sdk               *easylabsdk.Client // typed easylab client (lab+ops+registry, owns all k8s access)
-	agent             *agentsdk.Client    // typed abc agent client (files)
-	workerImage       string          // sandbox worker image (easylab runs it)
-	runtimeNamespace  string          // namespace where easylab creates sandboxes/deployments
+	agent             *agentsdk.Client   // typed abc agent client (files)
+	workerImage       string             // sandbox worker image (easylab runs it)
+	runtimeNamespace  string             // namespace where easylab creates sandboxes/deployments
 	ext               *extension.Extension
 	artifact          string // artifact registry base URL (packages + OCI + metadata)
 	artifactImageHost string // TLS ingress host for image refs (FROM/push via buildkit)
@@ -79,7 +79,7 @@ func main() {
 		artifactToken:     artifactToken,
 		base:              base,
 		easylabToken:      easylabToken,
-		agent:             agentsdk.New(envOr("AGENT_URL", envOr("AGENT_API_BASE", "http://agent.easylab.svc.cluster.local:80")), envOr("AGENT_API_KEY", "")),
+		agent:             agentsdk.New(envOr("AGENT_URL", envOr("AGENT_API_BASE", "http://abcp-agent.temp.svc.cluster.local")), envOr("AGENT_API_KEY", "")),
 		workerImage:       img,
 		runtimeNamespace:  runtimeNS,
 		wsCache:           map[string]wsCacheEntry{},

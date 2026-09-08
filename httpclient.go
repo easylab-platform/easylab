@@ -13,12 +13,51 @@ import (
 )
 
 // Shared HTTP clients: one for regular JSON calls, one long-lived for
-// archive fetches/syncs that stream large payloads. Replaces the previous mix
-// of per-call clients and http.DefaultClient (which has no timeout).
+// archive fetches/syncs that stream large payloads. The easylab gateway and
+// agent speak HTTP/2 only (h2c prior-knowledge for in-cluster cleartext),
+// so these transports are h2c-capable. The artifact registry (/v2 + /pkgs)
+// is h1-native and gets its own client.
 var (
-	defaultClient = &http.Client{Timeout: 60 * time.Second}
-	longClient    = &http.Client{Timeout: 15 * time.Minute}
+	h2cProtocols = func() *http.Protocols {
+		p := new(http.Protocols)
+		p.SetHTTP1(false)
+		p.SetUnencryptedHTTP2(true)
+		return p
+	}()
+	defaultClient = &http.Client{
+		Timeout:   60 * time.Second,
+		Transport: &http.Transport{Protocols: h2cProtocols},
+	}
+	longClient = &http.Client{
+		Timeout:   15 * time.Minute,
+		Transport: &http.Transport{Protocols: h2cProtocols},
+	}
+	// artifactClient is h1: podman/skopeo/npm ecosystems are h1-native.
+	artifactClient = &http.Client{Timeout: 60 * time.Second}
 )
+
+// httpGetJSONArtifact fetches from the artifact registry (/v2, /pkgs) over
+// HTTP/1.1 — podman/skopeo/npm ecosystems are h1-native.
+func (s *server) httpGetJSONArtifact(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	s.addAuth(req)
+	resp, err := artifactClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var v interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("GET %s: %d %s", redactURL(url), resp.StatusCode, toJSON(v))
+	}
+	return toJSON(v), nil
+}
 
 // httpGetJSON fetches a URL and returns the pretty-printed JSON body.
 func (s *server) httpGetJSON(ctx context.Context, url string) (string, error) {
