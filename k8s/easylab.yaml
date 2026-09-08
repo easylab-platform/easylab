@@ -23,7 +23,7 @@ spec:
       containers:
         # ---- easylab core (Go) — drives podman sidecar via Docker-compatible API
         - name: easylab
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260908021754
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260908031256
           imagePullPolicy: IfNotPresent
           args: ["-addr", "0.0.0.0:8080"]
           env:
@@ -157,3 +157,24 @@ spec:
             type: Directory
         - name: podman-sock
           emptyDir: {}
+
+---
+# In-cluster entrypoint for the abc agent (abcp-sdk/agent): cleartext
+# HTTP/2 (h2c prior knowledge) into the easylab pod's agent container.
+# Consumers use the Go agentsdk / TS @easylab/sdk/node createAgentClient.
+# The zergx agent is deprecated — everything targets this service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: abcp-agent
+  namespace: temp
+  labels:
+    app: easylab
+spec:
+  type: ClusterIP
+  selector:
+    app: easylab
+  ports:
+    - name: h2c
+      port: 80
+      targetPort: 8000

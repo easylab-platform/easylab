@@ -49,7 +49,7 @@ buildctl --addr "${BUILDKIT}" build \
   --opt "filename=easy-lab/Dockerfile" \
   --opt "build-arg:HTTP_PROXY=${PROXY}" \
   --opt "build-arg:HTTPS_PROXY=${PROXY}" \
-  --opt "build-arg:NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,develop.10.199.64.20.nip.io,GOWORK=off" \
+  --opt "build-arg:NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,develop.10.199.64.20.nip.io" \
   --output "type=docker,name=${NAMESPACE}/${NAME}:${TAG},dest=${WORK}/image.tar" \
   --progress plain
 
