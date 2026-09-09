@@ -6,18 +6,18 @@ import (
 	"time"
 )
 
-// runReconciler converges drift between easylab bookmarks, the mapping
+// runReconciler converges drift between easylab branches, the mapping
 // table, and agent sessions. It is the correctness backstop for the
 // best-effort lifecycle events — every rule is idempotent:
 //
-//   - row + bookmark gone (easylab-side delete): drop the row;
-//   - row + session gone (agent-side delete): drop the row; the bookmark
+//   - row + branch gone (easylab-side delete): drop the row;
+//   - row + session gone (agent-side delete): drop the row; the branch
 //     becomes a legal orphan, adoptable by a future same-name session;
 //   - session (derived name) without a row (lost lifecycle event — publish
 //     failure or downtime beyond stream retention): backfill the workspace
 //     anchored at `main` (fork anchoring precision needs the original event,
 //     which is why stream retention stays at 1 day);
-//   - orphan bookmark (no row): legal long-term state, log only.
+//   - orphan branch (no row): legal long-term state, log only.
 func runReconciler(ctx context.Context, s *server, interval time.Duration) {
 	if interval <= 0 {
 		interval = 60 * time.Second
@@ -75,21 +75,21 @@ func convergeDrift(ctx context.Context, s *server, sessions map[string]bool) err
 		}
 		bound := map[string]bool{}
 		for _, row := range rows {
-			bound[row.Bookmark] = true
+			bound[row.Branch] = true
 			switch {
-			case !bms[row.Bookmark]:
-				log.Warn("reconcile: bookmark gone — unmapping session",
-					"org", row.Org, "repo", row.Repo, "bookmark", row.Bookmark, "session", row.SessionName)
-				if err := s.store.DeleteRow(ctx, row.Org, row.Repo, row.Bookmark); err != nil {
+			case !bms[row.Branch]:
+				log.Warn("reconcile: branch gone — unmapping session",
+					"org", row.Org, "repo", row.Repo, "branch", row.Branch, "session", row.SessionName)
+				if err := s.store.DeleteRow(ctx, row.Org, row.Repo, row.Branch); err != nil {
 					return errDownstream("postgres", err)
 				}
 				s.cache.evict(row.SessionName)
 			case !sessions[row.SessionName]:
-				// Session gone: the bookmark becomes a legal orphan (work
+				// Session gone: the branch becomes a legal orphan (work
 				// preserved; adoptable by a same-name session later).
-				log.Warn("reconcile: session gone — unmapping (bookmark becomes orphan)",
-					"session", row.SessionName, "org", row.Org, "repo", row.Repo, "bookmark", row.Bookmark)
-				if err := s.store.DeleteRow(ctx, row.Org, row.Repo, row.Bookmark); err != nil {
+				log.Warn("reconcile: session gone — unmapping (branch becomes orphan)",
+					"session", row.SessionName, "org", row.Org, "repo", row.Repo, "branch", row.Branch)
+				if err := s.store.DeleteRow(ctx, row.Org, row.Repo, row.Branch); err != nil {
 					return errDownstream("postgres", err)
 				}
 				s.cache.evict(row.SessionName)
@@ -97,8 +97,8 @@ func convergeDrift(ctx context.Context, s *server, sessions map[string]bool) err
 		}
 		for bm := range bms {
 			if !bound[bm] {
-				log.Info("reconcile: orphan bookmark (adoptable via ops endpoint)",
-					"org", m.Org, "repo", m.Repo, "bookmark", bm)
+				log.Info("reconcile: orphan branch (adoptable via ops endpoint)",
+					"org", m.Org, "repo", m.Repo, "branch", bm)
 			}
 		}
 	}

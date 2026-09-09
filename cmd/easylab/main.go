@@ -443,11 +443,17 @@ func (s *server) handleCommit(w http.ResponseWriter, r *http.Request) {
 	if req.Author != nil {
 		author = *req.Author
 	}
+	meta, _ := repo.RepoMeta()
 
 	// Two commit modes:
 	//  - tree_id provided: classic tree commit.
 	//  - changes provided: atomic file-change commit (parent_hash + changes).
 	if len(req.Changes) > 0 {
+		ws := revision.NewWorkspace(repo)
+		branchName := req.Ref
+		if branchName == "" {
+			branchName = meta.DefaultBranch
+		}
 		var parentID object.ID
 		if req.ParentHash != "" {
 			var err error
@@ -455,6 +461,14 @@ func (s *server) handleCommit(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				writeErr(w, http.StatusBadRequest, err)
 				return
+			}
+		} else if branchName != "" {
+			// Default parent: the branch's current head (not the zero id,
+			// which would detach the commit from the branch history).
+			if _, gerr := ws.GetRef(branchName); gerr == nil {
+				if h, rerr := resolveRefAny(ws, repo, branchName); rerr == nil {
+					parentID = h
+				}
 			}
 		}
 		var changes []revision.FileChangeSpec
@@ -465,12 +479,19 @@ func (s *server) handleCommit(w http.ResponseWriter, r *http.Request) {
 				Delete:  c.Delete,
 			})
 		}
-		snap, ch, err := revision.NewWorkspace(repo).CommitFromChanges(
+		snap, ch, err := ws.CommitFromChanges(
 			parentID, changes, req.Description, author, req.RevisionID,
 		)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, err)
 			return
+		}
+		// Move the branch ref so reads at the ref observe the commit.
+		if branchName != "" {
+			if _, serr := ws.SetRef(branchName, store.RefBranch, snap.RevisionHash.String()); serr != nil {
+				writeErr(w, http.StatusInternalServerError, serr)
+				return
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]string{
 			"revision_id": ch.ID,

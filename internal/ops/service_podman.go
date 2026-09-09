@@ -272,9 +272,15 @@ func (r *PodmanServiceRunner) Launch(ctx context.Context, req ServiceRequest, lo
 	image := r.qualify(req.Image)
 	// Pull if absent (Docker-compatible pull); ignore not-found-on-inspect.
 	if _, _, err := r.cli.ImageInspectWithRaw(ctx, image); err != nil {
-		if _, perr := r.cli.ImagePull(ctx, image, imagepkg.PullOptions{}); perr != nil {
+		pull, perr := r.cli.ImagePull(ctx, image, imagepkg.PullOptions{})
+		if perr != nil {
 			return ServiceStatus{}, fmt.Errorf("pull %s: %w", image, perr)
 		}
+		// The pull is a stream: the image only lands in the local store once
+		// the body is drained to EOF. Skipping the drain races ContainerCreate
+		// into "no such image".
+		_, _ = io.Copy(io.Discard, pull)
+		_ = pull.Close()
 		if log != nil {
 			log("pulled " + image)
 		}

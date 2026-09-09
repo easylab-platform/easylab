@@ -20,7 +20,7 @@ import (
 // fakeLab emulates the easylab REST surface repo-extension depends on.
 type fakeLab struct {
 	mu     sync.Mutex
-	repos  map[string]map[string][]string // org -> repo -> bookmarks
+	repos  map[string]map[string][]string // org -> repo -> branches
 	anchor map[string]string              // "org/repo/new_bm" -> source it was created from
 	server *httptest.Server
 }
@@ -42,7 +42,7 @@ func newFakeLab() *fakeLab {
 		for org, repos := range f.repos {
 			rl := []interface{}{}
 			for repo := range repos {
-				rl = append(rl, map[string]interface{}{"repo": repo, "default_bookmark": "main"})
+				rl = append(rl, map[string]interface{}{"repo": repo, "default_branch": "main"})
 			}
 			orgs = append(orgs, map[string]interface{}{"org": org, "repos": rl})
 		}
@@ -63,8 +63,8 @@ func newFakeLab() *fakeLab {
 				f.repos[org][repo] = []string{"main"}
 			}
 			writeTestJSON(w, 201, map[string]interface{}{"full_name": org + "/" + repo})
-		// POST /bookmarks/{bm} {target: src}; DELETE /bookmarks/{bm}.
-		case r.Method == http.MethodPost && len(parts) == 4 && parts[2] == "bookmarks":
+		// POST /branches/{bm} {target: src}; DELETE /branches/{bm}.
+		case r.Method == http.MethodPost && len(parts) == 4 && parts[2] == "branches":
 			var b map[string]interface{}
 			_ = json.NewDecoder(r.Body).Decode(&b)
 			org, repo, nb := parts[0], parts[1], parts[3]
@@ -91,7 +91,7 @@ func newFakeLab() *fakeLab {
 			f.anchor[org+"/"+repo+"/"+nb] = src
 			f.repos[org][repo] = append(bms, nb)
 			writeTestJSON(w, 200, map[string]interface{}{"ok": true, "sha": "hash"})
-		case r.Method == http.MethodDelete && len(parts) == 4 && parts[2] == "bookmarks":
+		case r.Method == http.MethodDelete && len(parts) == 4 && parts[2] == "branches":
 			org, repo, bm := parts[0], parts[1], parts[3]
 			f.mu.Lock()
 			defer f.mu.Unlock()
@@ -103,8 +103,8 @@ func newFakeLab() *fakeLab {
 			}
 			f.repos[org][repo] = out
 			writeTestJSON(w, 204, map[string]interface{}{"ok": true})
-		// GET /bookmarks and GET /contents?ref={rev}.
-		case r.Method == http.MethodGet && len(parts) == 3 && parts[2] == "bookmarks":
+		// GET /branches and GET /contents?ref={rev}.
+		case r.Method == http.MethodGet && len(parts) == 3 && parts[2] == "branches":
 			org, repo := parts[0], parts[1]
 			f.mu.Lock()
 			defer f.mu.Unlock()
@@ -112,7 +112,7 @@ func newFakeLab() *fakeLab {
 			for _, b := range f.repos[org][repo] {
 				bl = append(bl, map[string]interface{}{"name": b, "sha": "h"})
 			}
-			writeTestJSON(w, 200, map[string]interface{}{"bookmarks": bl})
+			writeTestJSON(w, 200, map[string]interface{}{"branches": bl})
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents"):
 			org, repo := parts[0], parts[1]
 			rev := r.URL.Query().Get("ref")
@@ -289,7 +289,7 @@ func TestLifecycleCreated(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !lab.hasRepo("acme", "api") || !lab.hasBM("acme", "api", "main") {
-		t.Fatal("created did not materialize repo/bookmark")
+		t.Fatal("created did not materialize repo/branch")
 	}
 	if row, _ := s.store.GetRow(ctx, "acme", "api", "main"); row == nil {
 		t.Fatal("mapping row missing")
@@ -309,7 +309,7 @@ func TestLifecycleCreated(t *testing.T) {
 	}
 }
 
-func TestLifecycleForkedInheritsParentBookmark(t *testing.T) {
+func TestLifecycleForkedInheritsParentBranch(t *testing.T) {
 	lab, ag := newFakeLab(), newFakeAgent()
 	defer lab.Close()
 	defer ag.Close()
@@ -327,10 +327,10 @@ func TestLifecycleForkedInheritsParentBookmark(t *testing.T) {
 	mustEmit(abcprotocol.LifecycleEvent{Kind: "forked", SessionName: "acme:api:feat", Parent: strptr("acme:api:dev")})
 
 	if !lab.hasBM("acme", "api", "feat") {
-		t.Fatal("fork bookmark missing")
+		t.Fatal("fork branch missing")
 	}
 	if got := lab.bmAnchor("acme", "api", "feat"); got != "dev" {
-		t.Fatalf("fork anchored at %q, want parent bookmark %q", got, "dev")
+		t.Fatalf("fork anchored at %q, want parent branch %q", got, "dev")
 	}
 	if row, _ := s.store.GetRow(ctx, "acme", "api", "feat"); row == nil || row.SessionName != "acme:api:feat" {
 		t.Fatalf("fork row missing: %+v", row)
@@ -360,10 +360,10 @@ func TestLifecycleRenamedDual(t *testing.T) {
 		t.Fatal(err)
 	}
 	if lab.hasBM("acme", "api", "old") || !lab.hasBM("acme", "api", "new") {
-		t.Fatal("bookmark rename not dual")
+		t.Fatal("branch rename not dual")
 	}
 	if got := lab.bmAnchor("acme", "api", "new"); got != "old" {
-		t.Fatalf("renamed bookmark should anchor at old, got %q", got)
+		t.Fatalf("renamed branch should anchor at old, got %q", got)
 	}
 	if row, _ := s.store.GetRow(ctx, "acme", "api", "new"); row == nil || row.SessionName != "acme:api:new" {
 		t.Fatalf("row not renamed: %+v", row)
@@ -392,7 +392,7 @@ func TestLifecycleDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if lab.hasBM("acme", "api", "tmp") {
-		t.Fatal("bookmark survived delete")
+		t.Fatal("branch survived delete")
 	}
 	if row, _ := s.store.GetRow(ctx, "acme", "api", "tmp"); row != nil {
 		t.Fatal("row survived delete")
@@ -420,7 +420,7 @@ func TestResolveSessionStrict(t *testing.T) {
 		// sanity: nothing was created
 		t.Log("ok: no lazy creation")
 	} else {
-		t.Fatal("resolveSession must not create bookmarks")
+		t.Fatal("resolveSession must not create branches")
 	}
 	// non-derived name → hard error
 	if _, _, _, err := s.resolveSession(ctx, "hi"); err == nil {
@@ -430,8 +430,8 @@ func TestResolveSessionStrict(t *testing.T) {
 	if _, _, _, err := s.sessionBase(ctx, map[string]interface{}{}, ""); err == nil {
 		t.Fatal("expected error without session context")
 	}
-	if _, _, _, err := s.sessionBase(ctx, map[string]interface{}{"_org": "x", "_repo": "y", "_bookmark": "z"}, ""); err == nil {
-		t.Fatal("legacy _org/_repo/_bookmark should be rejected (session_name only)")
+	if _, _, _, err := s.sessionBase(ctx, map[string]interface{}{"_org": "x", "_repo": "y", "_branch": "z"}, ""); err == nil {
+		t.Fatal("legacy _org/_repo/_branch should be rejected (session_name only)")
 	}
 }
 
@@ -444,23 +444,23 @@ func TestLazyAdoptEndpoint(t *testing.T) {
 	s := newTestServer(t, lab, ag, testStore(t))
 	h := s.router()
 
-	// orphan bookmark created directly in lab
+	// orphan branch created directly in lab
 	lab.mu.Lock()
 	lab.repos["acme"] = map[string][]string{"api": {"main", "orphan-bm"}}
 	lab.mu.Unlock()
 
-	code, v := doReq(t, h, "POST", "/api/v1/repos/acme/api/bookmarks/orphan-bm/session", nil)
+	code, v := doReq(t, h, "POST", "/api/v1/repos/acme/api/branches/orphan-bm/session", nil)
 	if code != 200 || v["adopted"] != true {
 		t.Fatalf("adopt = %d %v", code, v)
 	}
 	if !ag.has("acme:api:orphan-bm") {
 		t.Fatal("adopt did not create session")
 	}
-	code, v = doReq(t, h, "POST", "/api/v1/repos/acme/api/bookmarks/orphan-bm/session", nil)
+	code, v = doReq(t, h, "POST", "/api/v1/repos/acme/api/branches/orphan-bm/session", nil)
 	if code != 200 || v["adopted"] != false {
 		t.Fatalf("re-adopt = %d %v", code, v)
 	}
-	if code, _ = doReq(t, h, "POST", "/api/v1/repos/acme/api/bookmarks/ghost/session", nil); code != 404 {
+	if code, _ = doReq(t, h, "POST", "/api/v1/repos/acme/api/branches/ghost/session", nil); code != 404 {
 		t.Fatalf("ghost adopt = %d, want 404", code)
 	}
 }
@@ -475,7 +475,7 @@ func TestGetSessionMap(t *testing.T) {
 
 	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"})
 	code, v := doReq(t, h, "GET", "/api/v1/session-map?session=acme:api:main", nil)
-	if code != 200 || v["bookmark"] != "main" {
+	if code != 200 || v["branch"] != "main" {
 		t.Fatalf("session-map = %d %v", code, v)
 	}
 	if code, _ = doReq(t, h, "GET", "/api/v1/session-map?session=missing", nil); code != 404 {
@@ -512,7 +512,7 @@ func TestReconcileConvergesDrift(t *testing.T) {
 
 	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:main"})
 
-	// drift 1: bookmark deleted directly in lab → row removed
+	// drift 1: branch deleted directly in lab → row removed
 	lab.mu.Lock()
 	lab.repos["acme"]["api"] = []string{}
 	lab.mu.Unlock()
@@ -520,10 +520,10 @@ func TestReconcileConvergesDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	if row, _ := s.store.GetRow(ctx, "acme", "api", "main"); row != nil {
-		t.Fatal("row survived bookmark deletion")
+		t.Fatal("row survived branch deletion")
 	}
 
-	// drift 2: session deleted directly in agent → row removed, bookmark orphaned
+	// drift 2: session deleted directly in agent → row removed, branch orphaned
 	s.emit(t, ctx, "created", abcprotocol.LifecycleEvent{Kind: "created", SessionName: "acme:api:bm2"})
 	ag.mu.Lock()
 	delete(ag.sessions, "acme:api:bm2")
@@ -535,7 +535,7 @@ func TestReconcileConvergesDrift(t *testing.T) {
 		t.Fatal("row survived session deletion")
 	}
 	if !lab.hasBM("acme", "api", "bm2") {
-		t.Fatal("bookmark must survive as orphan (work preserved)")
+		t.Fatal("branch must survive as orphan (work preserved)")
 	}
 }
 
@@ -547,7 +547,7 @@ func TestReconcileBackfillsLostEvents(t *testing.T) {
 	ctx := context.Background()
 
 	// sessions created in the agent while every lifecycle event was lost
-	// (publish failure / downtime beyond retention) — no rows, no bookmarks
+	// (publish failure / downtime beyond retention) — no rows, no branches
 	ag.mu.Lock()
 	ag.sessions["acme:api:main"] = true
 	ag.sessions["acme:api:feat"] = true
@@ -563,7 +563,7 @@ func TestReconcileBackfillsLostEvents(t *testing.T) {
 			t.Fatalf("backfill missing row for %s", name)
 		}
 		if !lab.hasBM(org, repo, bm) {
-			t.Fatalf("backfill missing bookmark for %s", name)
+			t.Fatalf("backfill missing branch for %s", name)
 		}
 	}
 	// non-derived session must NOT get a workspace
@@ -595,7 +595,7 @@ func TestReconcileBackfillAndUnmapDoNotFight(t *testing.T) {
 		t.Fatal("row should be unmapped (session gone)")
 	}
 	if !lab.hasBM("acme", "api", "x") {
-		t.Fatal("bookmark should remain as orphan")
+		t.Fatal("branch should remain as orphan")
 	}
 }
 

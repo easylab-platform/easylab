@@ -12,7 +12,7 @@ import (
 )
 
 // PgConfig kept for signature compatibility but now names a local SQLite file.
-// The repo-extension's private store (bookmark<->session mapping) lives in
+// The repo-extension's private store (branch<->session mapping) lives in
 // one file; this avoids any external Postgres dependency.
 type PgConfig struct {
 	Host     string
@@ -24,11 +24,11 @@ type PgConfig struct {
 
 func (c PgConfig) dsn(_ string) string { return c.DB }
 
-// MapRow is one row of the bookmark<->session mapping table.
+// MapRow is one row of the branch<->session mapping table.
 type MapRow struct {
 	Org         string
 	Repo        string
-	Bookmark    string
+	Branch    string
 	SessionName string
 }
 
@@ -80,16 +80,27 @@ CREATE TABLE IF NOT EXISTS managed_repos (
 CREATE TABLE IF NOT EXISTS session_repos (
   org          TEXT NOT NULL,
   repo         TEXT NOT NULL,
-  bookmark     TEXT NOT NULL,
+  branch     TEXT NOT NULL,
   session_name TEXT NOT NULL UNIQUE,
   created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at   INTEGER NOT NULL DEFAULT (unixepoch()),
-  PRIMARY KEY (org, repo, bookmark)
+  PRIMARY KEY (org, repo, branch)
 );
 `
 	_, err := s.db.ExecContext(ctx, ddl)
 	if err != nil {
 		return fmt.Errorf("ddl: %w", err)
+	}
+	// Legacy schema migration: the session_repos column was renamed
+	// bookmark -> branch. SQLite >= 3.25 supports RENAME COLUMN; probe the
+	// live schema so fresh databases (already on `branch`) are untouched.
+	var legacy int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info('session_repos') WHERE name='bookmark'`).Scan(&legacy); err == nil && legacy > 0 {
+		if _, err := s.db.ExecContext(ctx,
+			`ALTER TABLE session_repos RENAME COLUMN bookmark TO branch`); err != nil {
+			return fmt.Errorf("migrate bookmark->branch: %w", err)
+		}
 	}
 	return nil
 }
@@ -139,11 +150,11 @@ func (s *Store) ListManaged(ctx context.Context) ([]MapRow, error) {
 
 // ---- mapping rows ----
 
-const mapCols = `org, repo, bookmark, session_name`
+const mapCols = `org, repo, branch, session_name`
 
 func scanMapRowFrom(row *sql.Row) (*MapRow, error) {
 	var r MapRow
-	err := row.Scan(&r.Org, &r.Repo, &r.Bookmark, &r.SessionName)
+	err := row.Scan(&r.Org, &r.Repo, &r.Branch, &r.SessionName)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -153,10 +164,10 @@ func scanMapRowFrom(row *sql.Row) (*MapRow, error) {
 	return &r, nil
 }
 
-func (s *Store) GetRow(ctx context.Context, org, repo, bookmark string) (*MapRow, error) {
+func (s *Store) GetRow(ctx context.Context, org, repo, branch string) (*MapRow, error) {
 	return scanMapRowFrom(s.db.QueryRowContext(ctx,
-		`SELECT `+mapCols+` FROM session_repos WHERE org=? AND repo=? AND bookmark=?`,
-		org, repo, bookmark))
+		`SELECT `+mapCols+` FROM session_repos WHERE org=? AND repo=? AND branch=?`,
+		org, repo, branch))
 }
 
 func (s *Store) GetRowBySession(ctx context.Context, sessionName string) (*MapRow, error) {
@@ -166,25 +177,25 @@ func (s *Store) GetRowBySession(ctx context.Context, sessionName string) (*MapRo
 
 // InsertRow records a mapping. A unique violation is returned as errConflict so
 // callers can surface 409.
-func (s *Store) InsertRow(ctx context.Context, org, repo, bookmark, sessionName string) error {
+func (s *Store) InsertRow(ctx context.Context, org, repo, branch, sessionName string) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO session_repos (org, repo, bookmark, session_name) VALUES (?, ?, ?, ?)`,
-		org, repo, bookmark, sessionName)
+		`INSERT INTO session_repos (org, repo, branch, session_name) VALUES (?, ?, ?, ?)`,
+		org, repo, branch, sessionName)
 	if isUniqueViolation(err) {
-		return errConflict("bookmark or session already bound")
+		return errConflict("branch or session already bound")
 	}
 	return err
 }
 
-// RenameRow moves a mapping row to a new bookmark + session name.
+// RenameRow moves a mapping row to a new branch + session name.
 func (s *Store) RenameRow(ctx context.Context, org, repo, fromBM, toBM, toSession string) error {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE session_repos SET bookmark=?, session_name=?, updated_at=unixepoch()
-		 WHERE org=? AND repo=? AND bookmark=?`,
+		`UPDATE session_repos SET branch=?, session_name=?, updated_at=unixepoch()
+		 WHERE org=? AND repo=? AND branch=?`,
 		toBM, toSession, org, repo, fromBM)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return errConflict("target bookmark or session already bound")
+			return errConflict("target branch or session already bound")
 		}
 		return err
 	}
@@ -194,9 +205,9 @@ func (s *Store) RenameRow(ctx context.Context, org, repo, fromBM, toBM, toSessio
 	return nil
 }
 
-func (s *Store) DeleteRow(ctx context.Context, org, repo, bookmark string) error {
+func (s *Store) DeleteRow(ctx context.Context, org, repo, branch string) error {
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM session_repos WHERE org=? AND repo=? AND bookmark=?`, org, repo, bookmark)
+		`DELETE FROM session_repos WHERE org=? AND repo=? AND branch=?`, org, repo, branch)
 	return err
 }
 
@@ -209,11 +220,11 @@ func (s *Store) DeleteRowsForRepo(ctx context.Context, org, repo string) error {
 
 func (s *Store) ListRowsForRepo(ctx context.Context, org, repo string) ([]MapRow, error) {
 	return s.listRows(ctx,
-		`SELECT `+mapCols+` FROM session_repos WHERE org=? AND repo=? ORDER BY bookmark`, org, repo)
+		`SELECT `+mapCols+` FROM session_repos WHERE org=? AND repo=? ORDER BY branch`, org, repo)
 }
 
 func (s *Store) ListRows(ctx context.Context) ([]MapRow, error) {
-	return s.listRows(ctx, `SELECT `+mapCols+` FROM session_repos ORDER BY org, repo, bookmark`)
+	return s.listRows(ctx, `SELECT `+mapCols+` FROM session_repos ORDER BY org, repo, branch`)
 }
 
 func (s *Store) listRows(ctx context.Context, q string, args ...interface{}) ([]MapRow, error) {
@@ -225,7 +236,7 @@ func (s *Store) listRows(ctx context.Context, q string, args ...interface{}) ([]
 	var out []MapRow
 	for rows.Next() {
 		var r MapRow
-		if err := rows.Scan(&r.Org, &r.Repo, &r.Bookmark, &r.SessionName); err != nil {
+		if err := rows.Scan(&r.Org, &r.Repo, &r.Branch, &r.SessionName); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

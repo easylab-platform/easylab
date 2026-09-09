@@ -36,9 +36,11 @@ func embedExtensions(ctx context.Context) {
 
 	go func() {
 		if err := opsext.Run(ctx, opsext.Options{
-			EasyLabURL: base,
-			NATSURL:    natsURL,
-			Token:      token,
+			EasyLabURL:    base,
+			NATSURL:       natsURL,
+			Token:         token,
+			ArtifactURL:   base, // gateway serves /v2 + /pkgs itself (loopback)
+			ArtifactToken: token,
 		}); err != nil {
 			log.Error("embedded ops-extension stopped", "err", err)
 		}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -20,7 +21,7 @@ import (
 // easylabClient bridges ext/repo onto the easylab lab API.
 //
 // Core repo/branch/blob/commit operations go through the typed
-// easylab-sdk-go (Connect). Bookmark semantics are gone upstream — they
+// easylab-sdk-go (Connect). Branch semantics are gone upstream — they
 // map to branches. A small REST helper is retained only for tool-specific
 // read-only endpoints that have no proto RPC yet (graph / compare / search),
 // so the ext still works end-to-end while the contract grows.
@@ -43,13 +44,13 @@ func newClient(base, token string) *easylabClient {
 	}
 }
 
-// bookmarkInfo is a branch name + target revision id.
-type bookmarkInfo struct {
+// branchInfo is a branch name + target revision id.
+type branchInfo struct {
 	Name string
 	Sha  string
 }
 
-type repoTree map[string]map[string][]bookmarkInfo
+type repoTree map[string]map[string][]branchInfo
 
 func (t repoTree) repoExists(org, repo string) bool {
 	repos, ok := t[org]
@@ -60,13 +61,13 @@ func (t repoTree) repoExists(org, repo string) bool {
 	return ok
 }
 
-func (t repoTree) bookmarkExists(org, repo, bookmark string) bool {
+func (t repoTree) branchExists(org, repo, branch string) bool {
 	repos, ok := t[org]
 	if !ok {
 		return false
 	}
 	for _, b := range repos[repo] {
-		if b.Name == bookmark {
+		if b.Name == branch {
 			return true
 		}
 	}
@@ -85,11 +86,11 @@ func (c *easylabClient) GetRepoTree(ctx context.Context) (repoTree, error) {
 			continue
 		}
 		if tree[r.Namespace] == nil {
-			tree[r.Namespace] = map[string][]bookmarkInfo{}
+			tree[r.Namespace] = map[string][]branchInfo{}
 		}
-		bms, err := c.GetBookmarksDetail(ctx, r.Namespace, r.Name)
+		bms, err := c.GetBranchesDetail(ctx, r.Namespace, r.Name)
 		if err != nil {
-			tree[r.Namespace][r.Name] = []bookmarkInfo{}
+			tree[r.Namespace][r.Name] = []branchInfo{}
 			continue
 		}
 		tree[r.Namespace][r.Name] = bms
@@ -97,21 +98,21 @@ func (c *easylabClient) GetRepoTree(ctx context.Context) (repoTree, error) {
 	return tree, nil
 }
 
-// GetBookmarksDetail lists a repo's branches with target revision id.
-func (c *easylabClient) GetBookmarksDetail(ctx context.Context, org, repo string) ([]bookmarkInfo, error) {
+// GetBranchesDetail lists a repo's branches with target revision id.
+func (c *easylabClient) GetBranchesDetail(ctx context.Context, org, repo string) ([]branchInfo, error) {
 	bs, err := c.sdk.Branches(ctx, org, repo)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]bookmarkInfo, 0, len(bs))
+	out := make([]branchInfo, 0, len(bs))
 	for _, b := range bs {
-		out = append(out, bookmarkInfo{Name: b.GetName(), Sha: b.GetSha()})
+		out = append(out, branchInfo{Name: b.GetName(), Sha: b.GetSha()})
 	}
 	return out, nil
 }
 
-// GetBookmarks lists a repo's branch names.
-func (c *easylabClient) GetBookmarks(ctx context.Context, org, repo string) ([]string, error) {
+// GetBranches lists a repo's branch names.
+func (c *easylabClient) GetBranches(ctx context.Context, org, repo string) ([]string, error) {
 	bs, err := c.sdk.Branches(ctx, org, repo)
 	if err != nil {
 		return nil, errDownstream("easylab", err)
@@ -130,31 +131,31 @@ func (c *easylabClient) EnsureRepo(ctx context.Context, org, repo string) error 
 	return c.sdk.EnsureRepo(ctx, org, repo)
 }
 
-// EnsureBookmark creates a branch at `src` unless it already exists.
-func (c *easylabClient) EnsureBookmark(ctx context.Context, org, repo, src, bookmark string) error {
+// EnsureBranch creates a branch at `src` unless it already exists.
+func (c *easylabClient) EnsureBranch(ctx context.Context, org, repo, src, branch string) error {
 	tree, err := c.GetRepoTree(ctx)
 	if err != nil {
 		return err
 	}
-	if tree.bookmarkExists(org, repo, bookmark) {
+	if tree.branchExists(org, repo, branch) {
 		return nil
 	}
 	if !tree.repoExists(org, repo) {
 		return errNotFound("repository %s/%s does not exist", org, repo)
 	}
-	return c.sdk.CreateBranch(ctx, org, repo, bookmark, src)
+	return c.sdk.CreateBranch(ctx, org, repo, branch, src)
 }
 
-// DeleteBookmark removes the branch if it exists (idempotent).
-func (c *easylabClient) DeleteBookmark(ctx context.Context, org, repo, bookmark string) error {
+// DeleteBranch removes the branch if it exists (idempotent).
+func (c *easylabClient) DeleteBranch(ctx context.Context, org, repo, branch string) error {
 	tree, err := c.GetRepoTree(ctx)
 	if err != nil {
 		return err
 	}
-	if !tree.bookmarkExists(org, repo, bookmark) {
+	if !tree.branchExists(org, repo, branch) {
 		return nil
 	}
-	return c.sdk.DeleteBranch(ctx, org, repo, bookmark)
+	return c.sdk.DeleteBranch(ctx, org, repo, branch)
 }
 
 // CanResolve reports whether the rev (branch / sha / revision) resolves.
@@ -183,52 +184,64 @@ func (c *easylabClient) CanResolve(ctx context.Context, org, repo, rev string) (
 	return false, nil
 }
 
-// GetBookmarkHead resolves a branch to its immutable revision id.
-func (c *easylabClient) GetBookmarkHead(ctx context.Context, org, repo, bookmark string) (string, error) {
+// GetBranchHead resolves a branch to its head SNAPSHOT hash (32-byte object
+// id, 64 hex chars) — the form rebase/compare APIs take as parents. A branch
+// ref's stored target is often a 16-byte revision id, which those APIs reject,
+// so the revision log (CommitId = snapshot hash) is authoritative.
+func (c *easylabClient) GetBranchHead(ctx context.Context, org, repo, branch string) (string, error) {
+	revs, rerr := c.sdk.Revisions(ctx, org, repo, branch, 1)
+	if rerr == nil && len(revs) > 0 {
+		if sha := revs[0].GetSha(); sha != "" {
+			return sha, nil
+		}
+	}
 	bs, err := c.sdk.Branches(ctx, org, repo)
 	if err != nil {
 		return "", errDownstream("easylab", err)
 	}
 	for _, b := range bs {
-		if b.GetName() == bookmark {
-			return b.GetSha(), nil
+		if b.GetName() == branch {
+			// Only trust the ref target when it is a full snapshot hash.
+			if sha := b.GetSha(); len(sha) == 64 {
+				return sha, nil
+			}
+			break
 		}
 	}
-	revs, err := c.sdk.Revisions(ctx, org, repo, bookmark, 1)
-	if err != nil {
-		return "", errDownstream("easylab", err)
-	}
-	if len(revs) > 0 {
-		return revs[0].GetSha(), nil
-	}
-	return "", errDownstream("easylab", fmt.Errorf("branch %s/%s#%s not found", org, repo, bookmark))
+	return "", errDownstream("easylab", fmt.Errorf("branch %s/%s#%s not found", org, repo, branch))
 }
 
 // commit applies file actions as a single change on a branch. Returns a
 // change view (revision/sha best-effort).
-func (c *easylabClient) commit(ctx context.Context, org, repo, bookmark, message string, actions []map[string]interface{}) (map[string]interface{}, error) {
-	var path, content string
-	var del bool
+func (c *easylabClient) commit(ctx context.Context, org, repo, branch, message string, actions []map[string]interface{}) (map[string]interface{}, error) {
+	// Atomic multi-action commit over the REST commit endpoint: unlike the
+	// single-blob WriteBlob RPC it carries real delete semantics (writing an
+	// empty blob instead of deleting would poison sandbox sync, whose object
+	// decoder cannot distinguish an empty blob from a missing one).
+	changes := make([]map[string]interface{}, 0, len(actions))
 	for _, a := range actions {
-		path, _ = a["path"].(string)
-		del, _ = a["delete"].(bool)
-		if !del {
-			data, _ := a["content_base64"].(string)
-			dec, derr := base64.StdEncoding.DecodeString(data)
-			if derr != nil {
-				dec = []byte(data)
-			}
-			content = string(dec)
+		path, _ := a["path"].(string)
+		del, _ := a["delete"].(bool)
+		if act, _ := a["action"].(string); act == "delete" {
+			del = true
 		}
+		if del {
+			changes = append(changes, map[string]interface{}{"path": path, "delete": true})
+			continue
+		}
+		data, _ := a["content_base64"].(string)
+		dec, derr := base64.StdEncoding.DecodeString(data)
+		if derr != nil {
+			dec = []byte(data)
+		}
+		changes = append(changes, map[string]interface{}{"path": path, "content": string(dec)})
 	}
-	if del {
-		content = ""
-	}
-	_, err := c.sdk.WriteBlob(ctx, org, repo, bookmark, path, content, message)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]interface{}{"path": path, "message": message}, nil
+	return c.post(ctx, fmt.Sprintf("/repo/%s/%s/commit", url.PathEscape(org), url.PathEscape(repo)), map[string]interface{}{
+		"ref":         branch,
+		"description": message,
+		"new_commit":  true,
+		"changes":     changes,
+	})
 }
 
 // get/post/put/delete are retained for the few tool-specific endpoints that

@@ -30,17 +30,17 @@ tools:
             zh: 沙箱的基础镜像（easylab 可拉取，如 docker.io/library/<工具链>:<tag>）。worker 二进制会被自动注入。
       required: [image]
   - name: sandbox-run
-    description: Run a shell command in the session sandbox. The workspace is synced to the repo bookmark head first (repo files refreshed; sandbox-only files kept).
+    description: Run a shell command in the session sandbox. The workspace is synced to the repo branch head first (repo files refreshed; sandbox-only files kept).
     descriptions:
-      zh: 在会话沙箱中运行 shell 命令。先将工作区同步到仓库书签头部（刷新仓库文件；保留仅沙箱的文件）。
+      zh: 在会话沙箱中运行 shell 命令。先将工作区同步到仓库分支头部（刷新仓库文件；保留仅沙箱的文件）。
     input_schema:
       type: object
       properties:
         command:
           type: string
-          description: Shell command to run in the sandbox (the workspace is synced to the repo bookmark head first).
+          description: Shell command to run in the sandbox (the workspace is synced to the repo branch head first).
           descriptions:
-            zh: 在沙箱中运行的 shell 命令（工作区先同步到仓库书签头部）。
+            zh: 在沙箱中运行的 shell 命令（工作区先同步到仓库分支头部）。
         workdir:
           type: string
           description: "Working directory inside the sandbox, relative to the workspace root (default: workspace root)."
@@ -196,9 +196,9 @@ tools:
             zh: 后台任务 id（由 sandbox-run 返回）。
       required: [job-id]
   - name: sandbox-port
-    description: Copy a file from the sandbox into the session's repo (bookmark moves; the change syncs back on the next sandbox tool call).
+    description: Copy a file from the sandbox into the session's repo (branch moves; the change syncs back on the next sandbox tool call).
     descriptions:
-      zh: 把文件从沙箱复制到会话的仓库（书签移动；该变更会在下一次沙箱工具调用时回写）。
+      zh: 把文件从沙箱复制到会话的仓库（分支移动；该变更会在下一次沙箱工具调用时回写）。
     input_schema:
       type: object
       properties:
@@ -232,14 +232,14 @@ tools:
             zh: Dockerfile 的仓库相对路径（默认 ./Dockerfile）。
         tag:
           type: string
-          description: Image tag (defaults to the session bookmark).
+          description: Image tag (defaults to the session branch).
           descriptions:
-            zh: 镜像标签（默认会话书签）。
+            zh: 镜像标签（默认会话分支）。
         image-tag:
           type: string
-          description: Optional semantic version for the pushed image reference (e.g. v0.0.1). When omitted the tag defaults to the source bookmark (a floating tag).
+          description: Optional semantic version for the pushed image reference (e.g. v0.0.1). When omitted the tag defaults to the source branch (a floating tag).
           descriptions:
-            zh: 可选的语义化版本号（如 v0.0.1）。省略时标签默认为源书签（浮动标签）。
+            zh: 可选的语义化版本号（如 v0.0.1）。省略时标签默认为源分支（浮动标签）。
         context:
           type: string
           description: "Build context path, relative to the repo root (default: repo root)."
@@ -265,9 +265,9 @@ tools:
             zh: 要部署的镜像引用（裸名会在集群内注册表上限定）。
         name:
           type: string
-          description: 'Deployment name (defaults to a unique org-repo-bookmark slug; a service owned by another session is rejected).'
+          description: 'Deployment name (defaults to a unique org-repo-branch slug; a service owned by another session is rejected).'
           descriptions:
-            zh: '部署名称（默认为唯一的 org-repo-bookmark 派生名；属于其他会话的服务会被拒绝）。'
+            zh: '部署名称（默认为唯一的 org-repo-branch 派生名；属于其他会话的服务会被拒绝）。'
         resources:
           type: object
           description: CPU / memory requests and limits for the container.
@@ -385,11 +385,11 @@ tools:
           description: Target repository.
           descriptions:
             zh: 目标仓库。
-        bookmark:
+        branch:
           type: string
-          description: Bookmark to read or publish from.
+          description: Branch to read or publish from.
           descriptions:
-            zh: 读取或发布所用的书签（分支）。
+            zh: 读取或发布所用的分支（分支）。
         name:
           type: string
           description: Deployment / release name.

@@ -43,7 +43,7 @@ type Options struct {
 }
 
 // Run starts the embedded repo-extension: registers the NATS tool face, the
-// lifecycle-event subscription (mapping session<->bookmark), and the
+// lifecycle-event subscription (mapping session<->branch), and the
 // reconciler. No HTTP listener — served in-process by easylab (single
 // binary). It registers subscriptions and returns.
 func Run(ctx context.Context, opts Options) error {
@@ -84,7 +84,10 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	s.store = store
-	defer store.Close()
+	// The store lives for the process lifetime: Run registers subscriptions
+	// and returns (embedded mode), so a deferred Close here would slam the DB
+	// shut right after startup — every query would then fail with
+	// "sql: database is closed". The process exit cleans up.
 
 	nbus, err := natsbus.Connect(natsURL)
 	if err != nil {
@@ -102,7 +105,7 @@ func Run(ctx context.Context, opts Options) error {
 		Variables: map[string]extension.VariableSpec{
 			"org":      {Resolve: s.resolveOrg},
 			"repo":     {Resolve: s.resolveRepo},
-			"bookmark": {Resolve: s.resolveBookmark},
+			"branch": {Resolve: s.resolveBranch},
 		},
 		OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent) error {
 			return s.handleLifecycleEvent(ctx, string(ev.Kind), ev)

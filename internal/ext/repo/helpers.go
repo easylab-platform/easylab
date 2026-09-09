@@ -50,11 +50,11 @@ func validSessionComponent(s string) bool {
 	return true
 }
 
-func namingSession(org, repo, bookmark string) string {
-	return org + ":" + repo + ":" + bookmark
+func namingSession(org, repo, branch string) string {
+	return org + ":" + repo + ":" + branch
 }
 
-func parseSession(name string) (org, repo, bookmark string, ok bool) {
+func parseSession(name string) (org, repo, branch string, ok bool) {
 	parts := strings.Split(name, ":")
 	if len(parts) != 3 {
 		return "", "", "", false

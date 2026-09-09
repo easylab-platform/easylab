@@ -164,17 +164,18 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 			if org == "" {
 				org = "external"
 			}
-			res, err := s.sdk.Lab.CloneRepo(ctx, connect.NewRequest(&easylabv1.CloneRepoRequest{
-				Org: org, Repo: repo, GitUrl: gitURL,
-			}))
-			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "clone failed: %v", "克隆失败：%v", err)
+			// CloneRepo RPC is a stub upstream; the supported import path is
+			// EnsureRepo + SetMirror(pull URL) — the gateway's mirror loop
+			// fetches on schedule (EASYVCS_MIRROR_TICK, default 5s).
+			if err := s.sdk.EnsureRepo(ctx, org, repo); err != nil {
+				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "create repo failed: %v", "创建仓库失败：%v", err)
 			}
-			ok := "failed"
-			if res.Msg.GetOk() {
-				ok = "cloned"
+			if _, err := s.sdk.Lab.SetMirror(ctx, connect.NewRequest(&easylabv1.SetMirrorRequest{
+				Org: org, Repo: repo, PullUrl: gitURL,
+			})); err != nil {
+				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "set mirror failed: %v", "设置镜像失败：%v", err)
 			}
-			return extension.ToolResultData{Content: ok + " " + org + "/" + repo}, nil
+			return extension.ToolResultData{Content: fmt.Sprintf("mirroring %s/%s from %s (pull scheduled)", org, repo, gitURL)}, nil
 		},
 	}
 }

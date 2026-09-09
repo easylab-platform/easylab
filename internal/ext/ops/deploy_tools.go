@@ -49,7 +49,9 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 				"name":  name,
 				"image": image,
 				"kind":  "deployment",
-				"ports": []map[string]interface{}{{"container": 8080, "service": 80}},
+				// Gateway ServiceRequest.Ports is map[int]int (container port
+				// -> published host port) — an array here decodes to 400.
+				"ports": map[int]int{8080: 80},
 			}
 			ann := map[string]string{}
 			if sessionName != "" {

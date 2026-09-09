@@ -114,3 +114,12 @@ func inferRepoFromGitURL(u string) string {
 	}
 	return s
 }
+
+// base64Decode decodes standard base64 (empty/invalid yields "").
+func base64Decode(s string) string {
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}

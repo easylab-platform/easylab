@@ -19,6 +19,9 @@ type JobDone struct {
 	ExitCode int32
 	Stdout   string
 	Stderr   string
+	// Bg marks a job whose wait window elapsed while still running: it stays
+	// registered in the sandbox and can be driven by job-id (stdin/kill/wait).
+	Bg bool
 }
 
 // workerInfo resolves a sandbox's live state via easylab SandboxService.

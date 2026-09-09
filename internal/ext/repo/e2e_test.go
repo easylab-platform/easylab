@@ -43,7 +43,7 @@ func TestManifestBinding(t *testing.T) {
 	cfg := m.BuildConfig(manifest.Bindings{Handlers: manifestHandlers(), Variables: map[string]extension.VariableSpec{
 		"org":      {Resolve: func(context.Context, string) (string, error) { return "acme", nil }},
 		"repo":     {Resolve: func(context.Context, string) (string, error) { return "api", nil }},
-		"bookmark": {Resolve: func(context.Context, string) (string, error) { return "main", nil }},
+		"branch": {Resolve: func(context.Context, string) (string, error) { return "main", nil }},
 	}})
 
 	declared := map[string]bool{}
@@ -142,7 +142,7 @@ func TestExploreWire(t *testing.T) {
 		}
 		resp.Body.Close()
 	}
-	post("/api/v1/repos/acme/api", map[string]interface{}{"default_bookmark": "main"})
+	post("/api/v1/repos/acme/api", map[string]interface{}{"default_branch": "main"})
 
 	s := &server{base: lab.URL(), lab: newClient(lab.URL(), "t")}
 

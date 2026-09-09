@@ -6,9 +6,9 @@ import (
 	"github.com/abcp-sdk/abc-protocol-go/extension"
 )
 
-// resolveOrg/resolveRepo/resolveBookmark are the authoritative lazy resolvers
+// resolveOrg/resolveRepo/resolveBranch are the authoritative lazy resolvers
 // for the session variables `vars.repo.org` / `vars.repo.repo` /
-// `vars.repo.bookmark`. They read the extension's own mapping table (the
+// `vars.repo.branch`. They read the extension's own mapping table (the
 // single source of truth); the KV copy is a projection written on lifecycle
 // events, and these resolvers serve as the KV-miss fallback.
 
@@ -22,12 +22,12 @@ func (s *server) resolveRepo(ctx context.Context, sessionName string) (string, e
 	return r, err
 }
 
-func (s *server) resolveBookmark(ctx context.Context, sessionName string) (string, error) {
+func (s *server) resolveBranch(ctx context.Context, sessionName string) (string, error) {
 	_, _, b, err := s.resolveSession(ctx, sessionName)
 	return b, err
 }
 
-// publishSessionVars projects the session's org/repo/bookmark into the shared
+// publishSessionVars projects the session's org/repo/branch into the shared
 // KV (vars.repo.{token}.*) after the authoritative mapping changed. Called by
 // the lifecycle handler; the reconciler additionally rebuilds projections.
 func (s *server) publishSessionVars(ctx context.Context, ext *extension.Extension, sessionName string) {
@@ -40,7 +40,7 @@ func (s *server) publishSessionVars(ctx context.Context, ext *extension.Extensio
 	}
 	_ = ext.SetSessionVariable(ctx, sessionName, "org", o)
 	_ = ext.SetSessionVariable(ctx, sessionName, "repo", r)
-	_ = ext.SetSessionVariable(ctx, sessionName, "bookmark", b)
+	_ = ext.SetSessionVariable(ctx, sessionName, "branch", b)
 }
 
 // clearSessionVars removes a session's projected variables on deletion.

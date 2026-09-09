@@ -280,7 +280,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "search failed: %v", "搜索失败：%v", err)
 				}
 				if len(matches) == 0 {
-					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("no matches for '%s' in rev '%s'.", b, pattern), fmt.Sprintf("在版本 '%s' 中未找到 '%s' 的匹配。", b, pattern)), Data: map[string]interface{}{"matches": []interface{}{}, "count": 0}}, nil
+					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("no matches for '%s' in rev '%s'.", pattern, b), fmt.Sprintf("在版本 '%s' 中未找到 '%s' 的匹配。", b, pattern)), Data: map[string]interface{}{"matches": []interface{}{}, "count": 0}}, nil
 				}
 				max := abcprotocol.ArgInt(args, "max", 0)
 				truncated := false
@@ -332,8 +332,8 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 						if keyword != "" && !strings.Contains(repo, keyword) {
 							continue
 						}
-						fmt.Fprintf(&sb, "  - %s (bookmarks: %s)\n", repo, bookmarkTargets(bms))
-						rmeta = append(rmeta, map[string]interface{}{"repo": repo, "bookmarks": bookmarkMeta(bms)})
+						fmt.Fprintf(&sb, "  - %s (branches: %s)\n", repo, branchTargets(bms))
+						rmeta = append(rmeta, map[string]interface{}{"repo": repo, "branches": branchMeta(bms)})
 					}
 					meta = append(meta, map[string]interface{}{"org": org, "repos": rmeta})
 				}
@@ -364,12 +364,12 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				for _, m := range arr {
 					isHead, _ := m["is_head"].(bool)
 					commit := strFrom(m, "commit_id")
-					bmks := bookmarkLabels(m["bookmarks"])
+					bmks := branchLabels(m["branches"])
 					fmt.Fprintf(&sb, "  %s %s%s%s\n", shortID(commit), strFrom(m, "message"), bmks, headLabel(isHead))
 					meta = append(meta, map[string]interface{}{
 						"commit_id": commit, "change_id": strFrom(m, "change_id"),
 						"message": strFrom(m, "message"), "author": strFrom(m, "author"),
-						"parents": m["parents"], "is_head": isHead, "bookmarks": m["bookmarks"],
+						"parents": m["parents"], "is_head": isHead, "branches": m["branches"],
 					})
 				}
 				return extension.ToolResultData{Content: sb.String(), Data: map[string]interface{}{"graph": meta}}, nil
@@ -413,7 +413,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if source == "" {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'source' argument", "缺少 'source' 参数")
 				}
-				destSha, derr := s.lab.GetBookmarkHead(ctx, o, r, b)
+				destSha, derr := s.lab.GetBranchHead(ctx, o, r, b)
 				if derr != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "rebase failed: %v", "变基失败：%v", derr)
 				}
@@ -555,9 +555,9 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 	}
 }
 
-// sessionBase resolves the (org, repo, bookmark) triple for a tool call from
+// sessionBase resolves the (org, repo, branch) triple for a tool call from
 // the first-class `session_name` envelope field. There is no legacy
-// `_org`/`_repo`/`_bookmark` fallback: the agent always carries the session
+// `_org`/`_repo`/`_branch` fallback: the agent always carries the session
 // name, and the workspace mapping is derived from it.
 func (s *server) sessionBase(ctx context.Context, args map[string]interface{}, sessionName string) (string, string, string, error) {
 	if sessionName == "" {
@@ -567,15 +567,15 @@ func (s *server) sessionBase(ctx context.Context, args map[string]interface{}, s
 }
 
 // refBase resolves a `ref` argument into (org, repo, rev). `ref` is a full
-// `org:repo:<rev>` path (never a bare bookmark/rev name) — the rev segment is
+// `org:repo:<rev>` path (never a bare branch/rev name) — the rev segment is
 // passed verbatim to easylab, whose resolve_snapshot interprets it as a
-// bookmark, commit hash, tag or change-id. Absent/empty `ref` defaults to the
-// current workspace's (org, repo, bookmark); a `ref` that does not include an
+// branch, commit hash, tag or change-id. Absent/empty `ref` defaults to the
+// current workspace's (org, repo, branch); a `ref` that does not include an
 // org:repo prefix is rejected (a bare `<rev>` cannot locate a repo).
 func (s *server) refBase(ctx context.Context, args map[string]interface{}, sessionName string) (string, string, string, error) {
 	ref := abcprotocol.ArgString(args, "ref")
 	if ref == "" {
-		// Default: current workspace (org:repo:bookmark) from session_name.
+		// Default: current workspace (org:repo:branch) from session_name.
 		if sessionName == "" {
 			return "", "", "", fmt.Errorf("missing session context (session_name)")
 		}
@@ -594,8 +594,8 @@ func (s *server) refBase(ctx context.Context, args map[string]interface{}, sessi
 	return org, repo, rev, nil
 }
 
-// sessionBaseXO is sessionBase with an explicit `org`/`repo`/`bookmark` override
-// (read-only cross-repo access); the bookmark still defaults to the workspace.
+// sessionBaseXO is sessionBase with an explicit `org`/`repo`/`branch` override
+// (read-only cross-repo access); the branch still defaults to the workspace.
 func (s *server) sessionBaseXO(ctx context.Context, args map[string]interface{}, sessionName string) (string, string, string, error) {
 	o, r, b, err := s.sessionBase(ctx, args, sessionName)
 	if err != nil {
@@ -607,7 +607,7 @@ func (s *server) sessionBaseXO(ctx context.Context, args map[string]interface{},
 	if arg := abcprotocol.ArgString(args, "repo"); arg != "" {
 		r = arg
 	}
-	if arg := abcprotocol.ArgString(args, "bookmark"); arg != "" {
+	if arg := abcprotocol.ArgString(args, "branch"); arg != "" {
 		b = arg
 	}
 	return o, r, b, nil
@@ -695,9 +695,9 @@ func shortID(id string) string {
 	return id
 }
 
-// bookmarkLabels renders the bookmarks attached to a graph commit as
-// " (branch: a, b)" — empty when the commit carries no bookmark.
-func bookmarkLabels(v interface{}) string {
+// branchLabels renders the branches attached to a graph commit as
+// " (branch: a, b)" — empty when the commit carries no branch.
+func branchLabels(v interface{}) string {
 	arr, ok := v.([]interface{})
 	if !ok {
 		return ""
@@ -926,8 +926,8 @@ func toCommits(v map[string]interface{}) []commitInfo {
 	return out
 }
 
-// bookmarkTargets renders a repo's bookmarks as "name(target)" joined for text.
-func bookmarkTargets(bms []bookmarkInfo) string {
+// branchTargets renders a repo's branches as "name(target)" joined for text.
+func branchTargets(bms []branchInfo) string {
 	parts := make([]string, 0, len(bms))
 	for _, b := range bms {
 		parts = append(parts, fmt.Sprintf("%s(%s)", b.Name, shortID(b.Sha)))
@@ -935,11 +935,11 @@ func bookmarkTargets(bms []bookmarkInfo) string {
 	return strings.Join(parts, ", ")
 }
 
-// bookmarkMeta converts a repo's bookmarks into a Data slice with name+target.
-func bookmarkMeta(bms []bookmarkInfo) []interface{} {
+// branchMeta converts a repo's branches into a Data slice with name+target.
+func branchMeta(bms []branchInfo) []interface{} {
 	out := make([]interface{}, 0, len(bms))
 	for _, b := range bms {
-		out = append(out, map[string]interface{}{"bookmark": b.Name, "sha": b.Sha})
+		out = append(out, map[string]interface{}{"branch": b.Name, "sha": b.Sha})
 	}
 	return out
 }

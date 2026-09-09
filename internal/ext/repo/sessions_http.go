@@ -13,7 +13,7 @@ import (
 // ---- session resolution cache (tool path) ----
 
 type sessEntry struct {
-	org, repo, bookmark string
+	org, repo, branch string
 	exp                 time.Time
 }
 
@@ -34,13 +34,13 @@ func (c *sessCache) get(sid string) (string, string, string, bool) {
 	if !ok || time.Now().After(e.exp) {
 		return "", "", "", false
 	}
-	return e.org, e.repo, e.bookmark, true
+	return e.org, e.repo, e.branch, true
 }
 
-func (c *sessCache) put(sid, org, repo, bookmark string) {
+func (c *sessCache) put(sid, org, repo, branch string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.m[sid] = sessEntry{org: org, repo: repo, bookmark: bookmark, exp: time.Now().Add(c.ttl)}
+	c.m[sid] = sessEntry{org: org, repo: repo, branch: branch, exp: time.Now().Add(c.ttl)}
 }
 
 func (c *sessCache) evict(sid string) {
@@ -51,7 +51,7 @@ func (c *sessCache) evict(sid string) {
 
 // ---- session triple resolution (tool path, strict) ----
 
-// resolveSession maps a session name to its (org, repo, bookmark) triple via
+// resolveSession maps a session name to its (org, repo, branch) triple via
 // the mapping table. No fallback, no lazy creation: under the eager
 // lifecycle-event model every session has its workspace by the time tools
 // run. A miss means the event has not been processed yet (retry shortly) or
@@ -66,18 +66,18 @@ func (s *server) resolveSession(ctx context.Context, sid string) (string, string
 	}
 	if row == nil {
 		if _, _, _, ok := parseSession(sid); !ok {
-			return "", "", "", errBad("session '%s' does not match org:repo:bookmark naming; cannot resolve workspace", sid)
+			return "", "", "", errBad("session '%s' does not match org:repo:branch naming; cannot resolve workspace", sid)
 		}
 		return "", "", "", errNotFound("session '%s' workspace is not ready yet (lifecycle event in progress); retry later", sid)
 	}
-	s.cache.put(sid, row.Org, row.Repo, row.Bookmark)
-	return row.Org, row.Repo, row.Bookmark, nil
+	s.cache.put(sid, row.Org, row.Repo, row.Branch)
+	return row.Org, row.Repo, row.Branch, nil
 }
 
 // bindRow records a mapping; a unique conflict means a concurrent path
 // already won — converged, not an error.
-func (s *server) bindRow(ctx context.Context, org, repo, bookmark, sid string) error {
-	if err := s.store.InsertRow(ctx, org, repo, bookmark, sid); err != nil {
+func (s *server) bindRow(ctx context.Context, org, repo, branch, sid string) error {
+	if err := s.store.InsertRow(ctx, org, repo, branch, sid); err != nil {
 		if statusOf(err) == 409 {
 			return nil
 		}
@@ -86,12 +86,12 @@ func (s *server) bindRow(ctx context.Context, org, repo, bookmark, sid string) e
 	return s.store.InsertManaged(ctx, org, repo)
 }
 
-// adoptBookmark binds an EXISTING bookmark to a derived session, creating
+// adoptBranch binds an EXISTING branch to a derived session, creating
 // the session when needed. Returns (sessionName, adopted). Shared by the
 // manual ops surface (completeAdopt) and tool handlers (mr-create target
 // resolution).
-func (s *server) adoptBookmark(ctx context.Context, org, repo, bookmark string) (string, bool, error) {
-	row, err := s.store.GetRow(ctx, org, repo, bookmark)
+func (s *server) adoptBranch(ctx context.Context, org, repo, branch string) (string, bool, error) {
+	row, err := s.store.GetRow(ctx, org, repo, branch)
 	if err != nil {
 		return "", false, errDownstream("postgres", err)
 	}
@@ -105,23 +105,23 @@ func (s *server) adoptBookmark(ctx context.Context, org, repo, bookmark string) 
 	if !tree.repoExists(org, repo) {
 		return "", false, errNotFound("repository %s/%s does not exist", org, repo)
 	}
-	if !tree.bookmarkExists(org, repo, bookmark) {
-		return "", false, errNotFound("bookmark %s/%s#%s does not exist", org, repo, bookmark)
+	if !tree.branchExists(org, repo, branch) {
+		return "", false, errNotFound("branch %s/%s#%s does not exist", org, repo, branch)
 	}
-	name := namingSession(org, repo, bookmark)
+	name := namingSession(org, repo, branch)
 	if err := s.ag.EnsureSession(ctx, name); err != nil {
 		return "", false, err
 	}
-	if err := s.store.InsertRow(ctx, org, repo, bookmark, name); err != nil {
+	if err := s.store.InsertRow(ctx, org, repo, branch, name); err != nil {
 		return "", false, err
 	}
 	return name, true, nil
 }
 
-// completeAdopt binds an EXISTING bookmark to a derived session (manual ops
-// surface: give an orphan bookmark a session). Returns (sessionName, adopted).
-func (s *server) completeAdopt(ctx context.Context, org, repo, bookmark string) (string, bool, error) {
-	return s.adoptBookmark(ctx, org, repo, bookmark)
+// completeAdopt binds an EXISTING branch to a derived session (manual ops
+// surface: give an orphan branch a session). Returns (sessionName, adopted).
+func (s *server) completeAdopt(ctx context.Context, org, repo, branch string) (string, bool, error) {
+	return s.adoptBranch(ctx, org, repo, branch)
 }
 
 // ---- HTTP handlers (ops surface; workspace writes are event-driven) ----
@@ -133,8 +133,8 @@ func (s *server) router() http.Handler {
 		r.Get("/health", s.health)
 		r.Get("/session-map", s.getSessionMap)
 		r.Get("/repos", s.listRepos)
-		r.Get("/repos/{org}/{repo}/bookmarks", s.listBookmarks)
-		r.Post("/repos/{org}/{repo}/bookmarks/{bm}/session", s.ensureSession)
+		r.Get("/repos/{org}/{repo}/branches", s.listBranches)
+		r.Post("/repos/{org}/{repo}/branches/{bm}/session", s.ensureSession)
 	})
 	return r
 }
@@ -167,7 +167,7 @@ func (s *server) listRepos(w http.ResponseWriter, r *http.Request) {
 	}
 	bound := map[string]string{}
 	for _, row := range rows {
-		bound[row.Org+"/"+row.Repo+"/"+row.Bookmark] = row.SessionName
+		bound[row.Org+"/"+row.Repo+"/"+row.Branch] = row.SessionName
 	}
 
 	orgs := []interface{}{}
@@ -180,17 +180,17 @@ func (s *server) listRepos(w http.ResponseWriter, r *http.Request) {
 				if v, ok := bound[org+"/"+repo+"/"+bm.Name]; ok {
 					sn = v
 				}
-				bl = append(bl, map[string]interface{}{"bookmark": bm.Name, "session_name": sn})
+				bl = append(bl, map[string]interface{}{"branch": bm.Name, "session_name": sn})
 			}
-			rl = append(rl, map[string]interface{}{"repo": repo, "managed": mSet[org+"/"+repo], "bookmarks": bl})
+			rl = append(rl, map[string]interface{}{"repo": repo, "managed": mSet[org+"/"+repo], "branches": bl})
 		}
 		orgs = append(orgs, map[string]interface{}{"org": org, "repos": rl})
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"orgs": orgs})
 }
 
-// listBookmarks: GET /repos/{org}/{repo}/bookmarks
-func (s *server) listBookmarks(w http.ResponseWriter, r *http.Request) {
+// listBranches: GET /repos/{org}/{repo}/branches
+func (s *server) listBranches(w http.ResponseWriter, r *http.Request) {
 	org, repo := chi.URLParam(r, "org"), chi.URLParam(r, "repo")
 	ctx := r.Context()
 	tree, err := s.lab.GetRepoTree(ctx)
@@ -209,7 +209,7 @@ func (s *server) listBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 	bound := map[string]string{}
 	for _, row := range rows {
-		bound[row.Bookmark] = row.SessionName
+		bound[row.Branch] = row.SessionName
 	}
 	out := []interface{}{}
 	for _, bm := range tree[org][repo] {
@@ -217,18 +217,18 @@ func (s *server) listBookmarks(w http.ResponseWriter, r *http.Request) {
 		if v, ok := bound[bm.Name]; ok {
 			sn = v
 		}
-		out = append(out, map[string]interface{}{"bookmark": bm.Name, "session_name": sn})
+		out = append(out, map[string]interface{}{"branch": bm.Name, "session_name": sn})
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"bookmarks": out})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"branches": out})
 }
 
-// ensureSession: POST /repos/{org}/{repo}/bookmarks/{bm}/session — bind an
-// orphan bookmark to a (created) session. Idempotent.
+// ensureSession: POST /repos/{org}/{repo}/branches/{bm}/session — bind an
+// orphan branch to a (created) session. Idempotent.
 func (s *server) ensureSession(w http.ResponseWriter, r *http.Request) {
 	org, repo, bm := chi.URLParam(r, "org"), chi.URLParam(r, "repo"), chi.URLParam(r, "bm")
 	if !validSessionComponent(bm) {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"ok": false, "error": "invalid bookmark name; cannot derive session"})
+			"ok": false, "error": "invalid branch name; cannot derive session"})
 		return
 	}
 	name, adopted, err := s.completeAdopt(r.Context(), org, repo, bm)
@@ -258,7 +258,7 @@ func (s *server) getSessionMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"org": row.Org, "repo": row.Repo, "bookmark": row.Bookmark,
+		"org": row.Org, "repo": row.Repo, "branch": row.Branch,
 	})
 }
 

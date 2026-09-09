@@ -3,6 +3,8 @@ package opsext
 import (
 	"context"
 	"errors"
+
+	"connectrpc.com/connect"
 	"fmt"
 	"strings"
 	"time"
@@ -24,12 +26,17 @@ func (s *server) runViaGateway(ctx context.Context, cid, command string, timeout
 
 	// Sync-wait: the worker always registers a backgrounded job; JobWait
 	// blocks until completion or timeout (worker caps 60s). Then fold the
-	// output tails into the tool result.
+	// output tails into the tool result. A wait deadline is NOT a failure:
+	// the job stays registered and running in the background — surface it as
+	// such so long jobs (sleep/serve) keep their handle for stdin/kill.
 	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 	wait, err := s.sdk.Sandbox().JobWait(waitCtx, cid, &workerv1.JobWaitRequest{JobId: jobID, TimeoutMs: int32(timeoutMs)})
-	if err != nil && !errors.Is(err, waitCtx.Err()) {
-		return "", done, err
+	if err != nil {
+		if !errors.Is(err, waitCtx.Err()) && !errors.Is(err, context.DeadlineExceeded) && connect.CodeOf(err) != connect.CodeDeadlineExceeded && connect.CodeOf(err) != connect.CodeCanceled {
+			return "", done, err
+		}
+		done.Bg = true
 	}
 	if wait != nil && wait.Msg != nil {
 		done.ExitCode = wait.Msg.ExitCode
@@ -136,13 +143,16 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run failed: %v", "sandbox-run 失败：%v", err)
 			}
 			content := fmt.Sprintf("Command completed (job %s, exit %d)", jobID, done.ExitCode)
+			if done.Bg {
+				content = fmt.Sprintf("Job %s still running in background (wait window %dms elapsed); drive it via job-id", jobID, timeoutMs)
+			}
 			if done.Stdout != "" {
 				content += "\n" + done.Stdout
 			}
 			return extension.ToolResultData{Content: content, Data: map[string]interface{}{
 				"job-id":       jobID,
 				"exit_code":    done.ExitCode,
-				"backgrounded": false,
+				"backgrounded": done.Bg,
 			}}, nil
 		},
 	}

@@ -185,18 +185,27 @@ func (c *connLab) WriteBlob(ctx context.Context, req *connect.Request[easylabv1.
 	if ref == "" {
 		ref = meta.DefaultBranch
 	}
-	branch, berr := ws.GetRef(ref)
-	if berr != nil || branch == nil {
+	if _, berr := ws.GetRef(ref); berr != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("branch %q not found", ref))
+	}
+	// Commit on top of the branch's current head, then MOVE the branch ref:
+	// without the SetRef the commit detaches from the branch and every later
+	// read at the ref still sees the old tree.
+	parent, rerr := resolveRefAny(ws, repo, ref)
+	if rerr != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, rerr)
 	}
 	content := req.Msg.Content
 	if len(req.Msg.Raw) > 0 {
 		content = string(req.Msg.Raw)
 	}
-	_, _, err = ws.CommitFromChanges(object.ID{}, []revision.FileChangeSpec{
+	snap, _, err := ws.CommitFromChanges(parent, []revision.FileChangeSpec{
 		{Path: req.Msg.Path, Content: []byte(content)},
 	}, "write "+req.Msg.Path, store.Author{Name: "easyvcs", Email: "easyvcs@example.com"}, "")
 	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if _, err := ws.SetRef(ref, store.RefBranch, snap.RevisionHash.String()); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return connect.NewResponse(&easylabv1.WriteBlobResponse{Ok: true}), nil
@@ -342,14 +351,15 @@ func (c *connLab) CreateBranch(ctx context.Context, req *connect.Request[easylab
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
 	ws := revision.NewWorkspace(repo)
+	// The ref target must be a resolved object id, never a symbolic name:
+	// storing "from" verbatim (e.g. "main") poisons every later resolve of
+	// the new branch ("invalid object id").
 	target := req.Msg.From
-	if target == "" {
-		id, err := resolveRevID(ws, repo, "@")
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
-		}
-		target = id
+	hash, err := resolveRefAny(ws, repo, target)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
+	target = hash.String()
 	if _, err := ws.SetRef(req.Msg.Branch, store.RefBranch, target); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -251,7 +250,7 @@ func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx
 		message = "port " + sandboxPath
 	}
 
-	commitsPath := fmt.Sprintf("%s/api/v1/repos/%s/%s/commits",
+	commitsPath := fmt.Sprintf("%s/repo/%s/%s/commit",
 		s.base, urlPathEscape(sc.ws.org), urlPathEscape(sc.ws.repo))
 
 	// Determine whether sandbox_path is a directory.
@@ -266,24 +265,18 @@ func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx
 		if err != nil {
 			return "", ef(ctx, s.ext, sessionName, "port sandbox read failed: %v", "沙箱读取失败：%v", err)
 		}
-		sha, err := s.repoBlobSha(ctx, sc.ws.org, sc.ws.repo, repoPath, sc.ws.branch)
-		if err != nil && !errors.Is(err, errNotFoundForHTTP) {
-			return "", ef(ctx, s.ext, sessionName, "port read repo sha failed: %v", "读取仓库 sha 失败：%v", err)
-		}
-		action := map[string]interface{}{
-			"action":         "update",
-			"path":           repoPath,
-			"content_base64": base64Encode(string(data)),
-		}
-		if sha != "" {
-			action["sha"] = sha
+		commitBody := func(changes []map[string]interface{}) map[string]interface{} {
+			return map[string]interface{}{
+				"ref":         sc.ws.branchOrDefault(),
+				"description": message,
+				"new_commit":  true,
+				"changes":     changes,
+			}
 		}
 		var resp map[string]interface{}
-		if err := s.httpPostJSONMap(ctx, commitsPath, map[string]interface{}{
-			"branch":  sc.ws.branch,
-			"message": message,
-			"actions": []interface{}{action},
-		}, &resp); err != nil {
+		if err := s.httpPostJSONMap(ctx, commitsPath, commitBody([]map[string]interface{}{
+			{"path": repoPath, "content": string(data)},
+		}), &resp); err != nil {
 			return "", ef(ctx, s.ext, sessionName, "port write failed: %v", "沙箱写入失败：%v", err)
 		}
 		changeID := strField(resp, "change_id")
@@ -301,7 +294,7 @@ func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx
 	if len(files) == 0 {
 		return "", ef(ctx, s.ext, sessionName, "port sandbox directory '%s' is empty", "沙箱目录 '%s' 为空", sandboxPath)
 	}
-	actions := make([]map[string]interface{}, 0, len(files))
+	changes := make([]map[string]interface{}, 0, len(files))
 	for _, f := range files {
 		rel := f["path"].(string)
 		target := repoPath
@@ -311,21 +304,17 @@ func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx
 			target = target + "/" + rel
 		}
 		contentBase64, _ := f["content"].(string)
-		sha, serr := s.repoBlobSha(ctx, sc.ws.org, sc.ws.repo, target, sc.ws.branch)
-		if serr != nil && !errors.Is(serr, errNotFoundForHTTP) {
-			return "", ef(ctx, s.ext, sessionName, "port read repo sha failed: %v", "读取仓库 sha 失败：%v", serr)
-		}
-		action := map[string]interface{}{"action": "update", "path": target, "content_base64": contentBase64}
-		if sha != "" {
-			action["sha"] = sha
-		}
-		actions = append(actions, action)
+		changes = append(changes, map[string]interface{}{
+			"path":    target,
+			"content": base64Decode(contentBase64),
+		})
 	}
 	var resp map[string]interface{}
 	if err := s.httpPostJSONMap(ctx, commitsPath, map[string]interface{}{
-		"branch":  sc.ws.branch,
-		"message": message,
-		"actions": actions,
+		"ref":         sc.ws.branchOrDefault(),
+		"description": message,
+		"new_commit":  true,
+		"changes":     changes,
 	}, &resp); err != nil {
 		return "", ef(ctx, s.ext, sessionName, "port commit write failed: %v", "提交写入失败：%v", err)
 	}
@@ -333,23 +322,7 @@ func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx
 	if changeID == "" {
 		changeID = strField(resp, "commit_id")
 	}
-	return fmt.Sprintf("Ported directory '%s' to repo '%s' (%d file(s), change %s).", sandboxPath, repoPath, len(actions), shortID(changeID)), nil
-}
-
-func (s *server) repoBlobSha(ctx context.Context, org, repo, path, ref string) (string, error) {
-	url := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents/%s?ref=%s",
-		s.base, urlPathEscape(org), urlPathEscape(repo), escapePath(path), urlPathEscape(ref))
-	var v map[string]interface{}
-	if err := s.httpGetJSONMap(ctx, url, &v); err != nil {
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-			return "", errNotFoundForHTTP
-		}
-		return "", err
-	}
-	if s, ok := v["sha"].(string); ok {
-		return s, nil
-	}
-	return "", nil
+	return fmt.Sprintf("Ported directory '%s' to repo '%s' (%d file(s), change %s).", sandboxPath, repoPath, len(changes), shortID(changeID)), nil
 }
 
 // branchOrDefault returns b or "main" when empty.
