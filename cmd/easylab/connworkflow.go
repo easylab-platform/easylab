@@ -67,6 +67,7 @@ func protoProduce(p ci.Produce) *easylabv1.Produce {
 		Action: string(p.Action), Context: p.Context, Dockerfile: p.Dockerfile,
 		Tag: p.Tag, Path: p.Path, Destination: p.Destination, Ref: p.Ref,
 		Protocol: p.Protocol, Name: p.Name, Version: p.Version, File: p.File,
+		Containerfile: p.Containerfile,
 	}
 }
 
@@ -208,6 +209,7 @@ func fromProtoWorkflow(wf *easylabv1.Workflow) *ci.Workflow {
 				Path: j.Produce.GetPath(), Destination: j.Produce.GetDestination(),
 				Ref: j.Produce.GetRef(), Protocol: j.Produce.GetProtocol(),
 				Name: j.Produce.GetName(), Version: j.Produce.GetVersion(), File: j.Produce.GetFile(),
+			Containerfile: j.Produce.GetContainerfile(),
 			},
 		})
 	}

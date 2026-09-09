@@ -212,29 +212,6 @@ func (c *connOps) GetTask(ctx context.Context, req *connect.Request[easylabv1.Ge
 	}}), nil
 }
 
-func (c *connOps) Build(ctx context.Context, req *connect.Request[easylabv1.BuildRequest]) (*connect.Response[easylabv1.BuildResponse], error) {
-	image := req.Msg.Tag
-	if image == "" {
-		image = req.Msg.Ref
-	}
-	id := c.s.ops.builders.NewID("build")
-	task := c.s.ops.builders.Create(id, ops.KindBuild)
-	spec := ops.BuildSpec{
-		Context: req.Msg.Context,
-		Image:   image,
-	}
-	go func() {
-		res, err := c.s.ops.builder.Build(context.Background(), spec, func(line string) {
-			task.Log(line)
-		})
-		if err != nil {
-			task.Finish(false, res.Out, err.Error())
-			return
-		}
-		task.Finish(true, fmt.Sprintf("image=%s", res.Image), "")
-	}()
-	return connect.NewResponse(&easylabv1.BuildResponse{Ok: true, TaskId: id, Image: image}), nil
-}
 
 func (c *connOps) TaskLog(ctx context.Context, req *connect.Request[easylabv1.TaskLogRequest], stream *connect.ServerStream[easylabv1.TaskLogResponse]) error {
 	task := c.s.ops.builders.Get(req.Msg.Id)

@@ -2,7 +2,11 @@ package ci
 
 import (
 	"context"
-	"fmt"
+	"os"
+	"strconv"
+	"time"
+
+	publishpkg "github.com/easylab-platform/easylab/internal/publish"
 
 	"github.com/easylab-platform/easylab/internal/ops"
 )
@@ -13,11 +17,13 @@ import (
 // (internal/ops), streaming its log. Steps for non-oci-build produce run
 // through the sandbox worker (wired at single-binary time).
 type PodmanBackend struct {
-	builder ops.Builder
+	builder       ops.Builder
+	artifactURL   string
+	artifactToken string
 }
 
 func NewPodmanBackend(builder ops.Builder) *PodmanBackend {
-	return &PodmanBackend{builder: builder}
+	return &PodmanBackend{builder: builder, artifactURL: os.Getenv("EASYLAB_ARTIFACT_URL"), artifactToken: os.Getenv("ARTIFACT_TOKEN")}
 }
 
 // Run implements Backend.
@@ -30,11 +36,21 @@ func (b *PodmanBackend) Run(ctx context.Context, job *Job, rn *Runner, onLog fun
 	// action directly; otherwise the produce action is still the deliverable.
 	switch job.Produce.Action {
 	case ActionOCIBuild:
+		// oci-build must never walk the easylab cwd (EASYVCS_HOME) as context:
+		// always use a dedicated temp build dir. A self-contained build may
+		// inline the Containerfile; otherwise Dockerfile is expected in the
+		// (workspace-synced) context.
+		ctxDir := job.Produce.Context
+		if ctxDir == "" || ctxDir == "." {
+			ctxDir = buildTmpDir()
+		}
+		_ = os.MkdirAll(ctxDir, 0o755)
 		spec := ops.BuildSpec{
-			Context:   job.Produce.Context,
-			Dockerfile: job.Produce.Dockerfile,
-			Image:     job.Produce.Tag,
-			BuildArgs: mapToArgs(job.Produce, job.Steps),
+			Context:       ctxDir,
+			Containerfile: job.Produce.Containerfile,
+			Dockerfile:    job.Produce.Dockerfile,
+			Image:         job.Produce.Tag,
+			BuildArgs:     mapToArgs(job.Produce, job.Steps),
 		}
 		if spec.Dockerfile == "" {
 			spec.Dockerfile = "Dockerfile"
@@ -51,15 +67,45 @@ func (b *PodmanBackend) Run(ctx context.Context, job *Job, rn *Runner, onLog fun
 		if err != nil {
 			return "", err
 		}
-		if res.Image != "" {
-			return fmt.Sprintf("image=%s", res.Image), nil
+		// Scheduler treats res=="ok" as success. The produced image tag is the
+		// deliverable; surface it via the log/message but return "ok" so the
+		// job is not mis-classified as failed (the image exists regardless).
+		if onLog != nil && res.Image != "" {
+			onLog("image=" + res.Image)
+		}
+		return "ok", nil
+	case ActionPublishProtocol:
+		// publish-protocol: render the built-in template for the protocol,
+		// then build+run it via the podman build backend. The RUN uploads
+		// the package to the easylab protocol registry; exit 0 = success.
+		cf, err := publishpkg.Render(job.Produce.Protocol,
+			job.Produce.Name, job.Produce.Version, job.Produce.File,
+			b.artifactURL, b.artifactToken)
+		if err != nil {
+			return "", err
+		}
+		ctxDir := buildTmpDir()
+		_ = os.MkdirAll(ctxDir, 0o755)
+		spec := ops.BuildSpec{
+			Context:       ctxDir,
+			Containerfile: cf,
+			Dockerfile:    "Dockerfile",
+			Image:         "", // publish does not export an image
+			BuildArgs:     []string{"ARTIFACT_URL=" + b.artifactURL, "ARTIFACT_TOKEN=" + b.artifactToken, "PUBLISH_TS=" + ts()},
+		}
+		_, err = b.builder.Build(ctx, spec, func(line string) {
+			if onLog != nil {
+				onLog(line)
+			}
+		})
+		if err != nil {
+			return "", err
 		}
 		return "ok", nil
 	default:
-		// Non-oci-build produce on a podman backend: run the steps as a
-		// job via the runner, then perform produce (artifact-upload or
-		// publish-protocol) — handled by the host/easyworker backend in the
-		// single-binary wiring; here we fall through to the sandbox worker.
+		// Non-oci-build/publish produce on a podman backend: run the steps
+		// as a job via the runner, then perform produce — handled by the
+		// host/easyworker backend in the single-binary wiring.
 		return b.runSteps(ctx, job, img, onLog)
 	}
 }
@@ -93,3 +139,16 @@ func mapToArgs(p Produce, steps []Step) []string {
 	}
 	return out
 }
+
+// buildTmpDir returns a dedicated context dir for an oci-build job when no
+// explicit context (workspace) was provided. Prevents accidental use of the
+// easylab data dir as a build context.
+func buildTmpDir() string {
+	dir, err := os.MkdirTemp("", "easyci-*")
+	if err != nil {
+		return "."
+	}
+	return dir
+}
+
+func ts() string { return strconv.FormatInt(time.Now().UnixNano(), 10) }

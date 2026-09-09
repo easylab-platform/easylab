@@ -68,6 +68,7 @@ type Produce struct {
 	Name        string
 	Version     string
 	File        string
+	Containerfile string
 }
 
 // Workflow is the declarative event-driven automation unit.
