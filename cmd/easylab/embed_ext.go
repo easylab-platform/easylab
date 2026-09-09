@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/easylab-platform/ext-ops"
-	"github.com/easylab-platform/ext-repo"
+	"github.com/easylab-platform/easylab/internal/ext/ops"
+	"github.com/easylab-platform/easylab/internal/ext/repo"
 )
 
 // embedExtensions runs the ops + repo agent-tool extensions in-process (single
@@ -17,9 +17,6 @@ import (
 // netns) and forward tool calls to the easylab gateway via easylab-sdk-go.
 // They block until ctx is cancelled; failures are logged, not fatal.
 func embedExtensions(ctx context.Context) {
-	if os.Getenv("EASYLAB_EXT_CONTAINERS") == "1" {
-		return
-	}
 	natsURL := os.Getenv("EASYLAB_EXT_NATS_URL")
 	if natsURL == "" {
 		natsURL = "nats://127.0.0.1:4222"

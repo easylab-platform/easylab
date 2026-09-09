@@ -1,8 +1,8 @@
 package repoext
 
 import (
-	"connectrpc.com/connect"
 	"bytes"
+	"connectrpc.com/connect"
 	"context"
 	"encoding/base64"
 	"encoding/json"

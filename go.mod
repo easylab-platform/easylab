@@ -4,7 +4,9 @@ go 1.26.5
 
 require (
 	connectrpc.com/connect v1.20.0
+	github.com/abcp-sdk/abc-protocol-go v1.1.0
 	github.com/abcp-sdk/agent-proto v0.5.1
+	github.com/abcp-sdk/agent-sdk-go v0.5.1
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.1
 	github.com/easylab-platform/artifact/cargo v0.2.0
@@ -25,10 +27,11 @@ require (
 	github.com/easylab-platform/artifact/swiftpm v0.2.0
 	github.com/easylab-platform/artifact/system v0.2.0
 	github.com/easylab-platform/easylab-proto v0.5.2
+	github.com/easylab-platform/easylab-sdk-go v0.8.1
 	github.com/easylab-platform/easyvcs v0.5.1
-	github.com/easylab-platform/ext-ops v0.0.0-20260908104207-dc244cee69ef
-	github.com/easylab-platform/ext-repo v0.0.0-20260908104219-ccb664286cc7
 	github.com/glebarez/sqlite v1.11.0
+	github.com/go-chi/chi/v5 v5.3.2
+	google.golang.org/protobuf v1.36.12
 	gorm.io/driver/postgres v1.6.2
 	gorm.io/gorm v1.31.2
 )
@@ -36,8 +39,6 @@ require (
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/abcp-sdk/abc-protocol-go v1.1.0 // indirect
-	github.com/abcp-sdk/agent-sdk-go v0.5.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
@@ -45,10 +46,8 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/easylab-platform/easylab-sdk-go v0.8.1 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
-	github.com/go-chi/chi/v5 v5.3.2 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
@@ -87,7 +86,6 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/driver/mysql v1.6.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
@@ -102,8 +100,4 @@ replace github.com/easylab-platform/easyvcs => ../easyvcs
 
 replace github.com/easylab-platform/easylab-proto => ../easylab-proto
 
-replace github.com/easylab-platform/ext-repo => ../ext-repo
-
 replace github.com/easylab-platform/easylab-sdk-go => ../easylab-sdk-go
-
-replace github.com/easylab-platform/ext-ops => ../ext-ops

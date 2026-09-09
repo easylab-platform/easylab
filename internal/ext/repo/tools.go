@@ -1,12 +1,12 @@
 package repoext
 
 import (
-	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
-	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
+	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 	"net/url"
 	"strings"
 

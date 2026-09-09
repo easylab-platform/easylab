@@ -63,7 +63,11 @@ func OpenStore(_ context.Context, cfg PgConfig) (*Store, error) {
 	return st, nil
 }
 
-func (s *Store) Close() { if s != nil && s.db != nil { _ = s.db.Close() } }
+func (s *Store) Close() {
+	if s != nil && s.db != nil {
+		_ = s.db.Close()
+	}
+}
 
 func (s *Store) migrate(ctx context.Context) error {
 	const ddl = `
