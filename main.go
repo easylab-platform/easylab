@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -15,11 +14,9 @@ import (
 	"github.com/abcp-sdk/abc-protocol-go/extension"
 	"github.com/abcp-sdk/abc-protocol-go/manifest"
 	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
-	
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-
-	"easyvcs-ext-ops/internal/worker"
 
 	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 )
@@ -29,8 +26,7 @@ var manifestYaml []byte
 
 type server struct {
 	sdk               *easylabsdk.Client // typed easylab client (lab+ops+registry, owns all k8s access)
-	bus               *natsbus.Bus          // NATS bus (file store / abc)
-	workerImage       string             // sandbox worker image (easylab runs it)
+	bus               *natsbus.Bus       // NATS bus (file store / abc)
 	runtimeNamespace  string             // namespace where easylab creates sandboxes/deployments
 	ext               *extension.Extension
 	artifact          string // artifact registry base URL (packages + OCI + metadata)
@@ -42,17 +38,10 @@ type server struct {
 	wsMu    sync.Mutex              // guards wsCache
 	wsCache map[string]wsCacheEntry // session -> workspace (short TTL)
 
-	syncMu sync.Mutex        // guards synced
-	synced map[string]string // container key -> synced rev
-
-	// workerResolver overrides worker URL resolution (tests).
-	workerResolver func(cid string) (string, error)
-
 	builds sync.Map // build id -> *buildTask
 }
 
 func main() {
-	img := envOr("WORKER_IMAGE", "easylab-worker:v0.0.1")
 	natsURL := envOr("NATS_URL", "nats://nats.easylab.svc.cluster.local:4222")
 	port := envOr("PORT", "8080")
 	// easylab replaces the old repo-manager (archive + contents + clone).
@@ -79,10 +68,8 @@ func main() {
 		artifactToken:     artifactToken,
 		base:              base,
 		easylabToken:      easylabToken,
-			workerImage:       img,
 		runtimeNamespace:  runtimeNS,
 		wsCache:           map[string]wsCacheEntry{},
-		synced:            map[string]string{},
 	}
 
 	// Verification instances must set DISABLE_NATS=1. Tool-call and
@@ -153,19 +140,6 @@ func (s *server) router(toolBridge bool) http.Handler {
 	r.Use(middleware.Logger)
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", s.health)
-		r.Get("/sandboxes", s.sandboxesList)
-		r.Get("/sandboxes/{session}", s.sandboxGet)
-		r.Delete("/sandboxes/{session}", s.deleteContainer)
-		r.Post("/sandboxes/{session}/exec", s.exec)
-		r.Get("/sandboxes/{session}/jobs", s.listJobs)
-		r.Get("/sandboxes/{session}/jobs/{jobID}/output", s.jobOutput)
-		r.Post("/sandboxes/{session}/jobs/{jobID}/wait", s.jobWait)
-		r.Post("/sandboxes/{session}/jobs/{jobID}/stdin", s.jobStdin)
-		r.Post("/sandboxes/{session}/jobs/{jobID}/kill", s.kill)
-		r.Post("/sandboxes/{session}/read", s.sandboxRead)
-		r.Post("/sandboxes/{session}/write", s.sandboxWrite)
-		r.Get("/sandboxes/{session}/ws", s.wsProxy)
-		r.Get("/sandboxes/{session}/ws/job", s.wsProxyJob)
 		r.Post("/deployments", s.deploy)
 		r.Get("/infra/k8s/config", s.k8sConfig)
 		r.Post("/images/build", s.buildImage)
@@ -193,7 +167,6 @@ func (s *server) router(toolBridge bool) http.Handler {
 	})
 
 	// Embedded SPA (served at /; /api/v1 routes registered above win).
-	r.Handle("/*", spaHandler())
 	return r
 }
 
@@ -230,22 +203,12 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]interface{}{"ok": false, "error": msg})
 }
 
-// resolveWorkerURL finds the worker URL for a container ID (easylab-sourced).
-func (s *server) resolveWorkerURL(ctx context.Context, cid string) (string, error) {
-	info, err := s.workerInfo(ctx, cid)
-	if err != nil {
-		return "", fmt.Errorf("no worker for container %s", cid)
-	}
-	if info.WorkerURL == "" {
-		return "", fmt.Errorf("worker not ready")
-	}
-	return info.WorkerURL, nil
+func (s *server) health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "name": "ops-extension"})
 }
 
-func (s *server) workerCommand(ctx context.Context, cid, method string, params map[string]interface{}) (interface{}, error) {
-	wu, err := s.resolveWorkerURL(ctx, cid)
-	if err != nil {
-		return nil, err
-	}
-	return worker.CommandOnce(ctx, worker.ToWsURL(wu), method, params)
+func (s *server) k8sConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "namespace": s.runtimeNamespace})
 }
+
+var _ = context.Background

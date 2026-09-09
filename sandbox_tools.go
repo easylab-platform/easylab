@@ -2,14 +2,91 @@ package main
 
 import (
 	"context"
-	"easyvcs-ext-ops/internal/worker"
 	"errors"
 	"fmt"
-	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
-	"github.com/abcp-sdk/abc-protocol-go/extension"
 	"strings"
 	"time"
+
+	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
+	"github.com/abcp-sdk/abc-protocol-go/extension"
+	workerv1 "github.com/easylab-platform/easylab-proto/worker/v1"
 )
+
+// runViaGateway executes a command in the sandbox through the easylab
+// SandboxService gateway (single entry). Every command becomes a job; we
+// sync-wait for the terminal output tail.
+func (s *server) runViaGateway(ctx context.Context, cid, command string, timeoutMs int) (jobID string, done JobDone, err error) {
+	execRes, err := s.sdk.Sandbox().Execute(ctx, cid, &workerv1.ExecuteRequest{Command: command})
+	if err != nil {
+		return "", done, err
+	}
+	jobID = execRes.Msg.JobId
+
+	// Sync-wait: the worker always registers a backgrounded job; JobWait
+	// blocks until completion or timeout (worker caps 60s). Then fold the
+	// output tails into the tool result.
+	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+	defer cancel()
+	wait, err := s.sdk.Sandbox().JobWait(waitCtx, cid, &workerv1.JobWaitRequest{JobId: jobID, TimeoutMs: int32(timeoutMs)})
+	if err != nil && !errors.Is(err, waitCtx.Err()) {
+		return "", done, err
+	}
+	if wait != nil && wait.Msg != nil {
+		done.ExitCode = wait.Msg.ExitCode
+	}
+	// Pull the full output tail (stdout+stderr joined) for the tool result.
+	out, oerr := s.sdk.Sandbox().JobOutput(ctx, cid, &workerv1.JobOutputRequest{JobId: jobID, Start: -200, End: 0})
+	if oerr == nil && out != nil && out.Msg != nil {
+		done.Stdout = strings.Join(out.Msg.Lines, "\n")
+	}
+	return jobID, done, nil
+}
+
+// backgroundWatch polls a job to completion and notifies via the session
+// mailbox — replaces the legacy SSE background watcher.
+func (s *server) backgroundWatch(ctx context.Context, cid, jobID, sid string) {
+	bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer bgCancel()
+	// Poll JobWait in 5s slices; when done, fetch output and mail it.
+	lastErr := error(nil)
+	for {
+		w, err := s.sdk.Sandbox().JobWait(bgCtx, cid, &workerv1.JobWaitRequest{JobId: jobID, TimeoutMs: 5000})
+		if err != nil {
+			lastErr = err
+			break
+		}
+		if w.Msg != nil && w.Msg.State != "running" {
+			resp, oerr := s.sdk.Sandbox().JobOutput(bgCtx, cid, &workerv1.JobOutputRequest{JobId: jobID, Start: -200, End: 0})
+			lines := []string(nil)
+			if oerr == nil && resp != nil && resp.Msg != nil {
+				lines = resp.Msg.Lines
+			}
+			msg := fmt.Sprintf("Background command finished (job %s, exit %d)", jobID, w.Msg.ExitCode)
+			if s := strings.Join(lines, "\n"); s != "" {
+				msg += "\n" + s
+			}
+			if s.ext != nil {
+				_ = s.ext.PublishMailboxEvent(context.Background(), sid, "event",
+					map[string]interface{}{"content": msg})
+			}
+			return
+		}
+		select {
+		case <-bgCtx.Done():
+			lastErr = bgCtx.Err()
+			// fallthrough to error notify
+		default:
+		}
+	}
+	// Never report a fabricated "finished (exit 0)" when the wait broke.
+	if s.ext != nil && lastErr != nil {
+		_ = s.ext.PublishMailboxEvent(context.Background(), sid, "event",
+			map[string]interface{}{"content": fmt.Sprintf(
+				"Background command wait failed (job %s): %v. The job itself may still be running; inspect it with sandbox-job-output or stop it with sandbox-job-kill.",
+				jobID, lastErr)})
+	}
+	_ = ctx
+}
 
 func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 
@@ -19,11 +96,11 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if image == "" {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-create: missing 'image' (base image easylab can pull)", "sandbox-create：缺少 'image'（easylab 可拉取的基础镜像）")
 			}
-			_, sid, err := s.resolveWorkspace(ctx, args, sessionName)
+			ws, sid, err := s.resolveWorkspace(ctx, args, sessionName)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			info, err := s.createWorker(ctx, sid, image)
+			info, err := s.launchWorkspaceSandbox(ctx, ws, sid, image)
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-create failed: %v", "sandbox-create 失败：%v", err)
 			}
@@ -33,6 +110,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 				fmt.Sprintf("已从 %s 创建沙箱（容器 %s，状态 %s）。", image, info.ContainerID, info.Status))}, nil
 		},
 	}
+
 	m["sandbox-run"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 			command := strArg(args, "command")
@@ -43,117 +121,32 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			workerURL, err := s.resolveWorkerURL(ctx, sc.cid)
-			if err != nil {
-				return extension.ToolResultData{}, err
+			// Rev coherence is owned by easylab (SyncWorkspace). Always
+			// ensure synced first; failure surfaces a clear error.
+			if err := s.ensureSynced(ctx, sc.cid, sc.session, sc.ws); err != nil {
+				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run sync failed: %v", "sandbox-run 同步失败：%v", err)
 			}
 
-			run := func(rev string) (worker.ExecuteResult, error) {
-				return worker.Execute(ctx, worker.ToWsURL(workerURL), command, rev)
-			}
-
-			res, err := run(sc.ws.rev)
-			if err != nil {
-				// Worker may have restarted (synced_rev lost): re-sync once
-				// and retry; if it still refuses, execute without the rev
-				// gate (content is verified synced on our side).
-				if strings.Contains(err.Error(), "need_sync") {
-					s.markUnsynced(sc.cid)
-					if err := s.ensureSynced(ctx, sc.cid, sc.session, sc.ws); err != nil {
-						return extension.ToolResultData{}, err
-					}
-					if res, err = run(sc.ws.rev); err != nil {
-						if res, err = run(""); err != nil {
-							return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run failed: %v", "sandbox-run 失败：%v", err)
-						}
-					}
-				} else {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run failed: %v", "sandbox-run 失败：%v", err)
-				}
-			}
-
-			// Sync-wait the job up to timeout_ms (default 10s). The worker
-			// always registers a backgrounded job; the per-job SSE stream
-			// replays history then streams live output until job.completed.
-			// The bus is model-facing and carries no streamed deltas, so
-			// the terminal tool result folds the captured output in; the
-			// UI reads live output via the gateway's per-worker SSE proxy.
 			timeoutMs := int(abcprotocol.ArgInt(args, "timeout-ms", 10000))
 			if timeoutMs <= 0 {
 				timeoutMs = 10000
 			}
-			streamCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
-			defer cancel()
-
-			type streamResult struct {
-				done worker.JobDone
-				err  error
+			jobID, done, err := s.runViaGateway(ctx, sc.cid, command, timeoutMs)
+			if err != nil {
+				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run failed: %v", "sandbox-run 失败：%v", err)
 			}
-			resultCh := make(chan streamResult, 1)
-			go func() {
-				done, err := worker.StreamJobOutput(streamCtx, workerURL, res.JobID, nil)
-				resultCh <- streamResult{done: done, err: err}
-			}()
-
-			select {
-			case sr := <-resultCh:
-				if sr.err != nil && !errors.Is(sr.err, context.DeadlineExceeded) {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run stream failed: %v", "sandbox-run 流失败：%v", sr.err)
-				}
-				content := fmt.Sprintf("Command completed (job %s, exit %d)", res.JobID, sr.done.ExitCode)
-				if sr.done.Stdout != "" {
-					content += "\n" + sr.done.Stdout
-				}
-				if sr.done.Stderr != "" {
-					content += "\n[stderr]\n" + sr.done.Stderr
-				}
-				return extension.ToolResultData{Content: content, Data: map[string]interface{}{
-					"job-id":       res.JobID,
-					"exit_code":    sr.done.ExitCode,
-					"backgrounded": false,
-				}}, nil
-
-			case <-streamCtx.Done():
-				// Timed out: hand the job to a background watcher and return
-				// immediately. The watcher keeps the SSE stream open until
-				// completion, then notifies the agent via the session
-				// mailbox (payload.content is folded into the chat).
-				if s.ext != nil {
-					go func(jobID, sid string) {
-						bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Minute)
-						defer bgCancel()
-						done, streamErr := worker.StreamJobOutput(bgCtx, workerURL, jobID, nil)
-						if streamErr != nil {
-							// Never report a fabricated "finished (exit 0)"
-							// when the stream broke — tell the agent the
-							// outcome is unknown and how to inspect it.
-							_ = s.ext.PublishMailboxEvent(context.Background(), sid, "event",
-								map[string]interface{}{"content": fmt.Sprintf(
-									"Background command stream failed (job %s): %v. The job itself may still be running; inspect it with sandbox-job-output or stop it with sandbox-job-kill.",
-									jobID, streamErr)})
-							return
-						}
-						msg := fmt.Sprintf("Background command finished (job %s, exit %d)", jobID, done.ExitCode)
-						if done.Stdout != "" {
-							msg += "\n" + done.Stdout
-						}
-						if done.Stderr != "" {
-							msg += "\n[stderr]\n" + done.Stderr
-						}
-						_ = s.ext.PublishMailboxEvent(context.Background(), sid, "event",
-							map[string]interface{}{"content": msg})
-					}(res.JobID, sessionName)
-				}
-				content := fmt.Sprintf(
-					"Command is still running in the background (job %s); it did not finish within %dms. It keeps running in the background and you will be notified on completion. Meanwhile you can inspect current output with sandbox-job-output, or stop it with sandbox-job-kill.",
-					res.JobID, timeoutMs)
-				return extension.ToolResultData{Content: content, Data: map[string]interface{}{
-					"job-id":       res.JobID,
-					"backgrounded": true,
-				}}, nil
+			content := fmt.Sprintf("Command completed (job %s, exit %d)", jobID, done.ExitCode)
+			if done.Stdout != "" {
+				content += "\n" + done.Stdout
 			}
+			return extension.ToolResultData{Content: content, Data: map[string]interface{}{
+				"job-id":       jobID,
+				"exit_code":    done.ExitCode,
+				"backgrounded": false,
+			}}, nil
 		},
 	}
+
 	m["sandbox-read"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 			path := strArg(args, "path")
@@ -222,11 +215,11 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			res, err := s.workerCommand(ctx, sc.cid, "jobs", map[string]interface{}{})
+			jobs, err := s.sdk.Sandbox().ListJobs(ctx, sc.cid)
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-list failed: %v", "sandbox-job-list 失败：%v", err)
 			}
-			return extension.ToolResultData{Content: toJSON(res)}, nil
+			return extension.ToolResultData{Content: toJSON(jobs.Msg.Jobs)}, nil
 		},
 	}
 	m["sandbox-job-output"] = extension.ToolSpec{
@@ -235,11 +228,16 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			res, err := s.workerCommand(ctx, sc.cid, "job_output", jobArgs(args))
+			res, err := s.sdk.Sandbox().JobOutput(ctx, sc.cid, &workerv1.JobOutputRequest{
+				JobId:  strArg(args, "job-id"),
+				Start:  int33(args["start"], 0),
+				End:    int33(args["end"], 0),
+				Stream: strArg(args, "stream"),
+			})
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-output failed: %v", "sandbox-job-output 失败：%v", err)
 			}
-			return extension.ToolResultData{Content: toJSON(res)}, nil
+			return extension.ToolResultData{Content: toJSON(res.Msg)}, nil
 		},
 	}
 	m["sandbox-job-wait"] = extension.ToolSpec{
@@ -248,11 +246,14 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			res, err := s.workerCommand(ctx, sc.cid, "job_wait", jobArgs(args))
+			res, err := s.sdk.Sandbox().JobWait(ctx, sc.cid, &workerv1.JobWaitRequest{
+				JobId:     strArg(args, "job-id"),
+				TimeoutMs: int33(args["timeout-ms"], 0),
+			})
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-wait failed: %v", "sandbox-job-wait 失败：%v", err)
 			}
-			return extension.ToolResultData{Content: toJSON(res)}, nil
+			return extension.ToolResultData{Content: toJSON(res.Msg)}, nil
 		},
 	}
 	m["sandbox-job-stdin"] = extension.ToolSpec{
@@ -261,14 +262,15 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			res, err := s.workerCommand(ctx, sc.cid, "job_stdin", map[string]interface{}{
-				"job_id": strArg(args, "job-id"),
-				"data":   strArg(args, "data"),
+			_, err = s.sdk.Sandbox().JobStdin(ctx, sc.cid, &workerv1.JobStdinRequest{
+				JobId: strArg(args, "job-id"),
+				Data:  []byte(strArg(args, "data")),
+				Close: boolArg(args, "close"),
 			})
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-stdin failed: %v", "sandbox-job-stdin 失败：%v", err)
 			}
-			return extension.ToolResultData{Content: toJSON(res)}, nil
+			return extension.ToolResultData{Content: `{"ok":true}`}, nil
 		},
 	}
 	m["sandbox-job-kill"] = extension.ToolSpec{
@@ -277,13 +279,11 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			res, err := s.workerCommand(ctx, sc.cid, "kill", map[string]interface{}{
-				"job_id": strArg(args, "job-id"),
-			})
+			_, err = s.sdk.Sandbox().JobKill(ctx, sc.cid, &workerv1.JobKillRequest{JobId: strArg(args, "job-id")})
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-kill failed: %v", "sandbox-job-kill 失败：%v", err)
 			}
-			return extension.ToolResultData{Content: toJSON(res)}, nil
+			return extension.ToolResultData{Content: `{"ok":true}`}, nil
 		},
 	}
 	m["sandbox-port"] = extension.ToolSpec{
@@ -294,11 +294,25 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			}
 			v, err := s.portFile(ctx, sessionName, sc, args)
 			if err == nil {
-				// The branch moved: forget the cached head so the next
-				// call re-syncs and observes the ported file.
 				s.invalidateWorkspace(sc.session)
 			}
 			return extension.ToolResultData{Content: v}, err
 		},
 	}
+}
+
+func int33(v interface{}, def int32) int32 {
+	switch t := v.(type) {
+	case int32:
+		return t
+	case int64:
+		return int32(t)
+	case float64:
+		return int32(t)
+	case int:
+		return int32(t)
+	case nil:
+		return def
+	}
+	return def
 }

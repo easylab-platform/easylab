@@ -6,12 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
-
-	"connectrpc.com/connect"
-	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
-	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 )
 
 // sandboxCtx is the resolved per-call sandbox context: which workspace, which
@@ -122,188 +117,9 @@ func (s *server) easylabBranchHead(ctx context.Context, org, repo, bm string) (s
 // the pod: sandbox-* tools fail with a clear "create first" error when the pod
 // is absent, so the agent must explicitly choose a base image. When pod exists
 // and needSync, the workspace branch head is synced in (server-side by easylab).
-func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{}, sessionName string, needSync bool) (sandboxCtx, error) {
-	ws, sid, err := s.resolveWorkspace(ctx, args, sessionName)
-	if err != nil {
-		return sandboxCtx{}, err
-	}
-	info, err := s.workerInfo(ctx, labelKey(sid))
-	if err != nil {
-		// A missing service = pod not created yet.
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-			return sandboxCtx{}, fmt.Errorf("sandbox not created — call sandbox-create with an image first")
-		}
-		return sandboxCtx{}, fmt.Errorf("inspect sandbox for %s: %w", sid, err)
-	}
-	s.publishSandboxVars(ctx, sid, info)
-	sc := sandboxCtx{session: sid, cid: info.ContainerID, ws: ws}
-	if needSync {
-		if err := s.ensureSynced(ctx, sc.cid, sc.session, ws); err != nil {
-			return sandboxCtx{}, err
-		}
-	}
-	return sc, nil
-}
-
-// sandboxWorkerPort is the port worker-go serves inside the sandbox pod.
-// The worker's default is 8080, so the ensure request pins WORKER_PORT to keep
-// the process, the declared containerPort and the readiness probe in sync.
-const sandboxWorkerPort = 48080
-
-// createWorker explicitly creates the session's worker pod from a chosen base
-// image. When a pod already exists for the session it is reused (get-or-create)
-// so sandbox-create is idempotent; the base image is carried as the
-// `easylab/sandbox.image` annotation which easylab uses to derive the worker image.
-func (s *server) createWorker(ctx context.Context, sid, baseImage string) (ContainerInfo, error) {
-	key := labelKey(sid)
-	_, err := s.sdk.LaunchServiceFull(ctx, easylabsdk.LaunchServiceSpec{
-		Name:  key,
-		Image: baseImage,
-		Kind:  "bare",
-		Ports: []*easylabv1.PortSpec{{Container: sandboxWorkerPort, Service: 80}},
-		Env: map[string]string{
-			"WORKER_PORT": "48080",
-		},
-		Annotations: map[string]string{
-			"easylab/session":       sid,
-			"easylab/sandbox.image": baseImage,
-		},
-		Namespace: s.runtimeNamespace,
-	})
-	if err != nil {
-		return ContainerInfo{}, err
-	}
-	info, err := s.workerInfo(ctx, key)
-	if err != nil {
-		return ContainerInfo{}, err
-	}
-	info.SessionName = sid
-	return info, nil
-}
-
-// statusFromReady maps easylab's readiness into the legacy status vocabulary.
-func statusFromInfo(st *easylabv1.ServiceInfo) string {
-	if st.GetReady() > 0 {
-		return "running"
-	}
-	if st.GetPhase() != "" {
-		return strings.ToLower(st.GetPhase())
-	}
-	return "pending"
-}
-
-// workerURLFrom derives the direct pod worker base.
-func workerURLFrom(st *easylabv1.ServiceInfo, port int32) string {
-	if st.GetPodIp() == "" {
-		return ""
-	}
-	return fmt.Sprintf("http://%s:%d", st.GetPodIp(), port)
-}
-
-// workerInfo fetches the current sandbox state from easylab.
-func (s *server) workerInfo(ctx context.Context, key string) (ContainerInfo, error) {
-	res, err := s.sdk.GetService(ctx, key)
-	if err != nil {
-		return ContainerInfo{}, err
-	}
-	st := res.GetService()
-	return ContainerInfo{
-		ContainerID: key,
-		PodName:     "sandbox-" + key[:8],
-		Namespace:   s.runtimeNamespace,
-		WorkerURL:   workerURLFrom(st, sandboxWorkerPort),
-		PodIP:       st.GetPodIp(),
-		Status:      statusFromInfo(st),
-	}, nil
-}
-
-// destroyWorker deletes the sandbox through easylab. The ID may be the raw
-// session name, the derived key, or a pod/short name.
-func (s *server) destroyWorker(ctx context.Context, id string) error {
-	if _, err := s.sdk.Ops.DeleteService(ctx, connect.NewRequest(&easylabv1.DeleteServiceRequest{Name: labelKey(id)})); err != nil {
-		return err
-	}
-	return nil
-}
-
-// ensureSynced pushes the repo tree at ws.rev into the worker unless easylab
-// already holds that rev. The tarball fetch + overlay extract happen inside
-// easylab (which owns both the repo store and the pod); ops-extension just
-// names the target.
-func (s *server) ensureSynced(ctx context.Context, cid, session string, ws workspace) error {
-	if s.syncedRev(cid) == ws.rev {
-		return nil
-	}
-	if _, err := s.sdk.Sync(ctx, labelKey(session), ws.org, ws.repo, ws.rev, "", false); err != nil {
-		return fmt.Errorf("sync: %w", err)
-	}
-	s.setSyncedRev(cid, ws.rev)
-	return nil
-}
-
-// markUnsynced forgets the tracked rev (worker restart / need_sync) so the
-// next ensureSynced pushes again.
-func (s *server) markUnsynced(cid string) {
-	s.syncMu.Lock()
-	delete(s.synced, cid)
-	s.syncMu.Unlock()
-}
-
-func (s *server) syncedRev(cid string) string {
-	s.syncMu.Lock()
-	defer s.syncMu.Unlock()
-	return s.synced[cid]
-}
-
-func (s *server) setSyncedRev(cid, rev string) {
-	s.syncMu.Lock()
-	s.synced[cid] = rev
-	s.syncMu.Unlock()
-}
-
-// ── local naming helpers (moved from internal/k8s; sessions are addressed by
-// deterministic keys, no stored state) ──
-
-// labelKey sanitizes an arbitrary label (session names contain ':' which is
-// illegal in k8s label values and pod names) into a deterministic k8s-safe
-// key. Values that are already valid are used as-is (e.g. UUIDs).
-func labelKey(label string) string {
-	if validLabelValue(label) {
-		return label
-	}
-	sum := sha256.Sum256([]byte(label))
-	return hex.EncodeToString(sum[:])[:16]
-}
-
-// validLabelValue follows the k8s label value grammar: alphanumerics, '-',
-// '_' and '.', at most 63 chars.
-func validLabelValue(v string) bool {
-	if len(v) == 0 || len(v) > 63 {
-		return false
-	}
-	for _, r := range v {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
-			return false
-		}
-	}
-	return true
-}
-
-// ContainerInfo is the ops-extension view of a sandbox worker (now sourced
-// from easylab instead of client-go pod listings).
-type ContainerInfo struct {
-	ContainerID string
-	PodName     string
-	Namespace   string
-	WorkerURL   string
-	PodIP       string
-	Status      string
-	SessionName string
-}
 
 // filterServicesBySession narrows a easylab /ops/services JSON response to the
-// services carrying a easylab/session annotation equal to `session` (opaque
-// metadata we own at the tools layer; easylab never interprets it).
+// services carrying a easylab/session annotation equal to `session`.
 func filterServicesBySession(body, session string) string {
 	var in struct {
 		Services []map[string]interface{} `json:"services"`
@@ -325,10 +141,7 @@ func filterServicesBySession(body, session string) string {
 	return string(enc)
 }
 
-// filterServicesByExtra narrows a easylab /ops/services JSON response by the
-// tool-layer filters org/repo/kind (read from each service's annotations).
-// It runs client-side over the already-fetched list, mirroring
-// filterServicesBySession — easylab list returns the annotations verbatim.
+// filterServicesByExtra narrows by tool-layer filters org/repo/kind.
 func filterServicesByExtra(body, org, repo, kind string) string {
 	var in struct {
 		Services []map[string]interface{} `json:"services"`
@@ -363,4 +176,35 @@ func filterServicesByExtra(body, org, repo, kind string) string {
 		return ""
 	}
 	return string(enc)
+}
+
+// labelKey sanitizes an arbitrary label (session names contain ':' which is
+// illegal in k8s label values and pod names) into a deterministic k8s-safe
+// key. Values that are already valid are used as-is (e.g. UUIDs).
+func labelKey(label string) string {
+	if validLabelValue(label) {
+		return label
+	}
+	sum := sha256.Sum256([]byte(label))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// validLabelValue follows the k8s label value grammar: alphanumerics, '-',
+// '_' and '.', at most 63 chars.
+func validLabelValue(v string) bool {
+	if len(v) == 0 || len(v) > 63 {
+		return false
+	}
+	for _, r := range v {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+// sessionKey derives the k8s-safe sandbox key for a session name (delegates to
+// labelKey, which is the canonical derivation).
+func sessionKey(session string) string {
+	return labelKey(session)
 }

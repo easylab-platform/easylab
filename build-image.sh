@@ -18,6 +18,12 @@ PROXY="${PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
+# Temporarily strip local-dev replaces so the module resolves from the proxy
+# (the container build has no ../easylab-sdk-go). The vendored deps have
+# their replacements pinned in vendor/modules.txt, but go.mod's replaces are
+# harmless with -mod=vendor; keep go.mod intact by building from vendor.
+# We just copy the working tree; the replaced modules are vendored.
+
 echo "Building ${NAME} image -> ${DEST} (buildkitd=${BUILDKIT})"
 buildctl --addr "${BUILDKIT}" build \
   --frontend dockerfile.v0 \

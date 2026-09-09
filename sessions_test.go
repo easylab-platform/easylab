@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
+	"io"
+
 	"google.golang.org/protobuf/proto"
 
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -95,13 +96,15 @@ func TestResolveWorkspaceSessionName(t *testing.T) {
 	}
 }
 
-func TestSyncStateMachine(t *testing.T) {
-	var syncs int32
+func TestEnsureSyncedDelegatesToEasylab(t *testing.T) {
+	var got *easylabv1.SyncWorkspaceRequest
 	mux := http.NewServeMux()
-	mux.HandleFunc("/easylab.v1.OpsService/Sync", func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&syncs, 1)
-		resp := &easylabv1.SyncResponse{Ok: true, Files: 1}
-		out, _ := proto.Marshal(resp)
+	mux.HandleFunc("/easylab.v1.SandboxService/SyncWorkspace", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		req := &easylabv1.SyncWorkspaceRequest{}
+		_ = proto.Unmarshal(body, req)
+		got = req
+		out, _ := proto.Marshal(&easylabv1.SyncWorkspaceResponse{SyncedRev: "tree1"})
 		w.Header().Set("Content-Type", "application/proto")
 		_, _ = w.Write(out)
 	})
@@ -113,59 +116,28 @@ func TestSyncStateMachine(t *testing.T) {
 	fakeLab.Start()
 	defer fakeLab.Close()
 
-	s := &server{sdk: easylabsdk.New(fakeLab.URL, "devtoken"), runtimeNamespace: "temp",
-		wsCache: map[string]wsCacheEntry{}, synced: map[string]string{}}
+	s := &server{sdk: easylabsdk.New(fakeLab.URL, "devtoken"), wsCache: map[string]wsCacheEntry{}}
 	ws := workspace{org: "verify", repo: "ws", branch: "main", rev: "rev1"}
-
 	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
 		t.Fatal(err)
 	}
-	if n := atomic.LoadInt32(&syncs); n != 1 {
-		t.Fatalf("syncs=%d want 1", n)
+	if got == nil {
+		t.Fatal("SyncWorkspace was not called")
 	}
-	// Cached rev → no extra sync.
-	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
-		t.Fatal(err)
-	}
-	if n := atomic.LoadInt32(&syncs); n != 1 {
-		t.Fatalf("syncs=%d want 1 (cached)", n)
-	}
-	// New rev → syncs again.
-	ws.rev = "rev2"
-	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
-		t.Fatal(err)
-	}
-	if n := atomic.LoadInt32(&syncs); n != 2 {
-		t.Fatalf("syncs=%d want 2", n)
-	}
-	// markUnsynced forces a re-push.
-	s.markUnsynced("cid1")
-	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
-		t.Fatal(err)
-	}
-	if n := atomic.LoadInt32(&syncs); n != 3 {
-		t.Fatalf("syncs=%d want 3", n)
-	}
-	// Unreachable easylab surfaces as an error.
-	closed := easylabsdk.New("http://127.0.0.1:1", "")
-	if _, err := closed.Sync(context.Background(), "x", "o", "r", "v", "", false); err == nil {
-		t.Fatal("unreachable easylab must error")
+	if got.Sandbox != "cid1" || got.Org != "verify" || got.Repo != "ws" || got.Rev != "rev1" || got.Branch != "main" {
+		t.Fatalf("sync req = %+v", got)
 	}
 }
 
-func TestSyncWorkerRejectsBadResponse(t *testing.T) {
+func TestEnsureSyncedPropagatesErrors(t *testing.T) {
 	fakeLab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	defer fakeLab.Close()
-	s := &server{sdk: easylabsdk.New(fakeLab.URL, "devtoken"), runtimeNamespace: "temp",
-		synced: map[string]string{}}
+	s := &server{sdk: easylabsdk.New(fakeLab.URL, "devtoken")}
 	ws := workspace{org: "o", repo: "r", branch: "main", rev: "v"}
 	if err := s.ensureSynced(context.Background(), "cid", "o:r:main", ws); err == nil {
 		t.Fatal("easylab error must propagate")
-	}
-	if s.syncedRev("cid") != "" {
-		t.Fatal("rev must not be recorded on failure")
 	}
 }
 

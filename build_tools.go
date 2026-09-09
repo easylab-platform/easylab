@@ -1,10 +1,10 @@
 package main
 
 import (
+	"connectrpc.com/connect"
 	"context"
 	"fmt"
 	"github.com/abcp-sdk/abc-protocol-go/extension"
-	"connectrpc.com/connect"
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"net/url"
 	"strings"

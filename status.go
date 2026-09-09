@@ -2,9 +2,9 @@ package main
 
 import (
 	"connectrpc.com/connect"
-	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"context"
 	"encoding/json"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"net/http"
 
 	"sort"
@@ -68,91 +68,6 @@ func errStr(err error) string {
 
 // sandboxesList returns worker pods with their session labels and the repo rev
 // each is synced to.
-func (s *server) sandboxesList(w http.ResponseWriter, r *http.Request) {
-	list, err := s.sdk.ListServices(r.Context(), "", "", s.runtimeNamespace)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	svcMaps := serviceInfoMaps(list)
-	s.syncMu.Lock()
-	synced := make(map[string]string, len(s.synced))
-	for k, v := range s.synced {
-		synced[k] = v
-	}
-	s.syncMu.Unlock()
-
-	out := []map[string]interface{}{}
-	for _, svc := range svcMaps {
-		name, _ := svc["name"].(string)
-		// The session association lives in the `easylab/session` annotation;
-		// read it the same way filterServicesBySession does so the UI can bind
-		// a sandbox to its session.
-		session := ""
-		if ann, ok := svc["annotations"].(map[string]interface{}); ok {
-			if sv, ok := ann["easylab/session"].(string); ok {
-				session = sv
-			}
-		}
-		out = append(out, map[string]interface{}{
-			"container_id": name,
-			"session":      session,
-			"pod_name":     name,
-			"status":       svc["phase"],
-			"pod_ip":       svc["pod_ip"],
-			"synced_rev":   synced[name],
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"sandboxes": out})
-}
-
-// sandboxGet returns one session's sandbox pod plus the deployments it owns.
-func (s *server) sandboxGet(w http.ResponseWriter, r *http.Request) {
-	session := chi.URLParam(r, "session")
-	key := sessionKey(session)
-	info, err := s.workerInfo(r.Context(), key)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, err.Error())
-		return
-	}
-
-	s.syncMu.Lock()
-	syncedRev := s.synced[info.ContainerID]
-	s.syncMu.Unlock()
-
-	sandbox := map[string]interface{}{
-		"container_id": info.ContainerID,
-		"session":      info.SessionName,
-		"pod_name":     info.PodName,
-		"status":       info.Status,
-		"worker_url":   info.WorkerURL,
-		"pod_ip":       info.PodIP,
-		"synced_rev":   syncedRev,
-	}
-
-	svcs, err := s.sdk.ListServices(r.Context(), "", "", s.runtimeNamespace)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	outDeps := []map[string]interface{}{}
-	for _, svc := range serviceInfoMaps(svcs) {
-		if svc["kind"] != "deployment" {
-			continue
-		}
-		if svcSession, _ := svc["session"].(string); svcSession != "" && svcSession != session {
-			continue
-		}
-		outDeps = append(outDeps, svc)
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"sandbox":     sandbox,
-		"deployments": outDeps,
-	})
-}
-
-// deploymentsList returns the deployments (services) this ops-extension owns.
 func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
 	list, err := s.sdk.ListServices(r.Context(), "", "", s.runtimeNamespace)
 	if err != nil {

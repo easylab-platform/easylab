@@ -49,12 +49,6 @@ func parseSessionName(name string) (org, repo, branch string, ok bool) {
 	return parts[0], parts[1], parts[2], true
 }
 
-// sessionKey derives the k8s-safe sandbox key for a session name (the
-// canonical derivation lives in labelKey, sessions.go).
-func sessionKey(session string) string {
-	return labelKey(session)
-}
-
 // tryParseSession is a soft variant of parseSessionName that returns ok=false
 // rather than panicking/signing on malformed names (used by service-list).
 func tryParseSession(name string) (org, repo, branch string, ok bool) {
