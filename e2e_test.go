@@ -30,7 +30,7 @@ func TestManifestBinding(t *testing.T) {
 	if m.ID != "repo" {
 		t.Fatalf("manifest id = %q", m.ID)
 	}
-	if len(m.Tools) != 21 {
+	if len(m.Tools) != 14 {
 		t.Fatalf("manifest tools = %d, want 14", len(m.Tools))
 	}
 	if len(m.Variables) != 3 {
