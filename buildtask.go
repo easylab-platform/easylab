@@ -1,4 +1,4 @@
-package main
+package opsext
 
 import (
 	abcprotocol "github.com/abcp-sdk/abc-protocol-go"

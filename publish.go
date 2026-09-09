@@ -13,7 +13,7 @@
 // Cache-busting: buildkit caches RUN layers by command+context. Every publish
 // step references $PUBLISH_TS (a fresh timestamp per invocation), so the
 // publish layer never hits cache while toolchain layers stay cached.
-package main
+package opsext
 
 import (
 	"context"

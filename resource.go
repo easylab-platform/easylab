@@ -1,4 +1,4 @@
-package main
+package opsext
 
 // ResourcePair is one side of a nested resource declaration.
 type ResourcePair struct {

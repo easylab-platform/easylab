@@ -1,4 +1,4 @@
-package main
+package opsext
 
 // ContainerInfo is the ops-extension view of a sandbox worker (sourced from
 // easylab SandboxService instead of client-go pod listings).

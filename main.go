@@ -1,13 +1,9 @@
-package main
+package opsext
 
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"log/slog"
-	"net/http"
-
-	"os"
 	"sync"
 
 	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
@@ -15,11 +11,9 @@ import (
 	"github.com/abcp-sdk/abc-protocol-go/manifest"
 	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-
 	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 )
+
 
 //go:embed manifest.yaml
 var manifestYaml []byte
@@ -41,174 +35,100 @@ type server struct {
 	builds sync.Map // build id -> *buildTask
 }
 
-func main() {
-	natsURL := envOr("NATS_URL", "nats://nats.easylab.svc.cluster.local:4222")
-	port := envOr("PORT", "8080")
-	// easylab replaces the old repo-manager (archive + contents + clone).
-	// The cluster service is named repo (easylab is the binary).
-	base := envOr("EASYLAB_URL", envOr("EASYLAB_URL", "http://easylab:80"))
-	// Artifact registry replaces zot (OCI store) + the legacy registry (metadata):
-	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
-	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base
-	// used for API calls and in-container CLI uploads.
-	artifact := trimTrailingSlash(envOr("ARTIFACT_URL", "http://easylab"))
-	// Image references (buildkit FROM/push) must go through the TLS ingress
-	// host configured as insecure in buildkitd's registry config — the svc
-	// host is plain HTTP which buildkit cannot pull/push to.
-	artifactImageHost := envOr("ARTIFACT_IMAGE_HOST", "easylab")
-	artifactToken := envOr("ARTIFACT_TOKEN", "")
-	easylabToken := envOr("EASYLAB_TOKEN", "devtoken")
+// Options configures the embedded ops-extension.
+type Options struct {
+	EasyLabURL    string
+	NATSURL       string
+	Token         string
+	ArtifactURL   string
+	ArtifactHost  string
+	ArtifactToken string
+	RuntimeNS     string
+	Port          string
+	Hook          func(ext *extension.Extension)
+}
 
-	runtimeNS := envOr("NAMESPACE", "easylab")
+// Run starts the embedded ops-extension: registers the NATS tool face (and
+// lifecycle hook) so the agent can discover and call sandbox/build/deploy/
+// package tools. No HTTP listener — it is served in-process by easylab (the
+// single binary). It registers subscriptions and returns; the NATS
+// subscriptions stay live for the process lifetime (ctx driven).
+func Run(ctx context.Context, opts Options) error {
+	log := slog.Default().With("svc", "ops-extension")
+
+	base := opts.EasyLabURL
+	if base == "" {
+		base = envOr("EASYLAB_URL", "http://easylab:80")
+	}
+	natsURL := opts.NATSURL
+	if natsURL == "" {
+		natsURL = envOr("NATS_URL", "nats://nats.easylab.svc.cluster.local:4222")
+	}
+	artifact := opts.ArtifactURL
+	if artifact == "" {
+		artifact = trimTrailingSlash(envOr("ARTIFACT_URL", "http://easylab"))
+	}
+	artifactHost := opts.ArtifactHost
+	if artifactHost == "" {
+		artifactHost = envOr("ARTIFACT_IMAGE_HOST", "easylab")
+	}
+	artifactToken := opts.ArtifactToken
+	if artifactToken == "" {
+		artifactToken = envOr("ARTIFACT_TOKEN", "")
+	}
+	easylabToken := opts.Token
+	if easylabToken == "" {
+		easylabToken = envOr("EASYLAB_TOKEN", "devtoken")
+	}
+	ns := opts.RuntimeNS
+	if ns == "" {
+		ns = envOr("NAMESPACE", "easylab")
+	}
 
 	s := &server{
 		sdk:               easylabsdk.New(base, easylabToken),
 		artifact:          artifact,
-		artifactImageHost: artifactImageHost,
+		artifactImageHost: artifactHost,
 		artifactToken:     artifactToken,
 		base:              base,
 		easylabToken:      easylabToken,
-		runtimeNamespace:  runtimeNS,
+		runtimeNamespace:  ns,
 		wsCache:           map[string]wsCacheEntry{},
 	}
 
-	// Verification instances must set DISABLE_NATS=1. Tool-call and
-	// variable subscriptions use queue groups keyed by the extension id, so a
-	// second replica with the same id would STEAL live tool calls away from
-	// the serving instance (and double-answer abc.discover, which has no
-	// queue group by design). To keep the tools testable without joining the
-	// bus, such instances expose them over HTTP at POST /api/v1/tools/{name}
-	// with a JSON args body.
-	toolBridge := false
-	if os.Getenv("DISABLE_NATS") != "1" {
-		nbus, err := natsbus.Connect(natsURL)
-		if err != nil {
-			slog.Error("nats connect failed", "svc", "ops-extension", "err", err)
-			os.Exit(1)
-		}
-		m, err := manifest.ParseManifest(manifestYaml)
-		if err != nil {
-			slog.Error("load manifest failed", "svc", "ops-extension", "err", err)
-			os.Exit(1)
-		}
-		s.bus = nbus
-
-		r := s.router(toolBridge)
-
-		if err := extension.Serve(
-			extension.New(nbus, m.BuildConfig(manifest.Bindings{
-				Handlers: s.handlers(),
-				Variables: map[string]extension.VariableSpec{
-					"sandbox-id":     {Resolve: s.resolveSandboxID},
-					"sandbox-status": {Resolve: s.resolveSandboxStatus},
-				},
-				OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent) error {
-					if ev.Kind == "deleted" {
-						s.clearSandboxVars(ctx, ev.SessionName)
-					}
-					return nil
-				},
-			})),
-			extension.ServeOptions{
-				Handler: r,
-				Port:    port,
-				Run: func(runCtx context.Context, ext *extension.Extension) {
-					s.ext = ext
-					slog.Info("listening", "svc", "ops-extension", "addr", ":"+port, "artifact", artifact, "easylab", base, "runtime-ns", runtimeNS)
-				},
-			},
-		); err != nil {
-			slog.Error("serve failed", "svc", "ops-extension", "err", err)
-			os.Exit(1)
-		}
-		return
-	}
-
-	r := s.router(true)
-	addr := ":" + port
-	slog.Info("listening", "svc", "ops-extension", "addr", addr, "artifact", artifact, "easylab", base, "runtime-ns", runtimeNS)
-	if err := http.ListenAndServe(addr, r); err != nil {
-		slog.Error("http server failed", "svc", "ops-extension", "err", err)
-		os.Exit(1)
-	}
-}
-
-// router builds the chi router serving both the ops API and the embedded SPA.
-// `toolBridge` exposes the NATS tools over HTTP for verification instances.
-func (s *server) router(toolBridge bool) http.Handler {
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/health", s.health)
-		r.Post("/deployments", s.deploy)
-		r.Get("/infra/k8s/config", s.k8sConfig)
-		r.Post("/images/build", s.buildImage)
-		r.Get("/builds", s.buildsList)
-		r.Get("/builds/{id}", s.buildGet)
-		r.Get("/builds/{id}/stream", s.buildStream)
-		r.Get("/containerfile-templates", s.containerfileTemplates)
-		r.Get("/status", s.status)
-		r.Get("/deployments", s.deploymentsList)
-		r.Get("/deployments/{name}/pods", s.deploymentPods)
-		r.Get("/deployments/{name}/status", s.deploymentStatus)
-		r.Post("/deployments/{name}/restart", s.deploymentRestart)
-		r.Post("/deployments/{name}/scale", s.deploymentScale)
-		r.Post("/deployments/{name}/rollback", s.deploymentRollback)
-		r.Get("/deployments/{name}/events", s.deploymentEvents)
-		r.Get("/deployments/{name}/revisions", s.deploymentRevisions)
-		r.Delete("/deployments/{name}", s.deploymentDelete)
-		r.Get("/packages", s.packagesList)
-		r.Get("/images", s.imagesList)
-		r.Get("/publish-specs", s.publishSpecsHandler)
-		r.Post("/packages/publish", s.packagesPublish)
-		if toolBridge {
-			r.Post("/tools/{name}", s.callTool)
-		}
-	})
-
-	// Embedded SPA (served at /; /api/v1 routes registered above win).
-	return r
-}
-
-// callTool bridges a NATS tool over HTTP for verification instances
-// (DISABLE_NATS=1). Body: JSON object of tool args.
-func (s *server) callTool(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
-	spec, ok := s.handlers()[name]
-	if !ok {
-		writeErr(w, http.StatusNotFound, "no such tool: "+name)
-		return
-	}
-	args := map[string]interface{}{}
-	if err := json.NewDecoder(r.Body).Decode(&args); err != nil && err.Error() != "EOF" {
-		writeErr(w, http.StatusBadRequest, "invalid args body: "+err.Error())
-		return
-	}
-	res, err := spec.Execute(r.Context(), args, "http-verify", "")
-	out := res.Content
+	nbus, err := natsbus.Connect(natsURL)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
+		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": out})
-}
+	m, err := manifest.ParseManifest(manifestYaml)
+	if err != nil {
+		return err
+	}
+	s.bus = nbus
 
-func writeJSON(w http.ResponseWriter, code int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
-}
+	ext := extension.New(nbus, m.BuildConfig(manifest.Bindings{
+		Handlers: s.handlers(),
+		Variables: map[string]extension.VariableSpec{
+			"sandbox-id":     {Resolve: s.resolveSandboxID},
+			"sandbox-status": {Resolve: s.resolveSandboxStatus},
+		},
+		OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent) error {
+			if ev.Kind == "deleted" {
+				s.clearSandboxVars(ctx, ev.SessionName)
+			}
+			return nil
+		},
+	}))
 
-func writeErr(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]interface{}{"ok": false, "error": msg})
+	// Register the extension's NATS subscriptions (tools/variables/hooks/
+	// lifecycle) without serving an HTTP surface.
+	if err := ext.Serve(ctx); err != nil {
+		return err
+	}
+	s.ext = ext
+	log.Info("ops-extension embedded, nats", "nats", natsURL, "easylab", base, "runtime-ns", ns)
+	if opts.Hook != nil {
+		opts.Hook(ext)
+	}
+	return nil
 }
-
-func (s *server) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "name": "ops-extension"})
-}
-
-func (s *server) k8sConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "namespace": s.runtimeNamespace})
-}
-
-var _ = context.Background

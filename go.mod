@@ -1,4 +1,4 @@
-module easyvcs-ext-ops
+module github.com/easylab-platform/ext-ops
 
 go 1.26.3
 
