@@ -351,3 +351,11 @@ func (s *server) repoBlobSha(ctx context.Context, org, repo, path, ref string) (
 	}
 	return "", nil
 }
+
+// branchOrDefault returns b or "main" when empty.
+func branchOrDefault(b string) string {
+	if b == "" {
+		return "main"
+	}
+	return b
+}

@@ -14,7 +14,6 @@ import (
 	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 )
 
-
 //go:embed manifest.yaml
 var manifestYaml []byte
 
@@ -32,7 +31,6 @@ type server struct {
 	wsMu    sync.Mutex              // guards wsCache
 	wsCache map[string]wsCacheEntry // session -> workspace (short TTL)
 
-	builds sync.Map // build id -> *buildTask
 }
 
 // Options configures the embedded ops-extension.

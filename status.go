@@ -7,7 +7,6 @@ import (
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"net/http"
 
-	"sort"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -201,58 +200,6 @@ func (s *server) imagesList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
-}
-
-// publishSpecsHandler exports the per-protocol publish metadata so the
-// frontend can render a dynamic publish form.
-func (s *server) publishSpecsHandler(w http.ResponseWriter, r *http.Request) {
-	type specOut struct {
-		Protocol string   `json:"protocol"`
-		Args     []string `json:"args"`
-		Required []string `json:"required"`
-	}
-	out := make([]specOut, 0, len(publishSpecs))
-	for proto, spec := range publishSpecs {
-		out = append(out, specOut{Protocol: proto, Args: spec.args, Required: spec.required})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Protocol < out[j].Protocol })
-	writeJSON(w, http.StatusOK, map[string]interface{}{"specs": out})
-}
-
-// packagesPublish is the HTTP face of the package-publish tool.
-func (s *server) packagesPublish(w http.ResponseWriter, r *http.Request) {
-	var b struct {
-		Protocol   string `json:"protocol"`
-		Org        string `json:"org"`
-		Repo       string `json:"repo"`
-		Branch     string `json:"branch"`
-		Session    string `json:"session"`
-		Name       string `json:"name"`
-		Version    string `json:"version"`
-		File       string `json:"file"`
-		Dockerfile string `json:"dockerfile-path"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-	if b.Protocol == "" {
-		writeErr(w, http.StatusBadRequest, "protocol required")
-		return
-	}
-
-	id := s.startPublishTask(publishTaskBody{
-		Protocol:   b.Protocol,
-		Org:        b.Org,
-		Repo:       b.Repo,
-		Branch:     b.Branch,
-		Session:    b.Session,
-		Name:       b.Name,
-		Version:    b.Version,
-		File:       b.File,
-		Dockerfile: b.Dockerfile,
-	})
-	writeJSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
 }
 
 // serviceInfoMaps converts proto ServiceInfo list into the loose map shape

@@ -18,7 +18,7 @@ require (
 )
 
 require (
-	github.com/easylab-platform/easylab-proto v0.5.1
+	github.com/easylab-platform/easylab-proto v0.5.2
 	google.golang.org/protobuf v1.36.12
 )
 

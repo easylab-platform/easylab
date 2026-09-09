@@ -1,13 +1,15 @@
 package opsext
 
 import (
-	"connectrpc.com/connect"
 	"context"
 	"fmt"
-	"github.com/abcp-sdk/abc-protocol-go/extension"
-	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"net/url"
 	"strings"
+	"time"
+
+	"connectrpc.com/connect"
+	"github.com/abcp-sdk/abc-protocol-go/extension"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 )
 
 func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
@@ -29,23 +31,29 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 				ref = image + ":" + imageTag
 			}
 			fullImage := s.artifactImageHost + "/" + ref
-			payload := map[string]interface{}{
-				"org":      ws.org,
-				"repo":     ws.repo,
-				"branch":   ws.branch,
-				"image":    fullImage,
-				"export":   "push",
-				"no-cache": boolArg(args, "no-cache"),
-			}
-			if df := strArg(args, "dockerfile-path"); df != "" {
-				payload["dockerfile"] = df
-			}
-			id, err := s.opsSubmitBuild(ctx, payload)
+			// Build via easylab WorkflowService produce.oci-build (image build +
+			// push). The workflow is created (single job, no needs) and run.
+			wfRes, err := s.sdk.Workflow.CreateWorkflow(ctx, connect.NewRequest(&easylabv1.CreateWorkflowRequest{Workflow: &easylabv1.Workflow{
+				Name: "container-build-" + ws.branchOrDefault() + "-" + shortID(fmt.Sprintf("%d", time.Now().UnixNano())),
+				Org:  ws.org, Repo: ws.repo, Branch: ws.branchOrDefault(),
+				On: &easylabv1.Trigger{Events: []string{"manual"}},
+				Jobs: []*easylabv1.JobDef{{
+					Id:      "build",
+					RunsOn:  []string{"os=linux", "is_container=true"},
+					Steps:   []*easylabv1.Step{},
+					Produce: &easylabv1.Produce{Action: "oci-build", Tag: fullImage},
+				}},
+			}}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "container-build failed: %v", "container-build 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "container-build workflow failed: %v", "container-build 工作流失败：%v", err)
 			}
-			out, err := s.awaitOpsTaskProgress(ctx, "build", fullImage, id, callID)
-			return extension.ToolResultData{Content: out}, err
+			wid := wfRes.Msg.GetWorkflow().GetId()
+			runRes, err := s.sdk.Workflow.TriggerRun(ctx, connect.NewRequest(&easylabv1.TriggerRunRequest{WorkflowId: wid}))
+			if err != nil {
+				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "container-build trigger failed: %v", "container-build 触发失败：%v", err)
+			}
+			out := fmt.Sprintf("Build launched (run %s, image %s).", runRes.Msg.GetRun().GetId(), fullImage)
+			return extension.ToolResultData{Content: out}, nil
 		},
 	}
 	m["container-search"] = extension.ToolSpec{
@@ -95,10 +103,30 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 					branch = ws.branch
 				}
 			}
-			res, err := s.publishPackage(ctx, protocol, org, repo, branch,
-				strArg(args, "name"), strArg(args, "version"),
-				strArg(args, "file"), strArg(args, "dockerfile-path"))
-			return extension.ToolResultData{Content: res}, err
+			// Publish via easylab WorkflowService produce.publish-protocol.
+			wfRes, err := s.sdk.Workflow.CreateWorkflow(ctx, connect.NewRequest(&easylabv1.CreateWorkflowRequest{Workflow: &easylabv1.Workflow{
+				Name: "publish-" + protocol + "-" + shortID(fmt.Sprintf("%d", time.Now().UnixNano())),
+				Org:  org, Repo: repo, Branch: branchOrDefault(branch),
+				On: &easylabv1.Trigger{Events: []string{"manual"}},
+				Jobs: []*easylabv1.JobDef{{
+					Id:     "publish",
+					RunsOn: []string{"os=linux", "is_container=true"},
+					Steps:  []*easylabv1.Step{{Name: "publish", Run: "true"}},
+					Produce: &easylabv1.Produce{Action: "publish-protocol", Protocol: protocol,
+						Name: strArg(args, "name"), Version: strArg(args, "version"), File: strArg(args, "file")},
+				}},
+			}}))
+			if err != nil {
+				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "package-publish workflow failed: %v", "package-publish 工作流失败：%v", err)
+			}
+			wid := wfRes.Msg.GetWorkflow().GetId()
+			_, err = s.sdk.Workflow.TriggerRun(ctx, connect.NewRequest(&easylabv1.TriggerRunRequest{WorkflowId: wid}))
+			if err != nil {
+				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "package-publish trigger failed: %v", "package-publish 触发失败：%v", err)
+			}
+			ref := fmt.Sprintf("%s/%s@%s", org, repo, branchOrDefault(branch))
+			content := fmt.Sprintf("Publish launched (%s, context %s).", protocol, ref)
+			return extension.ToolResultData{Content: content}, nil
 		},
 	}
 	m["package-search"] = extension.ToolSpec{
