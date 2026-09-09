@@ -1,6 +1,6 @@
 //go:build e2e
 
-package main
+package repoext
 
 import (
 	"context"
@@ -31,7 +31,7 @@ func TestManifestBinding(t *testing.T) {
 		t.Fatalf("manifest id = %q", m.ID)
 	}
 	if len(m.Tools) != 21 {
-		t.Fatalf("manifest tools = %d, want 20", len(m.Tools))
+		t.Fatalf("manifest tools = %d, want 14", len(m.Tools))
 	}
 	if len(m.Variables) != 3 {
 		t.Fatalf("manifest variables = %d, want 3", len(m.Variables))
@@ -123,7 +123,7 @@ func TestDiscoverWire(t *testing.T) {
 		t.Fatalf("discover = %+v", manifests)
 	}
 	if len(*manifests[0].Tools) != 21 {
-		t.Fatalf("discover tools = %d, want 20", len(*manifests[0].Tools))
+		t.Fatalf("discover tools = %d, want 14", len(*manifests[0].Tools))
 	}
 }
 

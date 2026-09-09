@@ -1,6 +1,6 @@
 //go:build e2e
 
-package main
+package repoext
 
 import (
 	"context"
@@ -232,7 +232,7 @@ func testStore(t *testing.T) *Store {
 		t.Skipf("sqlite unavailable: %v", err)
 	}
 	if _, err := store.db.ExecContext(ctx, `
-		DELETE FROM session_repos; DELETE FROM managed_repos; DELETE FROM executed_worksheets;`); err != nil {
+		DELETE FROM session_repos; DELETE FROM managed_repos;`); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
 	t.Cleanup(store.Close)

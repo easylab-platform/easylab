@@ -1,4 +1,4 @@
-package main
+package repoext
 
 import (
 	"context"
@@ -7,7 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "modernc.org/sqlite"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 // PgConfig kept for signature compatibility but now names a local SQLite file.
@@ -45,20 +46,24 @@ func OpenStore(_ context.Context, cfg PgConfig) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", path)
+	gdb, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("sqlite open: %w", err)
 	}
-	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
-	if err := s.migrate(context.Background()); err != nil {
-		db.Close()
+	sdb, err := gdb.DB()
+	if err != nil {
+		return nil, fmt.Errorf("sqlite db: %w", err)
+	}
+	sdb.SetMaxOpenConns(1)
+	st := &Store{db: sdb}
+	if err := st.migrate(context.Background()); err != nil {
+		sdb.Close()
 		return nil, err
 	}
-	return s, nil
+	return st, nil
 }
 
-func (s *Store) Close() { _ = s.db.Close() }
+func (s *Store) Close() { if s != nil && s.db != nil { _ = s.db.Close() } }
 
 func (s *Store) migrate(ctx context.Context) error {
 	const ddl = `

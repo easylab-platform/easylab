@@ -1,32 +1,24 @@
-package main
+package repoext
 
 import (
-	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 	"context"
 	_ "embed"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"os/signal"
-	"syscall"
 	"time"
 
 	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
 	"github.com/abcp-sdk/abc-protocol-go/extension"
 	"github.com/abcp-sdk/abc-protocol-go/manifest"
 	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
+
+	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 )
 
 //go:embed manifest.yaml
 var manifestYaml []byte
 
-// server wires the two faces of repo-extension:
-//
-//   - tool face (NATS): agent file/git tools forwarding to easylab, with
-//     the (org, repo, bookmark) triple resolved from the injected `_session`
-//     via the mapping table;
-//   - workspace face: lifecycle events from the agent (durable NATS
-//     subscription) eagerly mirrored into easylab branches + mapping rows.
 type server struct {
 	base  string // easylab base URL
 	agent string // agent-ts base URL
@@ -36,76 +28,101 @@ type server struct {
 	sdk   *easylabsdk.Client // typed easylab client (search/graph/compare/rebase/tree/revisions)
 	ag    *agentClient
 	ext   *extension.Extension
+	bus   *natsbus.Bus
 }
 
-func main() {
+// Options configures the embedded repo-extension.
+type Options struct {
+	Base              string
+	Agent             string
+	NATSURL           string
+	Token             string
+	DB                string
+	ReconcileInterval time.Duration
+	Hook              func(ext *extension.Extension)
+}
+
+// Run starts the embedded repo-extension: registers the NATS tool face, the
+// lifecycle-event subscription (mapping session<->bookmark), and the
+// reconciler. No HTTP listener — served in-process by easylab (single
+// binary). It registers subscriptions and returns.
+func Run(ctx context.Context, opts Options) error {
 	log := slog.Default().With("svc", "repo-extension")
-	s := &server{
-		base:  envOr("EASYLAB_URL", "http://127.0.0.1:18160"),
-		agent: envOr("AGENT_URL", "http://abcp-agent.temp.svc.cluster.local"),
+
+	base := opts.Base
+	if base == "" {
+		base = envOr("EASYLAB_URL", "http://127.0.0.1:18160")
 	}
-	s.lab = newClient(s.base, envOr("EASYLAB_TOKEN", "devtoken"))
-	s.sdk = easylabsdk.New(s.base, envOr("EASYLAB_TOKEN", "devtoken"))
-	s.ag = newAgentClient(s.agent)
+	agent := opts.Agent
+	if agent == "" {
+		agent = envOr("AGENT_URL", "http://abcp-agent.temp.svc.cluster.local")
+	}
+	natsURL := opts.NATSURL
+	if natsURL == "" {
+		natsURL = envOr("NATS_URL", "nats://127.0.0.1:14222")
+	}
+	token := opts.Token
+	if token == "" {
+		token = envOr("EASYLAB_TOKEN", "devtoken")
+	}
+
+	s := &server{base: base, agent: agent}
+	s.lab = newClient(base, token)
+	s.sdk = easylabsdk.New(base, token)
+	s.ag = newAgentClient(agent)
 	s.cache = newSessCache(5 * time.Second)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	store, err := OpenStore(ctx, pgConfig())
+	db := opts.DB
+	if db == "" {
+		db = envOr("REPOEXT_DB", "easylab_repoext.db")
+	}
+	if !filepath.IsAbs(db) {
+		db = filepath.Join(envOr("EASYVCS_HOME", homeDir()), db)
+	}
+	store, err := OpenStore(ctx, PgConfig{DB: db})
 	if err != nil {
-		log.Error("pg connect failed", "err", err)
-		os.Exit(1)
+		return err
 	}
 	s.store = store
 	defer store.Close()
 
-	natsURL := envOr("NATS_URL", "nats://127.0.0.1:14222")
-
 	nbus, err := natsbus.Connect(natsURL)
 	if err != nil {
-		log.Error("nats connect failed", "err", err)
-		os.Exit(1)
+		return err
 	}
+	s.bus = nbus
 
 	m, err := manifest.ParseManifest(manifestYaml)
 	if err != nil {
-		log.Error("load manifest failed", "err", err)
-		os.Exit(1)
+		return err
 	}
 
-	if err := extension.Serve(
-		extension.New(nbus, m.BuildConfig(manifest.Bindings{
-			Handlers: s.handlers(),
-			Variables: map[string]extension.VariableSpec{
-				"org":      {Resolve: s.resolveOrg},
-				"repo":     {Resolve: s.resolveRepo},
-				"bookmark": {Resolve: s.resolveBookmark},
-			},
-			OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent) error {
-				return s.handleLifecycleEvent(ctx, string(ev.Kind), ev)
-			},
-		})),
-		extension.ServeOptions{
-			Handler: s.router(),
-			Run: func(runCtx context.Context, ext *extension.Extension) {
-				s.ext = ext
-				log.Info("listening", "port", envOr("PORT", "8080"), "nats", natsURL)
-				go runReconciler(runCtx, s, time.Duration(envInt("RECONCILE_INTERVAL_SECS", 60))*time.Second)
-			},
+	ext := extension.New(nbus, m.BuildConfig(manifest.Bindings{
+		Handlers: s.handlers(),
+		Variables: map[string]extension.VariableSpec{
+			"org":      {Resolve: s.resolveOrg},
+			"repo":     {Resolve: s.resolveRepo},
+			"bookmark": {Resolve: s.resolveBookmark},
 		},
-	); err != nil {
-		log.Error("serve failed", "err", err)
-		os.Exit(1)
-	}
-}
+		OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent) error {
+			return s.handleLifecycleEvent(ctx, string(ev.Kind), ev)
+		},
+	}))
 
-func pgConfig() PgConfig {
-	name := envOr("REPOEXT_DB", "easylab_repoext.db")
-	if !filepath.IsAbs(name) {
-		name = filepath.Join(envOr("EASYVCS_HOME", homeDir()), name)
+	if err := ext.Serve(ctx); err != nil {
+		return err
 	}
-	return PgConfig{DB: name}
+	s.ext = ext
+	log.Info("repo-extension embedded, nats", "nats", natsURL, "easylab", base)
+	interval := opts.ReconcileInterval
+	if interval <= 0 {
+		interval = time.Duration(envInt("RECONCILE_INTERVAL_SECS", 60)) * time.Second
+	}
+	go runReconciler(ctx, s, interval)
+	if opts.Hook != nil {
+		opts.Hook(ext)
+	}
+	return nil
 }
 
 // homeDir returns the easylab home (default ~/.easyvcs) for a local repoext db.

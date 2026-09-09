@@ -1,4 +1,4 @@
-package main
+package repoext
 
 import (
 	"context"
@@ -31,6 +31,9 @@ func (s *server) resolveBookmark(ctx context.Context, sessionName string) (strin
 // KV (vars.repo.{token}.*) after the authoritative mapping changed. Called by
 // the lifecycle handler; the reconciler additionally rebuilds projections.
 func (s *server) publishSessionVars(ctx context.Context, ext *extension.Extension, sessionName string) {
+	if ext == nil {
+		return
+	}
 	o, r, b, err := s.resolveSession(ctx, sessionName)
 	if err != nil {
 		return
@@ -42,5 +45,8 @@ func (s *server) publishSessionVars(ctx context.Context, ext *extension.Extensio
 
 // clearSessionVars removes a session's projected variables on deletion.
 func (s *server) clearSessionVars(ctx context.Context, ext *extension.Extension, sessionName string) {
+	if ext == nil {
+		return
+	}
 	_ = ext.DeleteSessionVariables(ctx, sessionName)
 }
