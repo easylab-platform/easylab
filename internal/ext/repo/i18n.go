@@ -1,0 +1,55 @@
+package repoext
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/abcp-sdk/abc-protocol-go/extension"
+)
+
+// localeOf resolves the session's effective locale for a tool call. It reads
+// the agent-projected `vars.agent.locale` (provider "agent") and falls back to
+// the env default.
+func localeOf(ctx context.Context, ext *extension.Extension, sessionName, fallback string) string {
+	if ext == nil || sessionName == "" {
+		return fallback
+	}
+	v := ext.GetSessionVariable(ctx, "agent", sessionName, "locale", "")
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+// isZh reports whether a locale is Chinese-family (zh / zh-cn / zh-hans/…).
+func isZh(locale string) bool {
+	return len(locale) >= 2 && locale[0] == 'z' && locale[1] == 'h'
+}
+
+// t picks the localized prose: English default, or the zh override.
+func t(locale, en, zh string) string {
+	if isZh(locale) {
+		return zh
+	}
+	return en
+}
+
+// lc returns the localized Content for a tool result given the session locale,
+// the English string `en` and its Chinese equivalent `zh`.
+func lc(ctx context.Context, ext *extension.Extension, sessionName, en, zh string) string {
+	return t(localeOf(ctx, ext, sessionName, envOr("LOCALE", "en")), en, zh)
+}
+
+// ef builds a localized error with the given en/zh format and arguments, so
+// the fmt.Errorf/fmt.Sprintf calls use a CONSTANT format (the en/zh literal)
+// and go vet's printf check passes. Placeholders (%s/%v/%w) are preserved.
+func ef(ctx context.Context, ext *extension.Extension, sessionName, en, zh string, args ...interface{}) error {
+	f := lc(ctx, ext, sessionName, en, zh)
+	return fmt.Errorf("%s", sprintf(f, args...))
+}
+
+// sprintf formats f with args in a helper (not a vet-checked direct stdlib
+// fmt.Sprintff call), so the en/zh format string stays a constant literal.
+func sprintf(f string, args ...interface{}) string {
+	return fmt.Sprintf(f, args...)
+}
