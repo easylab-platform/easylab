@@ -109,10 +109,10 @@ func main() {
 	// Start the background mirror scheduler (push on-change, pull on-interval).
 	go s.runMirrorLoop(context.Background())
 
-	// Launch the extension containers (ops + repo) so the agent discovers their
-	// tools via NATS. We drive them through the same ops service runner that
-	// OpsService/LaunchService uses (internal registry, no TLS, no side pull).
-	go launchExtensions(s, opsState)
+	// Agent tool extensions (ops + repo) run in-process (single binary): NATS
+	// tool face re-exported by the gateway via easylab-sdk-go on loopback.
+	// Set EASYLAB_EXT_CONTAINERS=1 to use the legacy container launch.
+	go embedExtensions(context.Background())
 
 	mux := s.router()
 	_ = mux
