@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/easylab-platform/artifact/cargo"
@@ -61,6 +62,8 @@ type server struct {
 	selfBase string
 	ops      *opsState
 	sbx      *sbxreg.Registry
+	workflows sync.Map       // workflow id -> *ci.Workflow (declarations)
+	runs     sync.Map       // run id -> *ci.Run (instantiations)
 	// auth is the artifactkit Auth over the easyvcs credential store
 	// (unified minted-token semantics via StoreAuth; see easyvcs_token_store.go).
 	auth artifactkit.Auth
@@ -233,6 +236,7 @@ func (s *server) router() *http.ServeMux {
 	mux.Handle(easylabv1connect.NewLabServiceHandler(&connLab{s}))
 	mux.Handle(easylabv1connect.NewOpsServiceHandler(&connOps{s}))
 	mux.Handle(easylabv1connect.NewSandboxServiceHandler(&connSandbox{s: s}))
+	mux.Handle(easylabv1connect.NewWorkflowServiceHandler(NewWorkflowService(s)))
 	mux.Handle(easylabv1connect.NewRegistryServiceHandler(&connRegistry{s}))
 
 	// agent.v1 gateway: forwards to the real agent backend. Web/flutter talk to
