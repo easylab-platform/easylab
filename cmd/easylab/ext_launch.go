@@ -38,7 +38,7 @@ func launchExtensions(s *server, st *opsState) {
 		port  string
 	}
 	exts := []ext{
-		{"ops-ext", "forgejo.develop.10.199.64.20.nip.io/easylab/ops-extension:20260908074246", "18092"},
+		{"ops-ext", "forgejo.develop.10.199.64.20.nip.io/easylab/ops-extension:20260909073231", "18092"},
 		{"repo-ext", "forgejo.develop.10.199.64.20.nip.io/easylab/repo-extension:20260908074246", "18093"},
 	}
 	for _, e := range exts {

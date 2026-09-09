@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: standalone-agent
+  namespace: temp
+  labels:
+    app: standalone-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: standalone-agent
+  template:
+    metadata:
+      labels:
+        app: standalone-agent
+    spec:
+      serviceAccountName: easylab
+      securityContext: {}
+      containers:
+        # ---- nats (JetStream KV for presets / agent-config / file meta) ----
+        - name: nats
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/nats:latest
+          imagePullPolicy: IfNotPresent
+          args: ["-js", "-p", "4222", "-m", "8222", "-sd", "/data/nats"]
+          ports:
+            - { containerPort: 4222, protocol: TCP }
+          resources:
+            limits: { cpu: 500m, memory: 512Mi }
+            requests: { cpu: 100m, memory: 64Mi }
+          volumeMounts:
+            - { mountPath: /data/nats, name: data, subPath: nats }
+
+        # ---- abcp agent (session/model/turn engine; h2c on 8000) ----
+        - name: agent
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260909062632
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NATS_URL
+              value: nats://127.0.0.1:4222
+            - name: DB_BACKEND
+              value: sqlite
+            - name: DATABASE_URL
+              value: sqlite:///data/agent.db
+            - name: PORT
+              value: "8080"
+          ports:
+            - { containerPort: 8080, protocol: TCP }
+          resources:
+            limits: { cpu: "1", memory: 1Gi }
+            requests: { cpu: 100m, memory: 128Mi }
+          volumeMounts:
+            - { mountPath: /data, name: data, subPath: agent-data }
+
+      volumes:
+        - name: data
+          hostPath:
+            path: /home/develop/.easylab/standalone-agent
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: standalone-agent
+  namespace: temp
+  labels:
+    app: standalone-agent
+spec:
+  type: ClusterIP
+  selector:
+    app: standalone-agent
+  ports:
+    - name: h2c
+      port: 80
+      targetPort: 8080

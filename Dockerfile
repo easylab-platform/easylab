@@ -34,12 +34,12 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
 RUN apk add --no-cache ca-certificates
 WORKDIR /src/app
 COPY go.mod go.sum ./
-# Strip the local-dev replace so easyvcs resolves from the proxy.
-RUN sed -i '/^replace github.com\/easylab-platform\/easyvcs/d' go.mod
+COPY vendor ./vendor
 COPY cmd ./cmd
 COPY internal ./internal
-RUN go build -mod=mod -trimpath -ldflags="-s -w" -o /out/easylab ./cmd/easylab
-RUN go build -mod=mod -trimpath -ldflags="-s -w" -o /out/easyvcs github.com/easylab-platform/easyvcs/cmd/easyvcs
+# Vendor mode: all module deps (incl. easylab-proto worker/v1) ship in the
+# context; replaces are pinned in vendor/modules.txt so go.mod stays intact.
+RUN go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/easylab ./cmd/easylab
 
 # ---- runtime ----
 FROM ${REGISTRY}/alpine:${ALPINE}
@@ -55,7 +55,8 @@ RUN set -eux; \
     && addgroup -S easyvcs && adduser -S -G easyvcs easyvcs
 # /data is writable (hostPath) and holds the persistent OCI metadata + blobs.
 COPY --from=gobuild /out/easylab /usr/local/bin/easylab
-COPY --from=gobuild /out/easyvcs /usr/local/bin/easyvcs
+# easyworker binary injected into sandbox base images (derived-image builds).
+COPY worker-bin/easyworker /usr/local/lib/easyworker/easyworker-linux-amd64
 RUN cat > /usr/local/bin/easylab-entrypoint.sh <<'EOF'
 #!/bin/sh
 exec /usr/local/bin/easylab "$@"

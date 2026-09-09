@@ -301,8 +301,11 @@ func (r *PodmanServiceRunner) Launch(ctx context.Context, req ServiceRequest, lo
 		for c, h := range req.Ports {
 			port := nat.Port(fmt.Sprintf("%d/tcp", c))
 			exposed[port] = struct{}{}
-			if h != 0 {
+			switch {
+			case h > 0: // explicit loopback publish
 				pbinds[port] = []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: fmt.Sprintf("%d", h)}}
+			case h == -1: // auto-assigned loopback publish (sandboxes)
+				pbinds[port] = []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: ""}}
 			}
 		}
 		hostCfg := &container.HostConfig{

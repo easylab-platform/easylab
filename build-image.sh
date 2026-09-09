@@ -39,6 +39,12 @@ cp "${LAB_DIR}/go.mod" "${CTX}/go.mod"
 cp "${LAB_DIR}/go.sum" "${CTX}/go.sum"
 cp -r "${LAB_DIR}/cmd" "${CTX}/cmd"
 cp -r "${LAB_DIR}/internal" "${CTX}/internal"
+# Vendored deps (incl. the new easylab-proto worker/v1 types): the container
+# build resolves nothing from the network for Go modules.
+cp -r "${LAB_DIR}/vendor" "${CTX}/vendor"
+# easyworker binary injected into sandbox base images (EnsureSandboxImage).
+mkdir -p "${CTX}/worker-bin"
+cp ../easyworker/dist/easyworker-linux-amd64 "${CTX}/worker-bin/easyworker"
 mkdir -p "${CTX}/easy-lab" && cp "${LAB_DIR}/Dockerfile" "${CTX}/easy-lab/Dockerfile"
 
 echo "Building EasyLab image -> ${DEST} (buildkitd=${BUILDKIT})"

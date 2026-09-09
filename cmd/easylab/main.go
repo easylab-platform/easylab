@@ -6,7 +6,6 @@
 package main
 
 import (
-	"time"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -18,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	_ "github.com/easylab-platform/artifact/cargo"
 	_ "github.com/easylab-platform/artifact/composer"
@@ -40,6 +40,7 @@ import (
 	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
 	"github.com/easylab-platform/easylab-proto/easylab/v1/easylabv1connect"
 
+	"github.com/easylab-platform/easylab/internal/sbxreg"
 	"github.com/easylab-platform/easyvcs/object"
 	"github.com/easylab-platform/easyvcs/revision"
 	"github.com/easylab-platform/easyvcs/store"
@@ -59,6 +60,7 @@ type server struct {
 	registry *artifactkit.Registry
 	selfBase string
 	ops      *opsState
+	sbx      *sbxreg.Registry
 	// auth is the artifactkit Auth over the easyvcs credential store
 	// (unified minted-token semantics via StoreAuth; see easyvcs_token_store.go).
 	auth artifactkit.Auth
@@ -89,7 +91,17 @@ func main() {
 	if err != nil {
 		log.Fatal("init ops:", err)
 	}
-	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
+	// Sandbox registry: same DB as the easyvcs store (own session, WAL).
+	sbxKind := envOrStr("EASYVCS_DB_DRIVER", store.KindSQLite)
+	sbxDSN := envOrStr("EASYVCS_DB_DSN", "")
+	if sbxDSN == "" && sbxKind == store.KindSQLite {
+		sbxDSN = store.DBPath()
+	}
+	sbxReg, err := sbxreg.Open(sbxKind, sbxDSN)
+	if err != nil {
+		log.Fatal("init sandbox registry:", err)
+	}
+	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, sbx: sbxReg, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
 
 	// Start the background mirror scheduler (push on-change, pull on-interval).
 	go s.runMirrorLoop(context.Background())
@@ -220,6 +232,7 @@ func (s *server) router() *http.ServeMux {
 	// /easylab.v1 and /agent.v1 (Connect/ gRPC-compatible).
 	mux.Handle(easylabv1connect.NewLabServiceHandler(&connLab{s}))
 	mux.Handle(easylabv1connect.NewOpsServiceHandler(&connOps{s}))
+	mux.Handle(easylabv1connect.NewSandboxServiceHandler(&connSandbox{s: s}))
 	mux.Handle(easylabv1connect.NewRegistryServiceHandler(&connRegistry{s}))
 
 	// agent.v1 gateway: forwards to the real agent backend. Web/flutter talk to

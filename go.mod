@@ -86,3 +86,5 @@ require (
 )
 
 replace github.com/easylab-platform/easyvcs => ../easyvcs
+
+replace github.com/easylab-platform/easylab-proto => ../easylab-proto
