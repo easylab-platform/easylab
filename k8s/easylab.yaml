@@ -127,7 +127,7 @@ spec:
 
         # ---- agent (abc session backend)
         - name: agent
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260908154658
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260909113252
           imagePullPolicy: IfNotPresent
           env:
             - name: NATS_URL
@@ -141,6 +141,10 @@ spec:
             # keeps working on the shared pod netns.
             - name: PORT
               value: "8000"
+            # In-pod callers (easylab gateway h2cClient, easylab-sdk-go) speak
+            # cleartext HTTP/2 prior-knowledge — the agent must serve h2c.
+            - name: HTTP_PROTOCOL
+              value: h2c
           ports:
             - containerPort: 8000
               protocol: TCP
