@@ -34,12 +34,11 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
 RUN apk add --no-cache ca-certificates
 WORKDIR /src/app
 COPY go.mod go.sum ./
-COPY vendor ./vendor
 COPY cmd ./cmd
 COPY internal ./internal
-# Vendor mode: all module deps (incl. easylab-proto worker/v1) ship in the
-# context; replaces are pinned in vendor/modules.txt so go.mod stays intact.
-RUN go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/easylab ./cmd/easylab
+# No vendor/: all deps (incl. easylab-proto, easylab-sdk-go, easyvcs) resolve
+# from the module proxy; the build runs -mod=mod over the network.
+RUN go build -mod=mod -trimpath -ldflags="-s -w" -o /out/easylab ./cmd/easylab
 
 # ---- runtime ----
 FROM ${REGISTRY}/alpine:${ALPINE}

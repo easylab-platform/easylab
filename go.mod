@@ -26,8 +26,8 @@ require (
 	github.com/easylab-platform/artifact/rubygems v0.2.0
 	github.com/easylab-platform/artifact/swiftpm v0.2.0
 	github.com/easylab-platform/artifact/system v0.2.0
-	github.com/easylab-platform/easylab-proto v0.5.2
-	github.com/easylab-platform/easylab-sdk-go v0.8.1
+	github.com/easylab-platform/easylab-proto v0.6.0
+	github.com/easylab-platform/easylab-sdk-go v0.9.0
 	github.com/easylab-platform/easyvcs v0.5.1
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-chi/chi/v5 v5.3.2
@@ -95,9 +95,3 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	modernc.org/sqlite v1.58.0 // indirect
 )
-
-replace github.com/easylab-platform/easyvcs => ../easyvcs
-
-replace github.com/easylab-platform/easylab-proto => ../easylab-proto
-
-replace github.com/easylab-platform/easylab-sdk-go => ../easylab-sdk-go

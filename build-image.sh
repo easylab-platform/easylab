@@ -2,10 +2,9 @@
 # Build and push the EasyLab runtime image WITHOUT a local build daemon.
 #
 # Pipeline (verified):
-#   1. Assemble a temp build context rooted at '.', containing go.work +
-#      easyvcs/. The Go module graph now resolves EVERYTHING from public
-#      GitHub (easylab-platform/artifact/*, easylab-proto, abcp-sdk/*) — no
-#      local artifact/ or deps/ needed. go.work only lists ./easyvcs.
+#   1. Assemble a temp build context rooted at '.'. The Go module graph
+#      resolves EVERYTHING from public GitHub (easylab-platform/*, abcp-sdk/*)
+#      via GOPROXY — no vendor/ directory and no local paths.
 #   2. buildctl targets the shared cluster buildkitd (default the temp one) and
 #      builds the image, exporting a docker archive (with a RepoTag). buildkitd
 #      does NOT push.
@@ -30,18 +29,14 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
 # Build context root: the easylab module itself (go.mod + cmd/ + internal/).
-# easyvcs is a separate public module (github.com/easylab-platform/easyvcs)
-# resolved by GOPROXY inside the build. Skip the local-dev replace so the proxy
-# supplies it instead of a local path. No local vendoring, no go.work.
+# All deps resolve from GOPROXY (no replace directives, no vendor/); the build
+# is -mod=mod over the network through the proxy.
 CTX="${WORK}/ctx"
 mkdir -p "${CTX}"
 cp "${LAB_DIR}/go.mod" "${CTX}/go.mod"
 cp "${LAB_DIR}/go.sum" "${CTX}/go.sum"
 cp -r "${LAB_DIR}/cmd" "${CTX}/cmd"
 cp -r "${LAB_DIR}/internal" "${CTX}/internal"
-# Vendored deps (incl. the new easylab-proto worker/v1 types): the container
-# build resolves nothing from the network for Go modules.
-cp -r "${LAB_DIR}/vendor" "${CTX}/vendor"
 # easyworker binary injected into sandbox base images (EnsureSandboxImage).
 mkdir -p "${CTX}/worker-bin"
 cp ../easyworker/dist/easyworker-linux-amd64 "${CTX}/worker-bin/easyworker"
