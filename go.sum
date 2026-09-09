@@ -18,6 +18,8 @@ github.com/abcp-sdk/agent-sdk-go v0.5.1 h1:RfbmCnYAdkskS6aMyXfvePpicTHOuW11bjkRr
 github.com/abcp-sdk/agent-sdk-go v0.5.1/go.mod h1:JbL4kwYI0ZTVhsMhURFTAwJHAOA0FZeuGfu7yxSI430=
 github.com/abcp-sdk/agent-sdk-go v0.5.2 h1:GZftP9Jpa2oNzsabcKmPP8MFhlChYvOks7dHa3qXPf4=
 github.com/abcp-sdk/agent-sdk-go v0.5.2/go.mod h1:/G/KvEVvuRbd9lQIn2BeN4FBfFGfchC1ewtydtuBIqA=
+github.com/abcp-sdk/agent-sdk-go v0.6.0 h1:im5JyAMDVuR9wK0npo6rYTDYm26ANxmJ9jb8VbjlpLM=
+github.com/abcp-sdk/agent-sdk-go v0.6.0/go.mod h1:/G/KvEVvuRbd9lQIn2BeN4FBfFGfchC1ewtydtuBIqA=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=
 github.com/cenkalti/backoff/v5 v5.0.3/go.mod h1:rkhZdG3JZukswDf7f0cwqPNk4K0sa+F97BxZthm/crw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
