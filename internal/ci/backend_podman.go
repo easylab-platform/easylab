@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	publishpkg "github.com/easylab-platform/easylab/internal/publish"
@@ -20,10 +21,36 @@ type PodmanBackend struct {
 	builder       ops.Builder
 	artifactURL   string
 	artifactToken string
+	// exportWS materializes org/repo@branch into a directory (the repo tree
+	// as the build context). Wired by the host, which owns the easyvcs store.
+	exportWS func(org, repo, branch, dir string) error
 }
 
 func NewPodmanBackend(builder ops.Builder) *PodmanBackend {
 	return &PodmanBackend{builder: builder, artifactURL: os.Getenv("EASYLAB_ARTIFACT_URL"), artifactToken: os.Getenv("ARTIFACT_TOKEN")}
+}
+
+// SetWorkspaceExporter wires the repo-tree exporter (host callback).
+func (b *PodmanBackend) SetWorkspaceExporter(f func(org, repo, branch, dir string) error) {
+	b.exportWS = f
+}
+
+// prepareContext resolves the build context directory for a produce job: an
+// explicit Context wins; otherwise a temp dir seeded with the workspace tree
+// (empty contexts made every build a no-op that never saw the repo files).
+func (b *PodmanBackend) prepareContext(job *Job) string {
+	if job.Produce.Context != "" && job.Produce.Context != "." {
+		_ = os.MkdirAll(job.Produce.Context, 0o755)
+		return job.Produce.Context
+	}
+	dir := buildTmpDir()
+	_ = os.MkdirAll(dir, 0o755)
+	if b.exportWS != nil && job.Org != "" && job.Repo != "" {
+		// Best effort: a failed export still leaves the (possibly empty)
+		// context; the build itself surfaces any missing-file problems.
+		_ = b.exportWS(job.Org, job.Repo, job.Branch, dir)
+	}
+	return dir
 }
 
 // Run implements Backend.
@@ -40,11 +67,7 @@ func (b *PodmanBackend) Run(ctx context.Context, job *Job, rn *Runner, onLog fun
 		// always use a dedicated temp build dir. A self-contained build may
 		// inline the Containerfile; otherwise Dockerfile is expected in the
 		// (workspace-synced) context.
-		ctxDir := job.Produce.Context
-		if ctxDir == "" || ctxDir == "." {
-			ctxDir = buildTmpDir()
-		}
-		_ = os.MkdirAll(ctxDir, 0o755)
+		ctxDir := b.prepareContext(job)
 		spec := ops.BuildSpec{
 			Context:       ctxDir,
 			Containerfile: job.Produce.Containerfile,
@@ -84,14 +107,28 @@ func (b *PodmanBackend) Run(ctx context.Context, job *Job, rn *Runner, onLog fun
 		if err != nil {
 			return "", err
 		}
-		ctxDir := buildTmpDir()
-		_ = os.MkdirAll(ctxDir, 0o755)
+		ctxDir := b.prepareContext(job)
 		spec := ops.BuildSpec{
 			Context:       ctxDir,
 			Containerfile: cf,
 			Dockerfile:    "Dockerfile",
 			Image:         "", // publish does not export an image
 			BuildArgs:     []string{"ARTIFACT_URL=" + b.artifactURL, "ARTIFACT_TOKEN=" + b.artifactToken, "PUBLISH_TS=" + ts()},
+		}
+		// npm refuses to publish without credentials even against an
+		// anonymous registry. The .npmrc key must be the registry URL sans
+		// scheme INCLUDING its path (npm matches the key against the
+		// --registry URL; a host-only key never matches a subpath registry).
+		if job.Produce.Protocol == "npm" && b.artifactURL != "" {
+			host := strings.TrimPrefix(strings.TrimPrefix(b.artifactURL, "https://"), "http://")
+			host = strings.TrimSuffix(host, "/")
+			if strings.HasPrefix(b.artifactURL, "https://") {
+				host = strings.TrimSuffix(host, ":443")
+			} else {
+				host = strings.TrimSuffix(host, ":80")
+			}
+			spec.BuildArgs = append(spec.BuildArgs,
+				"NPMRC_LINE=//"+host+"/pkgs/npm/:_authToken="+b.artifactToken)
 		}
 		_, err = b.builder.Build(ctx, spec, func(line string) {
 			if onLog != nil {

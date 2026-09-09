@@ -23,7 +23,7 @@ spec:
       containers:
         # ---- easylab core (Go) — drives podman sidecar via Docker-compatible API
         - name: easylab
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260909124644
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260909131050
           imagePullPolicy: IfNotPresent
           args: ["-addr", "0.0.0.0:8080"]
           env:
@@ -59,6 +59,12 @@ spec:
             # ---- HTTP/2 执法（可选）：=1 时拒绝 connect 路径上的 HTTP/1.x 请求
             # 设置为 devtoken，登录界面 token 填 devtoken。
             - name: EASYVCS_TOKEN
+              value: devtoken
+            # Produce build-args (publish/oci-build templates) must reach the
+            # registry; empty made every npm/cargo publish target a dead URL.
+            - name: EASYLAB_ARTIFACT_URL
+              value: http://127.0.0.1:8080
+            - name: ARTIFACT_TOKEN
               value: devtoken
             # ---- 服务容器与 easylab 共同的出站正向代理（部署可替换）。
             # easylab 回源 + 被拉起容器的普速出站（github 等非包流量）都走它；

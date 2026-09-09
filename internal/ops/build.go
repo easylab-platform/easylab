@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"encoding/json"
 	"archive/tar"
 	"bufio"
 	"context"
@@ -213,6 +214,7 @@ func (b *podmanBuilder) Build(ctx context.Context, spec BuildSpec, log func(stri
 	defer resp.Body.Close()
 
 	var out strings.Builder
+	var buildErr string
 	sc := bufio.NewScanner(resp.Body)
 	for sc.Scan() {
 		line := sc.Text()
@@ -220,9 +222,19 @@ func (b *podmanBuilder) Build(ctx context.Context, spec BuildSpec, log func(stri
 		if log != nil {
 			log(line)
 		}
+		// The docker/podman build API reports RUN failures as JSON error
+		// entries inside a 200-stream — the HTTP call itself succeeds. Without
+		// this check every failed RUN (npm publish, cargo publish, ...) reads
+		// as a green build.
+		if e := streamBuildError(line); e != "" && buildErr == "" {
+			buildErr = e
+		}
 	}
 	if err := sc.Err(); err != nil {
 		return BuildResult{}, err
+	}
+	if buildErr != "" {
+		return BuildResult{Image: spec.Image, Out: out.String()}, fmt.Errorf("build failed: %s", buildErr)
 	}
 
 	// Push to the registry if one was given (podman buildah writes into the
@@ -244,4 +256,23 @@ func (b *podmanBuilder) Build(ctx context.Context, spec BuildSpec, log func(stri
 	}
 
 	return BuildResult{Image: spec.Image, Out: out.String()}, nil
+}
+
+// streamBuildError extracts the error message from one build-stream line
+// ({"error":"...","errorDetail":{"message":"..."}}), empty when the line is
+// ordinary progress output.
+func streamBuildError(line string) string {
+	var ev struct {
+		Error        string `json:"error"`
+		ErrorDetail  struct {
+			Message string `json:"message"`
+		} `json:"errorDetail"`
+	}
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		return ""
+	}
+	if ev.ErrorDetail.Message != "" {
+		return ev.ErrorDetail.Message
+	}
+	return ev.Error
 }

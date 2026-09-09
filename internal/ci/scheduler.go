@@ -118,6 +118,7 @@ func (s *Scheduler) walk(ctx context.Context, wf *Workflow, run *Run) error {
 					break
 				}
 			}
+			j.Org, j.Repo, j.Branch = wf.Org, wf.Repo, wf.Branch
 			inst.State = StateRunning
 			res, rerr := s.back.Run(ctx, j, s.pickRunner(j), func(line string) {
 				if s.onLog != nil {

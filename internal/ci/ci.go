@@ -38,10 +38,15 @@ func ToolchainImage(tc string) string { return Toolchains[tc] }
 // Job is a single CI job definition (a DAG node). It is declarative and
 // stateless — a Run materialises one JobInstance per Job.
 type Job struct {
-	ID               string
-	Needs            []string
-	RunsOn           []string // runner labels: os=, arch=, is_container=, toolchain=
-	Container        string   // explicit image override
+	ID     string
+	Needs  []string
+	RunsOn []string // runner labels: os=, arch=, is_container=, toolchain=
+	// Workspace coords (set by the scheduler from the owning Workflow) so
+	// produce backends can export the repo tree as the build context.
+	Org              string
+	Repo             string
+	Branch           string
+	Container        string // explicit image override
 	WorkingDirectory string
 	Steps            []Step
 	Produce          Produce
@@ -57,17 +62,17 @@ type Step struct {
 
 // Produce declares the platform-managed outcome action.
 type Produce struct {
-	Action      Action
-	Context     string
-	Dockerfile  string
-	Tag         string
-	Path        string
-	Destination string
-	Ref         string
-	Protocol    string
-	Name        string
-	Version     string
-	File        string
+	Action        Action
+	Context       string
+	Dockerfile    string
+	Tag           string
+	Path          string
+	Destination   string
+	Ref           string
+	Protocol      string
+	Name          string
+	Version       string
+	File          string
 	Containerfile string
 }
 

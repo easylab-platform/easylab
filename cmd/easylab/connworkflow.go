@@ -1,17 +1,26 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"github.com/easylab-platform/easylab-proto/easylab/v1/easylabv1connect"
 	"github.com/easylab-platform/easylab/internal/ci"
+	"github.com/easylab-platform/easyvcs/revision"
+	"github.com/easylab-platform/easyvcs/store"
 )
 
 // connWorkflow implements easylabv1connect.WorkflowServiceHandler: declarative
@@ -20,9 +29,11 @@ import (
 // of the dev (sandbox/service) world: runners with session_bound=true are not
 // part of this pool.
 type connWorkflow struct {
-	s   *server
-	reg *ci.RunnerRegistry
-	sch *ci.Scheduler
+	s       *server
+	reg     *ci.RunnerRegistry
+	sch     *ci.Scheduler
+	logsMu  sync.Mutex
+	jobLogs map[string][]string // job id -> tail of build output
 }
 
 var _ easylabv1connect.WorkflowServiceHandler = (*connWorkflow)(nil)
@@ -37,8 +48,21 @@ func NewWorkflowService(s *server) *connWorkflow {
 	if s.ops != nil && s.ops.builder != nil {
 		back = ci.NewPodmanBackend(s.ops.builder)
 	}
-	sch := ci.NewScheduler(reg, back, nil)
-	return &connWorkflow{s: s, reg: reg, sch: sch}
+	// Seed produce build contexts with the repo tree at the branch head.
+	back.SetWorkspaceExporter(func(org, repo, branch, dir string) error {
+		return exportRepoTree(s, org, repo, branch, dir)
+	})
+	c := &connWorkflow{s: s, reg: reg, jobLogs: map[string][]string{}}
+	c.sch = ci.NewScheduler(reg, back, func(jobID, line string) {
+		c.logsMu.Lock()
+		defer c.logsMu.Unlock()
+		logs := append(c.jobLogs[jobID], line)
+		if len(logs) > 400 {
+			logs = logs[len(logs)-400:]
+		}
+		c.jobLogs[jobID] = logs
+	})
+	return c
 }
 
 func protoWorkflow(w *ci.Workflow) *easylabv1.Workflow {
@@ -136,10 +160,18 @@ func (c *connWorkflow) ListRuns(ctx context.Context, req *connect.Request[easyla
 
 // RunJobLog streams a job's log for a run (job id within the run).
 func (c *connWorkflow) RunJobLog(ctx context.Context, req *connect.Request[easylabv1.RunJobLogRequest], stream *connect.ServerStream[easylabv1.RunJobLogResponse]) error {
-	// The scheduler currently logs via onLog; we keep a buffered per-run log
-	// for streaming. For the first release, real-time job log streaming is a
-	// no-op (jobs are synchronous) — the terminal log is delivered on GetRun.
-	return stream.Send(&easylabv1.RunJobLogResponse{Stream: "state", Line: "run " + req.Msg.RunId + " job " + req.Msg.JobId + " complete"})
+	c.logsMu.Lock()
+	logs := append([]string(nil), c.jobLogs[req.Msg.JobId]...)
+	c.logsMu.Unlock()
+	if len(logs) == 0 {
+		return stream.Send(&easylabv1.RunJobLogResponse{Stream: "state", Line: "run " + req.Msg.RunId + " job " + req.Msg.JobId + " complete"})
+	}
+	for _, line := range logs {
+		if err := stream.Send(&easylabv1.RunJobLogResponse{Stream: "build", Line: line}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *connWorkflow) CancelRun(ctx context.Context, req *connect.Request[easylabv1.CancelRunRequest]) (*connect.Response[easylabv1.CancelRunResponse], error) {
@@ -209,7 +241,7 @@ func fromProtoWorkflow(wf *easylabv1.Workflow) *ci.Workflow {
 				Path: j.Produce.GetPath(), Destination: j.Produce.GetDestination(),
 				Ref: j.Produce.GetRef(), Protocol: j.Produce.GetProtocol(),
 				Name: j.Produce.GetName(), Version: j.Produce.GetVersion(), File: j.Produce.GetFile(),
-			Containerfile: j.Produce.GetContainerfile(),
+				Containerfile: j.Produce.GetContainerfile(),
 			},
 		})
 	}
@@ -239,13 +271,74 @@ func protoRun(r *ci.Run) *easylabv1.Run {
 }
 
 // errors as plain connect errors
-func errWorkflowNotFound() error { return connect.NewError(connect.CodeNotFound, fmt.Errorf("workflow not found")) }
-func errRunNotFound() error      { return connect.NewError(connect.CodeNotFound, fmt.Errorf("run not found")) }
-func errRunnerRequired() error   { return fmt.Errorf("runner required") }
+func errWorkflowNotFound() error {
+	return connect.NewError(connect.CodeNotFound, fmt.Errorf("workflow not found"))
+}
+func errRunNotFound() error {
+	return connect.NewError(connect.CodeNotFound, fmt.Errorf("run not found"))
+}
+func errRunnerRequired() error { return fmt.Errorf("runner required") }
 
 // newID short unique id (used to key workflows/runs).
 func newID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// exportRepoTree materializes org/repo@branch into dir (the repo tree as the
+// produce build context), reusing the sandbox-sync tar builder.
+func exportRepoTree(s *server, org, repoName, branch, dir string) error {
+	r, err := s.cs.OpenRepo(store.RepoRef{Namespace: org, Name: repoName})
+	if err != nil {
+		return fmt.Errorf("open %s/%s: %w", org, repoName, err)
+	}
+	ws := revision.NewWorkspace(r)
+	treeID, err := treeOfRef(ws, r, branch)
+	if err != nil {
+		return fmt.Errorf("ref %s: %w", branch, err)
+	}
+	tarball, _, err := buildTreeTar(ws, treeID)
+	if err != nil {
+		return err
+	}
+	return extractTarTo(dir, tarball)
+}
+
+// extractTarTo unpacks a tarball into dir (regular files + directories).
+func extractTarTo(dir string, tarball []byte) error {
+	tr := tar.NewReader(bytes.NewReader(tarball))
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		clean := filepath.Clean("/" + hdr.Name)
+		if clean == "/" || strings.Contains(clean, "..") {
+			continue
+		}
+		target := filepath.Join(dir, clean)
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777|0o400)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return err
+			}
+			f.Close()
+		}
+	}
 }

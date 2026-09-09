@@ -301,6 +301,12 @@ func (r *PodmanServiceRunner) Launch(ctx context.Context, req ServiceRequest, lo
 		if reps > 1 {
 			containerName = fmt.Sprintf("%s-%d", req.Name, i)
 		}
+		// Replace semantics: a leftover container with the same name (from a
+		// previous deploy or a worker-restart) must not wedge every later
+		// launch with "name already in use".
+		if json, ierr := r.cli.ContainerInspect(ctx, containerName); ierr == nil && json.ContainerJSONBase != nil {
+			_ = r.cli.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true})
+		}
 		binds := []string{}
 		exposed := map[nat.Port]struct{}{}
 		pbinds := nat.PortMap{}

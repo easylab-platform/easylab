@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"context"
 	"strings"
 
@@ -18,28 +19,19 @@ type connRegistry struct {
 
 func (c *connRegistry) ListPackageTypes(ctx context.Context, req *connect.Request[easylabv1.ListPackageTypesRequest]) (*connect.Response[easylabv1.ListPackageTypesResponse], error) {
 	idx := c.s.registry.Meta
-	repos, err := idx.ListRepositories(ctx)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	// Count packages per format from the list packages summary.
+	// Group by the index's real format column. Splitting repository keys at
+	// "/" used to surface OCI namespaces (library/, team/) as fake package
+	// protocols and hide real ones (npm) entirely.
 	packages, _ := idx.ListPackages(ctx)
 	counts := map[string]int32{}
 	for _, p := range packages {
 		counts[p.Format]++
 	}
-	var out []*easylabv1.PackageTypeEntry
-	seen := map[string]bool{}
-	for _, r := range repos {
-		format := splitFormat(r)
-		if !seen[format] {
-			seen[format] = true
-			out = append(out, &easylabv1.PackageTypeEntry{
-				Type:     format,
-				Packages: counts[format],
-			})
-		}
+	out := make([]*easylabv1.PackageTypeEntry, 0, len(counts))
+	for format, n := range counts {
+		out = append(out, &easylabv1.PackageTypeEntry{Type: format, Packages: n})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Type < out[j].Type })
 	return connect.NewResponse(&easylabv1.ListPackageTypesResponse{Packages: out}), nil
 }
 
