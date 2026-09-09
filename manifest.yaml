@@ -304,22 +304,3 @@ tools:
           descriptions:
             zh: change ID。
       required: [rev]
-
-hooks:
-  call: [worksheet-decided]
-  call_schemas:
-    worksheet-decided:
-      type: object
-      required: [worksheet_id, action, decision, args, session]
-      properties:
-        worksheet_id:
-          type: string
-        action:
-          type: string
-        decision:
-          type: string
-          enum: [approve, reject]
-        args:
-          type: object
-        session:
-          type: string

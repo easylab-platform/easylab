@@ -11,8 +11,8 @@ import (
 )
 
 // PgConfig kept for signature compatibility but now names a local SQLite file.
-// The repo-extension's private store (bookmark<->session mapping + worksheet
-// dedup) lives in one file; this avoids any external Postgres dependency.
+// The repo-extension's private store (bookmark<->session mapping) lives in
+// one file; this avoids any external Postgres dependency.
 type PgConfig struct {
 	Host     string
 	Port     string
@@ -77,12 +77,7 @@ CREATE TABLE IF NOT EXISTS session_repos (
   updated_at   INTEGER NOT NULL DEFAULT (unixepoch()),
   PRIMARY KEY (org, repo, bookmark)
 );
-CREATE TABLE IF NOT EXISTS executed_worksheets (
-  worksheet_id TEXT PRIMARY KEY,
-  action       TEXT NOT NULL DEFAULT '',
-  session_name TEXT NOT NULL DEFAULT '',
-  executed_at  INTEGER NOT NULL DEFAULT (unixepoch())
-);`
+`
 	_, err := s.db.ExecContext(ctx, ddl)
 	if err != nil {
 		return fmt.Errorf("ddl: %w", err)
@@ -227,23 +222,6 @@ func (s *Store) listRows(ctx context.Context, q string, args ...interface{}) ([]
 		out = append(out, r)
 	}
 	return out, rows.Err()
-}
-
-// ---- worksheet dedup ----
-
-// ExecutedWorksheet records a worksheet as executed (at-least-once dispatch
-// guard). Returns true when this call was the first to claim it; false means a
-// prior execution already ran and side effects must be skipped.
-func (s *Store) ExecutedWorksheet(ctx context.Context, worksheetID, action, sessionName string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `
-INSERT INTO executed_worksheets (worksheet_id, action, session_name)
-VALUES (?, ?, ?)
-ON CONFLICT (worksheet_id) DO NOTHING`, worksheetID, action, sessionName)
-	if err != nil {
-		return false, err
-	}
-	n, _ := res.RowsAffected()
-	return n == 1, nil
 }
 
 // ---- error helpers ----

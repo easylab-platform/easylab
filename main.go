@@ -82,7 +82,6 @@ func main() {
 				"repo":     {Resolve: s.resolveRepo},
 				"bookmark": {Resolve: s.resolveBookmark},
 			},
-			OnCallHook: s.onCallHook,
 			OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent) error {
 				return s.handleLifecycleEvent(ctx, string(ev.Kind), ev)
 			},
