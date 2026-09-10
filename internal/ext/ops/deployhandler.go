@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"connectrpc.com/connect"
+
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
-	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
 )
 
 func jsonDecode(r *http.Request, v interface{}) error {
@@ -31,7 +32,7 @@ func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
 		b.Port = 8080
 	}
 	spec := s.deploymentRequest(b)
-	if _, err := s.sdk.LaunchServiceFull(r.Context(), spec); err != nil {
+	if _, err := s.sdk.Ops.LaunchService(r.Context(), connect.NewRequest(spec)); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -46,8 +47,8 @@ func (s *server) deploymentRequest(b struct {
 	Env       map[string]string `json:"env"`
 	Session   string            `json:"session"`
 	Resources *ResourceRequest  `json:"resources"`
-}) easylabsdk.LaunchServiceSpec {
-	req := easylabsdk.LaunchServiceSpec{
+}) *easylabv1.LaunchServiceRequest {
+	req := &easylabv1.LaunchServiceRequest{
 		Name:      b.Name,
 		Image:     b.Image,
 		Kind:      "deployment",
@@ -63,9 +64,9 @@ func (s *server) deploymentRequest(b struct {
 	}
 	if b.Resources != nil {
 		if b.Resources.Requests != nil {
-			req.CPUs = b.Resources.Requests.CPU
+			req.Cpus = b.Resources.Requests.CPU
 		} else if b.Resources.Limits != nil {
-			req.CPUs = b.Resources.Limits.CPU
+			req.Cpus = b.Resources.Limits.CPU
 		}
 	}
 	return req

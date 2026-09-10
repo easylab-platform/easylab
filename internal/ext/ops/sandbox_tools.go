@@ -11,6 +11,7 @@ import (
 
 	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
 	"github.com/abcp-sdk/abc-protocol-go/extension"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	workerv1 "github.com/easylab-platform/easylab-proto/worker/v1"
 )
 
@@ -18,11 +19,13 @@ import (
 // SandboxService gateway (single entry). Every command becomes a job; we
 // sync-wait for the terminal output tail.
 func (s *server) runViaGateway(ctx context.Context, cid, command string, timeoutMs int) (jobID string, done JobDone, err error) {
-	execRes, err := s.sdk.Sandbox().Execute(ctx, cid, &workerv1.ExecuteRequest{Command: command})
+	execRes, err := s.sdk.Sandbox.Execute(ctx, connect.NewRequest(&easylabv1.ExecuteRequest{
+		Sandbox: cid, Req: &workerv1.ExecuteRequest{Command: command},
+	}))
 	if err != nil {
 		return "", done, err
 	}
-	jobID = execRes.Msg.JobId
+	jobID = execRes.Msg.GetJobId()
 
 	// Sync-wait: the worker always registers a backgrounded job; JobWait
 	// blocks until completion or timeout (worker caps 60s). Then fold the
@@ -31,7 +34,9 @@ func (s *server) runViaGateway(ctx context.Context, cid, command string, timeout
 	// such so long jobs (sleep/serve) keep their handle for stdin/kill.
 	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
-	wait, err := s.sdk.Sandbox().JobWait(waitCtx, cid, &workerv1.JobWaitRequest{JobId: jobID, TimeoutMs: int32(timeoutMs)})
+	wait, err := s.sdk.Sandbox.JobWait(waitCtx, connect.NewRequest(&easylabv1.JobWaitRequest{
+		Sandbox: cid, Req: &workerv1.JobWaitRequest{JobId: jobID, TimeoutMs: int32(timeoutMs)},
+	}))
 	if err != nil {
 		if !errors.Is(err, waitCtx.Err()) && !errors.Is(err, context.DeadlineExceeded) && connect.CodeOf(err) != connect.CodeDeadlineExceeded && connect.CodeOf(err) != connect.CodeCanceled {
 			return "", done, err
@@ -42,7 +47,9 @@ func (s *server) runViaGateway(ctx context.Context, cid, command string, timeout
 		done.ExitCode = wait.Msg.ExitCode
 	}
 	// Pull the full output tail (stdout+stderr joined) for the tool result.
-	out, oerr := s.sdk.Sandbox().JobOutput(ctx, cid, &workerv1.JobOutputRequest{JobId: jobID, Start: -200, End: 0})
+	out, oerr := s.sdk.Sandbox.JobOutput(ctx, connect.NewRequest(&easylabv1.JobOutputRequest{
+		Sandbox: cid, Req: &workerv1.JobOutputRequest{JobId: jobID, Start: -200, End: 0},
+	}))
 	if oerr == nil && out != nil && out.Msg != nil {
 		done.Stdout = strings.Join(out.Msg.Lines, "\n")
 	}
@@ -57,13 +64,17 @@ func (s *server) backgroundWatch(ctx context.Context, cid, jobID, sid string) {
 	// Poll JobWait in 5s slices; when done, fetch output and mail it.
 	lastErr := error(nil)
 	for {
-		w, err := s.sdk.Sandbox().JobWait(bgCtx, cid, &workerv1.JobWaitRequest{JobId: jobID, TimeoutMs: 5000})
+		w, err := s.sdk.Sandbox.JobWait(bgCtx, connect.NewRequest(&easylabv1.JobWaitRequest{
+			Sandbox: cid, Req: &workerv1.JobWaitRequest{JobId: jobID, TimeoutMs: 5000},
+		}))
 		if err != nil {
 			lastErr = err
 			break
 		}
 		if w.Msg != nil && w.Msg.State != "running" {
-			resp, oerr := s.sdk.Sandbox().JobOutput(bgCtx, cid, &workerv1.JobOutputRequest{JobId: jobID, Start: -200, End: 0})
+			resp, oerr := s.sdk.Sandbox.JobOutput(bgCtx, connect.NewRequest(&easylabv1.JobOutputRequest{
+				Sandbox: cid, Req: &workerv1.JobOutputRequest{JobId: jobID, Start: -200, End: 0},
+			}))
 			lines := []string(nil)
 			if oerr == nil && resp != nil && resp.Msg != nil {
 				lines = resp.Msg.Lines
@@ -225,7 +236,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			jobs, err := s.sdk.Sandbox().ListJobs(ctx, sc.cid)
+			jobs, err := s.sdk.Sandbox.ListJobs(ctx, connect.NewRequest(&easylabv1.ListJobsRequest{Sandbox: sc.cid}))
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-list failed: %v", "sandbox-job-list 失败：%v", err)
 			}
@@ -238,12 +249,15 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			res, err := s.sdk.Sandbox().JobOutput(ctx, sc.cid, &workerv1.JobOutputRequest{
-				JobId:  strArg(args, "job-id"),
-				Start:  int33(args["start"], 0),
-				End:    int33(args["end"], 0),
-				Stream: strArg(args, "stream"),
-			})
+			res, err := s.sdk.Sandbox.JobOutput(ctx, connect.NewRequest(&easylabv1.JobOutputRequest{
+				Sandbox: sc.cid,
+				Req: &workerv1.JobOutputRequest{
+					JobId:  strArg(args, "job-id"),
+					Start:  int33(args["start"], 0),
+					End:    int33(args["end"], 0),
+					Stream: strArg(args, "stream"),
+				},
+			}))
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-output failed: %v", "sandbox-job-output 失败：%v", err)
 			}
@@ -256,10 +270,13 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			res, err := s.sdk.Sandbox().JobWait(ctx, sc.cid, &workerv1.JobWaitRequest{
-				JobId:     strArg(args, "job-id"),
-				TimeoutMs: int33(args["timeout-ms"], 0),
-			})
+			res, err := s.sdk.Sandbox.JobWait(ctx, connect.NewRequest(&easylabv1.JobWaitRequest{
+				Sandbox: sc.cid,
+				Req: &workerv1.JobWaitRequest{
+					JobId:     strArg(args, "job-id"),
+					TimeoutMs: int33(args["timeout-ms"], 0),
+				},
+			}))
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-wait failed: %v", "sandbox-job-wait 失败：%v", err)
 			}
@@ -272,11 +289,14 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			_, err = s.sdk.Sandbox().JobStdin(ctx, sc.cid, &workerv1.JobStdinRequest{
-				JobId: strArg(args, "job-id"),
-				Data:  []byte(strArg(args, "data")),
-				Close: boolArg(args, "close"),
-			})
+			_, err = s.sdk.Sandbox.JobStdin(ctx, connect.NewRequest(&easylabv1.JobStdinRequest{
+				Sandbox: sc.cid,
+				Req: &workerv1.JobStdinRequest{
+					JobId: strArg(args, "job-id"),
+					Data:  []byte(strArg(args, "data")),
+					Close: boolArg(args, "close"),
+				},
+			}))
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-stdin failed: %v", "sandbox-job-stdin 失败：%v", err)
 			}
@@ -289,7 +309,9 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			_, err = s.sdk.Sandbox().JobKill(ctx, sc.cid, &workerv1.JobKillRequest{JobId: strArg(args, "job-id")})
+			_, err = s.sdk.Sandbox.JobKill(ctx, connect.NewRequest(&easylabv1.JobKillRequest{
+				Sandbox: sc.cid, Req: &workerv1.JobKillRequest{JobId: strArg(args, "job-id")},
+			}))
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-kill failed: %v", "sandbox-job-kill 失败：%v", err)
 			}

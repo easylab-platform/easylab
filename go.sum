@@ -70,8 +70,6 @@ github.com/easylab-platform/artifact/system v0.2.0 h1:oRj+EvFKXRM8HFMVot+tdShthp
 github.com/easylab-platform/artifact/system v0.2.0/go.mod h1:2bRT0+YakhsoUfuTKd9tSCAmMr+/97o4omLGU4KkX10=
 github.com/easylab-platform/easylab-proto v0.6.0 h1:cdVVIZ4no0JaEap7Jn2Y5IkwKnTdP0AVmstYKHQA8uU=
 github.com/easylab-platform/easylab-proto v0.6.0/go.mod h1:PcZuLRhnUB6ZQmF1/vC8ip2IVhOArtp86+ZnCJfXHoY=
-github.com/easylab-platform/easylab-sdk-go v0.9.0 h1:kvltaBQcjPROPjkEkSACqAT5zd6Vr6v8FaG7cLSGQyc=
-github.com/easylab-platform/easylab-sdk-go v0.9.0/go.mod h1:0pH1uGgTZOgJZJ+Whnt5FV57KP/uJdMMuettdYCHiqQ=
 github.com/easylab-platform/easyvcs v0.5.1 h1:DVt9ie3mIrUIJuq2edoM3qQ5TAIcdv0FxVrfe5C0lP4=
 github.com/easylab-platform/easyvcs v0.5.1/go.mod h1:jFri6d5KqRGaXz6h0TSHoj3TvamFxkrO+bodzwRhGVo=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=

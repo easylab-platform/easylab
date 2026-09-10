@@ -13,7 +13,7 @@ import (
 	"github.com/abcp-sdk/abc-protocol-go/manifest"
 	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
 
-	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
+	easylabclient "github.com/easylab-platform/easylab/internal/easylabclient"
 )
 
 //go:embed manifest.yaml
@@ -25,7 +25,7 @@ type server struct {
 	store *Store
 	cache *sessCache
 	lab   *easylabClient
-	sdk   *easylabsdk.Client // typed easylab client (search/graph/compare/rebase/tree/revisions)
+	sdk   *easylabclient.Services // typed easylab clients (generated)
 	ag    *agentClient
 	ext   *extension.Extension
 	bus   *natsbus.Bus
@@ -68,7 +68,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	s := &server{base: base, agent: agent}
 	s.lab = newClient(base, token)
-	s.sdk = easylabsdk.New(base, token)
+	s.sdk = easylabclient.New(base, token)
 	s.ag = newAgentClient(agent)
 	s.cache = newSessCache(5 * time.Second)
 
@@ -103,8 +103,8 @@ func Run(ctx context.Context, opts Options) error {
 	ext := extension.New(nbus, m.BuildConfig(manifest.Bindings{
 		Handlers: s.handlers(),
 		Variables: map[string]extension.VariableSpec{
-			"org":      {Resolve: s.resolveOrg},
-			"repo":     {Resolve: s.resolveRepo},
+			"org":    {Resolve: s.resolveOrg},
+			"repo":   {Resolve: s.resolveRepo},
 			"branch": {Resolve: s.resolveBranch},
 		},
 		OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent) error {

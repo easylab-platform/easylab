@@ -7,6 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"connectrpc.com/connect"
+
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 )
 
 // sandboxCtx is the resolved per-call sandbox context: which workspace, which
@@ -100,11 +104,11 @@ func (s *server) invalidateWorkspace(sid string) {
 
 // easylabBranchHead fetches a branch's target commit id from easylab.
 func (s *server) easylabBranchHead(ctx context.Context, org, repo, bm string) (string, error) {
-	branches, err := s.sdk.Branches(ctx, org, repo)
+	branchesRes, err := s.sdk.Lab.Branches(ctx, connect.NewRequest(&easylabv1.BranchesRequest{Org: org, Repo: repo}))
 	if err != nil {
 		return "", fmt.Errorf("easylab branchs %s/%s: %w", org, repo, err)
 	}
-	for _, b := range branches {
+	for _, b := range branchesRes.Msg.GetBranches() {
 		if b.GetName() == bm {
 			return b.GetSha(), nil
 		}

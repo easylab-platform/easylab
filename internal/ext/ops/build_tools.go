@@ -131,13 +131,13 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 	}
 	m["package-search"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-			types, err := s.sdk.ListPackageTypes(ctx)
+			typesRes, err := s.sdk.Registry.ListPackageTypes(ctx, connect.NewRequest(&easylabv1.ListPackageTypesRequest{}))
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "package-search failed: %v", "package-search 失败：%v", err)
 			}
 			proto := strArg(args, "protocol")
 			var lines []string
-			for _, t := range types {
+			for _, t := range typesRes.Msg.GetPackages() {
 				if proto != "" && t.GetType() != proto {
 					continue
 				}
@@ -167,8 +167,10 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 			// CloneRepo RPC is a stub upstream; the supported import path is
 			// EnsureRepo + SetMirror(pull URL) — the gateway's mirror loop
 			// fetches on schedule (EASYVCS_MIRROR_TICK, default 5s).
-			if err := s.sdk.EnsureRepo(ctx, org, repo); err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "create repo failed: %v", "创建仓库失败：%v", err)
+			if _, err := s.sdk.Lab.EnsureRepo(ctx, connect.NewRequest(&easylabv1.EnsureRepoRequest{Org: org, Repo: repo})); err != nil {
+				if connect.CodeOf(err) != connect.CodeAlreadyExists && connect.CodeOf(err) != connect.CodeInvalidArgument {
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "create repo failed: %v", "创建仓库失败：%v", err)
+				}
 			}
 			if _, err := s.sdk.Lab.SetMirror(ctx, connect.NewRequest(&easylabv1.SetMirrorRequest{
 				Org: org, Repo: repo, PullUrl: gitURL,

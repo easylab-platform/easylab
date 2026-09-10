@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"connectrpc.com/connect"
+
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 )
 
@@ -26,7 +28,7 @@ type JobDone struct {
 
 // workerInfo resolves a sandbox's live state via easylab SandboxService.
 func (s *server) workerInfo(ctx context.Context, key string) (ContainerInfo, error) {
-	res, err := s.sdk.Sandbox().GetSandbox(ctx, key)
+	res, err := s.sdk.Sandbox.GetSandbox(ctx, connect.NewRequest(&easylabv1.GetSandboxRequest{Name: key}))
 	if err != nil {
 		return ContainerInfo{}, err
 	}
@@ -46,9 +48,9 @@ func (s *server) workerInfo(ctx context.Context, key string) (ContainerInfo, err
 // skip-if-already-synced logic (compares synced_rev + live boot id against
 // the branch head). ops-extension just names the target and the workspace.
 func (s *server) ensureSynced(ctx context.Context, cid, session string, ws workspace) error {
-	if _, err := s.sdk.Sandbox().SyncWorkspace(ctx, &easylabv1.SyncWorkspaceRequest{
+	if _, err := s.sdk.Sandbox.SyncWorkspace(ctx, connect.NewRequest(&easylabv1.SyncWorkspaceRequest{
 		Sandbox: cid, Org: ws.org, Repo: ws.repo, Rev: ws.rev, Branch: ws.branchOrDefault(),
-	}); err != nil {
+	})); err != nil {
 		// Treat "already synced" (not-found on branch) as success to keep the
 		// hot path idempotent; easylab surfaces real errors otherwise.
 		if strings.Contains(err.Error(), "not found") {
@@ -89,10 +91,10 @@ func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{},
 // SandboxService, associated with this session's workspace (idempotent).
 func (s *server) launchWorkspaceSandbox(ctx context.Context, ws workspace, sid, baseImage string) (ContainerInfo, error) {
 	key := labelKey(sid)
-	res, err := s.sdk.Sandbox().LaunchSandbox(ctx, &easylabv1.LaunchSandboxRequest{
+	res, err := s.sdk.Sandbox.LaunchSandbox(ctx, connect.NewRequest(&easylabv1.LaunchSandboxRequest{
 		Name: key, BaseImage: baseImage,
 		Org: ws.org, Repo: ws.repo, Branch: ws.branchOrDefault(),
-	})
+	}))
 	if err != nil {
 		return ContainerInfo{}, err
 	}
@@ -106,6 +108,6 @@ func (s *server) launchWorkspaceSandbox(ctx context.Context, ws workspace, sid, 
 
 // destroyWorker deletes the sandbox through easylab (container + registry).
 func (s *server) destroyWorker(ctx context.Context, id string) error {
-	_, err := s.sdk.Sandbox().DeleteSandbox(ctx, labelKey(id))
+	_, err := s.sdk.Sandbox.DeleteSandbox(ctx, connect.NewRequest(&easylabv1.DeleteSandboxRequest{Name: labelKey(id)}))
 	return err
 }

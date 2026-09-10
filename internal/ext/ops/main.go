@@ -11,16 +11,16 @@ import (
 	"github.com/abcp-sdk/abc-protocol-go/manifest"
 	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
 
-	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
+	easylabclient "github.com/easylab-platform/easylab/internal/easylabclient"
 )
 
 //go:embed manifest.yaml
 var manifestYaml []byte
 
 type server struct {
-	sdk               *easylabsdk.Client // typed easylab client (lab+ops+registry, owns all k8s access)
-	bus               *natsbus.Bus       // NATS bus (file store / abc)
-	runtimeNamespace  string             // namespace where easylab creates sandboxes/deployments
+	sdk               *easylabclient.Services // typed easylab clients (lab+ops+registry+sandbox+workflow+agent)
+	bus               *natsbus.Bus            // NATS bus (file store / abc)
+	runtimeNamespace  string                  // namespace where easylab creates sandboxes/deployments
 	ext               *extension.Extension
 	artifact          string // artifact registry base URL (packages + OCI + metadata)
 	artifactImageHost string // TLS ingress host for image refs (FROM/push via buildkit)
@@ -84,7 +84,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	s := &server{
-		sdk:               easylabsdk.New(base, easylabToken),
+		sdk:               easylabclient.New(base, easylabToken),
 		artifact:          artifact,
 		artifactImageHost: artifactHost,
 		artifactToken:     artifactToken,

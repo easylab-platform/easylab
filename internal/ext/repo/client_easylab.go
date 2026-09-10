@@ -15,20 +15,20 @@ import (
 	"time"
 
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
-	"github.com/easylab-platform/easylab-sdk-go"
+	easylabclient "github.com/easylab-platform/easylab/internal/easylabclient"
 )
 
 // easylabClient bridges ext/repo onto the easylab lab API.
 //
-// Core repo/branch/blob/commit operations go through the typed
-// easylab-sdk-go (Connect). Branch semantics are gone upstream — they
-// map to branches. A small REST helper is retained only for tool-specific
-// read-only endpoints that have no proto RPC yet (graph / compare / search),
-// so the ext still works end-to-end while the contract grows.
+// Core repo/branch/blob/commit operations go through the generated easylab
+// Connect client. Branch semantics are gone upstream — they map to branches.
+// A small REST helper is retained only for tool-specific read-only endpoints
+// that have no proto RPC yet, so the ext still works end-to-end while the
+// contract grows.
 type easylabClient struct {
 	base  string
 	token string
-	sdk   *easylabsdk.Client
+	svc   *easylabclient.Services
 	hc    *http.Client
 }
 
@@ -39,7 +39,7 @@ func newClient(base, token string) *easylabClient {
 	return &easylabClient{
 		base:  base,
 		token: token,
-		sdk:   easylabsdk.New(base, token),
+		svc:   easylabclient.New(base, token),
 		hc:    &http.Client{Timeout: 30 * time.Second},
 	}
 }
@@ -76,12 +76,12 @@ func (t repoTree) branchExists(org, repo, branch string) bool {
 
 // GetRepoTree lists every org/repo/branch.
 func (c *easylabClient) GetRepoTree(ctx context.Context) (repoTree, error) {
-	repos, err := c.sdk.ListRepos(ctx)
+	res, err := c.svc.Lab.ListRepos(ctx, connect.NewRequest(&easylabv1.ListReposRequest{}))
 	if err != nil {
 		return nil, errDownstream("easylab", err)
 	}
 	tree := repoTree{}
-	for _, r := range repos {
+	for _, r := range res.Msg.GetRepos() {
 		if r.Namespace == "" || r.Name == "" {
 			continue
 		}
@@ -100,12 +100,12 @@ func (c *easylabClient) GetRepoTree(ctx context.Context) (repoTree, error) {
 
 // GetBranchesDetail lists a repo's branches with target revision id.
 func (c *easylabClient) GetBranchesDetail(ctx context.Context, org, repo string) ([]branchInfo, error) {
-	bs, err := c.sdk.Branches(ctx, org, repo)
+	res, err := c.svc.Lab.Branches(ctx, connect.NewRequest(&easylabv1.BranchesRequest{Org: org, Repo: repo}))
 	if err != nil {
 		return nil, err
 	}
-	out := make([]branchInfo, 0, len(bs))
-	for _, b := range bs {
+	out := make([]branchInfo, 0, len(res.Msg.GetBranches()))
+	for _, b := range res.Msg.GetBranches() {
 		out = append(out, branchInfo{Name: b.GetName(), Sha: b.GetSha()})
 	}
 	return out, nil
@@ -113,12 +113,12 @@ func (c *easylabClient) GetBranchesDetail(ctx context.Context, org, repo string)
 
 // GetBranches lists a repo's branch names.
 func (c *easylabClient) GetBranches(ctx context.Context, org, repo string) ([]string, error) {
-	bs, err := c.sdk.Branches(ctx, org, repo)
+	res, err := c.svc.Lab.Branches(ctx, connect.NewRequest(&easylabv1.BranchesRequest{Org: org, Repo: repo}))
 	if err != nil {
 		return nil, errDownstream("easylab", err)
 	}
-	out := make([]string, 0, len(bs))
-	for _, b := range bs {
+	out := make([]string, 0, len(res.Msg.GetBranches()))
+	for _, b := range res.Msg.GetBranches() {
 		if n := b.GetName(); n != "" {
 			out = append(out, n)
 		}
@@ -128,7 +128,11 @@ func (c *easylabClient) GetBranches(ctx context.Context, org, repo string) ([]st
 
 // EnsureRepo creates org/repo (idempotent).
 func (c *easylabClient) EnsureRepo(ctx context.Context, org, repo string) error {
-	return c.sdk.EnsureRepo(ctx, org, repo)
+	_, err := c.svc.Lab.EnsureRepo(ctx, connect.NewRequest(&easylabv1.EnsureRepoRequest{Org: org, Repo: repo}))
+	if err == nil || connect.CodeOf(err) == connect.CodeAlreadyExists || connect.CodeOf(err) == connect.CodeInvalidArgument {
+		return nil
+	}
+	return errDownstream("easylab", err)
 }
 
 // EnsureBranch creates a branch at `src` unless it already exists.
@@ -143,7 +147,13 @@ func (c *easylabClient) EnsureBranch(ctx context.Context, org, repo, src, branch
 	if !tree.repoExists(org, repo) {
 		return errNotFound("repository %s/%s does not exist", org, repo)
 	}
-	return c.sdk.CreateBranch(ctx, org, repo, branch, src)
+	_, err = c.svc.Lab.CreateBranch(ctx, connect.NewRequest(&easylabv1.CreateBranchRequest{
+		Org: org, Repo: repo, Branch: branch, From: src,
+	}))
+	if err != nil && connect.CodeOf(err) != connect.CodeAlreadyExists && connect.CodeOf(err) != connect.CodeInvalidArgument {
+		return errDownstream("easylab", err)
+	}
+	return nil
 }
 
 // DeleteBranch removes the branch if it exists (idempotent).
@@ -155,28 +165,36 @@ func (c *easylabClient) DeleteBranch(ctx context.Context, org, repo, branch stri
 	if !tree.branchExists(org, repo, branch) {
 		return nil
 	}
-	return c.sdk.DeleteBranch(ctx, org, repo, branch)
+	_, err = c.svc.Lab.DeleteBranch(ctx, connect.NewRequest(&easylabv1.DeleteBranchRequest{
+		Org: org, Repo: repo, Branch: branch,
+	}))
+	if err != nil && connect.CodeOf(err) != connect.CodeNotFound {
+		return errDownstream("easylab", err)
+	}
+	return nil
 }
 
 // CanResolve reports whether the rev (branch / sha / revision) resolves.
 func (c *easylabClient) CanResolve(ctx context.Context, org, repo, rev string) (bool, error) {
-	bs, err := c.sdk.Branches(ctx, org, repo)
+	bsRes, err := c.svc.Lab.Branches(ctx, connect.NewRequest(&easylabv1.BranchesRequest{Org: org, Repo: repo}))
 	if err != nil {
-		if easylabsdk.IsNotFound(err) {
+		if connect.CodeOf(err) == connect.CodeNotFound {
 			return false, nil
 		}
 		return false, errDownstream("easylab", err)
 	}
-	for _, b := range bs {
+	for _, b := range bsRes.Msg.GetBranches() {
 		if b.GetName() == rev || b.GetSha() == rev {
 			return true, nil
 		}
 	}
-	revs, err := c.sdk.Revisions(ctx, org, repo, "", 200)
+	revsRes, err := c.svc.Lab.Revisions(ctx, connect.NewRequest(&easylabv1.RevisionsRequest{
+		Org: org, Repo: repo, Limit: 200,
+	}))
 	if err != nil {
 		return false, errDownstream("easylab", err)
 	}
-	for _, r := range revs {
+	for _, r := range revsRes.Msg.GetRevisions() {
 		if r.GetRev() == rev || r.GetSha() == rev {
 			return true, nil
 		}
@@ -189,17 +207,19 @@ func (c *easylabClient) CanResolve(ctx context.Context, org, repo, rev string) (
 // ref's stored target is often a 16-byte revision id, which those APIs reject,
 // so the revision log (CommitId = snapshot hash) is authoritative.
 func (c *easylabClient) GetBranchHead(ctx context.Context, org, repo, branch string) (string, error) {
-	revs, rerr := c.sdk.Revisions(ctx, org, repo, branch, 1)
-	if rerr == nil && len(revs) > 0 {
-		if sha := revs[0].GetSha(); sha != "" {
+	revsRes, rerr := c.svc.Lab.Revisions(ctx, connect.NewRequest(&easylabv1.RevisionsRequest{
+		Org: org, Repo: repo, Ref: branch, Limit: 1,
+	}))
+	if rerr == nil && len(revsRes.Msg.GetRevisions()) > 0 {
+		if sha := revsRes.Msg.GetRevisions()[0].GetSha(); sha != "" {
 			return sha, nil
 		}
 	}
-	bs, err := c.sdk.Branches(ctx, org, repo)
+	bsRes, err := c.svc.Lab.Branches(ctx, connect.NewRequest(&easylabv1.BranchesRequest{Org: org, Repo: repo}))
 	if err != nil {
 		return "", errDownstream("easylab", err)
 	}
-	for _, b := range bs {
+	for _, b := range bsRes.Msg.GetBranches() {
 		if b.GetName() == branch {
 			// Only trust the ref target when it is a full snapshot hash.
 			if sha := b.GetSha(); len(sha) == 64 {
@@ -365,14 +385,20 @@ func errText(v map[string]interface{}) string {
 
 var _ = easylabv1.BranchInfo{}
 
-// Rebase reparents a revision onto new parents via the typed SDK.
+// Rebase reparents a revision onto new parents via the generated client.
 func (c *easylabClient) Rebase(ctx context.Context, org, repo, rev string, newParents []string) (string, string, error) {
-	return c.sdk.Rebase(ctx, org, repo, rev, newParents)
+	res, err := c.svc.Lab.Rebase(ctx, connect.NewRequest(&easylabv1.RebaseRequest{
+		Org: org, Repo: repo, Rev: rev, NewParents: newParents,
+	}))
+	if err != nil {
+		return "", "", errDownstream("easylab", err)
+	}
+	return res.Msg.GetRevisionId(), res.Msg.GetSnapshot(), nil
 }
 
-// Blame returns per-line origin ids via the typed SDK.
+// Blame returns per-line origin ids via the generated client.
 func (c *easylabClient) Blame(ctx context.Context, org, repo, path, ref string) (map[string]interface{}, error) {
-	lines, err := c.sdk.Lab.Blame(ctx, connect.NewRequest(&easylabv1.BlameRequest{Org: org, Repo: repo, Path: path, Ref: ref}))
+	lines, err := c.svc.Lab.Blame(ctx, connect.NewRequest(&easylabv1.BlameRequest{Org: org, Repo: repo, Path: path, Ref: ref}))
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +411,11 @@ func (c *easylabClient) Blame(ctx context.Context, org, repo, path, ref string) 
 	return out, nil
 }
 
-// Diff returns per-file diffs for a change via the typed SDK.
+// Diff returns per-file diffs for a change via the generated client.
 func (c *easylabClient) Diff(ctx context.Context, org, repo, changeID, path string) ([]*easylabv1.DiffFile, error) {
-	return c.sdk.Diff(ctx, org, repo, changeID, path)
+	res, err := c.svc.Lab.Diff(ctx, connect.NewRequest(&easylabv1.DiffRequest{Org: org, Repo: repo, ChangeId: changeID, Path: path}))
+	if err != nil {
+		return nil, errDownstream("easylab", err)
+	}
+	return res.Msg.GetFiles(), nil
 }

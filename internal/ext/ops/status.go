@@ -48,7 +48,13 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		deps = append(deps, map[string]interface{}{"name": "easylab-ops", "ok": true})
 	}
 
-	svcs, _ := s.sdk.ListServices(ctx, "", "", s.runtimeNamespace)
+	svcsRes, _ := s.sdk.Ops.ListServices(ctx, connect.NewRequest(&easylabv1.ListServicesRequest{
+		Namespace: s.runtimeNamespace,
+	}))
+	var svcs []*easylabv1.ServiceInfo
+	if svcsRes != nil {
+		svcs = svcsRes.Msg.GetServices()
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":        true,
 		"version":   version,
@@ -68,13 +74,15 @@ func errStr(err error) string {
 // sandboxesList returns worker pods with their session labels and the repo rev
 // each is synced to.
 func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
-	list, err := s.sdk.ListServices(r.Context(), "", "", s.runtimeNamespace)
+	listRes, err := s.sdk.Ops.ListServices(r.Context(), connect.NewRequest(&easylabv1.ListServicesRequest{
+		Namespace: s.runtimeNamespace,
+	}))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	out := []map[string]interface{}{}
-	for _, svc := range serviceInfoMaps(list) {
+	for _, svc := range serviceInfoMaps(listRes.Msg.GetServices()) {
 		if svc["kind"] == "deployment" {
 			out = append(out, svc)
 		}
@@ -85,13 +93,13 @@ func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
 // deploymentPods returns the pods of one deployment.
 func (s *server) deploymentPods(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	res, err := s.sdk.GetService(r.Context(), name)
+	res, err := s.sdk.Ops.GetService(r.Context(), connect.NewRequest(&easylabv1.GetServiceRequest{Name: name}))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	pods := []map[string]interface{}{}
-	for _, p := range res.GetPods() {
+	for _, p := range res.Msg.GetPods() {
 		pods = append(pods, map[string]interface{}{
 			"name": p.GetName(), "ip": p.GetIp(), "phase": p.GetPhase(),
 			"ready": p.GetReady(), "image": p.GetImage(), "age": p.GetAge(), "restarts": p.GetRestarts(),
@@ -103,12 +111,12 @@ func (s *server) deploymentPods(w http.ResponseWriter, r *http.Request) {
 // deploymentStatus reports the rollout state of one deployment.
 func (s *server) deploymentStatus(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	res, err := s.sdk.GetService(r.Context(), name)
+	res, err := s.sdk.Ops.GetService(r.Context(), connect.NewRequest(&easylabv1.GetServiceRequest{Name: name}))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	st := res.GetService()
+	st := res.Msg.GetService()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"name":     st.GetName(),
 		"kind":     st.GetKind(),
@@ -135,12 +143,12 @@ func (s *server) deploymentRestart(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	// easylab has no dedicated restart RPC; a scale to the current replica
 	// count forces the runner to reconcile the service (best-effort restart).
-	res, err := s.sdk.GetService(r.Context(), name)
+	res, err := s.sdk.Ops.GetService(r.Context(), connect.NewRequest(&easylabv1.GetServiceRequest{Name: name}))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	n := res.GetService().GetReplicas()
+	n := res.Msg.GetService().GetReplicas()
 	if _, err := s.sdk.Ops.ScaleService(r.Context(), connect.NewRequest(&easylabv1.ScaleServiceRequest{Name: name, Replicas: n})); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

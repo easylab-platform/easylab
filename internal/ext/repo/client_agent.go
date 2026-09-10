@@ -126,4 +126,3 @@ func (c *agentClient) DeleteSession(ctx context.Context, name string) error {
 	}
 	return err
 }
-

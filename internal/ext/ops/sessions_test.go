@@ -13,7 +13,7 @@ import (
 
 	"connectrpc.com/connect"
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
-	easylabsdk "github.com/easylab-platform/easylab-sdk-go"
+	easylabclient "github.com/easylab-platform/easylab/internal/easylabclient"
 )
 
 // --- fake easylab Connect server (OpsService Sync + LabService Branches) ---
@@ -66,7 +66,7 @@ func readAll(t *testing.T, r *http.Request) []byte {
 func TestBranchHead(t *testing.T) {
 	lab := newFakeLab(t, nil)
 	defer lab.Close()
-	s := &server{sdk: easylabsdk.New(lab.URL, "devtoken"), wsCache: map[string]wsCacheEntry{}}
+	s := &server{sdk: easylabclient.New(lab.URL, "devtoken"), wsCache: map[string]wsCacheEntry{}}
 
 	rev, err := s.easylabBranchHead(context.Background(), "verify", "exists", "main")
 	if err != nil || rev != "abc123" {
@@ -80,7 +80,7 @@ func TestBranchHead(t *testing.T) {
 func TestResolveWorkspaceSessionName(t *testing.T) {
 	lab := newFakeLab(t, nil)
 	defer lab.Close()
-	s := &server{sdk: easylabsdk.New(lab.URL, "devtoken"), wsCache: map[string]wsCacheEntry{}}
+	s := &server{sdk: easylabclient.New(lab.URL, "devtoken"), wsCache: map[string]wsCacheEntry{}}
 
 	ws, _, err := s.resolveWorkspace(context.Background(), nil, "verify:exists:main")
 	if err != nil {
@@ -116,7 +116,7 @@ func TestEnsureSyncedDelegatesToEasylab(t *testing.T) {
 	fakeLab.Start()
 	defer fakeLab.Close()
 
-	s := &server{sdk: easylabsdk.New(fakeLab.URL, "devtoken"), wsCache: map[string]wsCacheEntry{}}
+	s := &server{sdk: easylabclient.New(fakeLab.URL, "devtoken"), wsCache: map[string]wsCacheEntry{}}
 	ws := workspace{org: "verify", repo: "ws", branch: "main", rev: "rev1"}
 	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestEnsureSyncedPropagatesErrors(t *testing.T) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	defer fakeLab.Close()
-	s := &server{sdk: easylabsdk.New(fakeLab.URL, "devtoken")}
+	s := &server{sdk: easylabclient.New(fakeLab.URL, "devtoken")}
 	ws := workspace{org: "o", repo: "r", branch: "main", rev: "v"}
 	if err := s.ensureSynced(context.Background(), "cid", "o:r:main", ws); err == nil {
 		t.Fatal("easylab error must propagate")
