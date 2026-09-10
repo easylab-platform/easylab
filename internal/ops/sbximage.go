@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
-// WorkerBinPath returns the easyworker binary shipped inside the easylab
+// WorkerBinPath returns the easyworker binary's local path inside the easylab
 // image (override with EASYLAB_WORKER_BIN). It is injected into sandbox base
 // images as the ENTRYPOINT via a cached derived image.
 func WorkerBinPath() string {
@@ -24,6 +25,85 @@ func WorkerBinPath() string {
 		return v
 	}
 	return "/usr/local/lib/easyworker/easyworker-linux-amd64"
+}
+
+// WorkerRef identifies the easyworker build fetched from the artifact registry.
+// EASYLAB_WORKERREF is "name@version" (default easyworker@v0.1.0); the binary
+// gets the same canonical filename on every platform.
+const (
+	defaultWorkerName    = "easyworker"
+	defaultWorkerVersion = "v0.1.0"
+	workerBinFilename    = "easyworker-linux-amd64"
+)
+
+func WorkerRef() (name, version string) {
+	ref := os.Getenv("EASYLAB_WORKER_REF")
+	if ref == "" {
+		return defaultWorkerName, defaultWorkerVersion
+	}
+	if i := stringsIndexByte(ref, '@'); i > 0 {
+		return ref[:i], ref[i+1:]
+	}
+	return ref, defaultWorkerVersion
+}
+
+// loadWorkerBin resolves the easyworker binary. Precedence:
+//  1. EASYLAB_WORKER_BIN (explicit local file)
+//  2. the on-image copy (present in the deployed easylab image)
+//  3. `registry` — fetch from the artifact generic store (EASYLAB_ARTIFACT_URL)
+//
+// The registry path lets a build host with neither the easyworker source tree
+// nor the binary on disk still assemble sandbox images.
+func loadWorkerBin(ctx context.Context) ([]byte, error) {
+	if v := os.Getenv("EASYLAB_WORKER_BIN"); v != "" {
+		return os.ReadFile(v)
+	}
+	if b, err := os.ReadFile(WorkerBinPath()); err == nil {
+		return b, nil
+	}
+	return fetchWorkerBin(ctx)
+}
+
+// fetchWorkerBin downloads <artifactURL>/pkgs/generic/<name>/<version>/<file>.
+func fetchWorkerBin(ctx context.Context) ([]byte, error) {
+	base := os.Getenv("EASYLAB_ARTIFACT_URL")
+	if base == "" {
+		return nil, fmt.Errorf("easyworker binary not found and EASYLAB_ARTIFACT_URL unset")
+	}
+	name, version := WorkerRef()
+	url := fmt.Sprintf("%s/pkgs/generic/%s/%s/%s", trimSlash(base), name, version, workerBinFilename)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if tok := os.Getenv("ARTIFACT_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetch %s: HTTP %d", url, resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+func trimSlash(s string) string {
+	for len(s) > 0 && s[len(s)-1] == '/' {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func stringsIndexByte(s string, b byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == b {
+			return i
+		}
+	}
+	return -1
 }
 
 // SandboxTag derives the deterministic derived-image tag for a base image:
@@ -46,7 +126,7 @@ func SandboxTag(baseImage string, workerBin []byte) string {
 // (scratch/distroless) build too; WORKDIR creates the workspace without a
 // shell.
 func (r *PodmanServiceRunner) EnsureSandboxImage(ctx context.Context, baseImage, workspace string) (string, bool, error) {
-	bin, err := os.ReadFile(WorkerBinPath())
+	bin, err := loadWorkerBin(ctx)
 	if err != nil {
 		return "", false, fmt.Errorf("worker binary: %w", err)
 	}

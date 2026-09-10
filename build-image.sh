@@ -38,8 +38,18 @@ cp "${LAB_DIR}/go.sum" "${CTX}/go.sum"
 cp -r "${LAB_DIR}/cmd" "${CTX}/cmd"
 cp -r "${LAB_DIR}/internal" "${CTX}/internal"
 # easyworker binary injected into sandbox base images (EnsureSandboxImage).
+# Prefer the sibling source tree's freshly built binary; otherwise pull the
+# canonical one from the artifact registry (generic store), so a build host
+# with neither the easyworker repo nor the binary still works.
 mkdir -p "${CTX}/worker-bin"
-cp ../easyworker/dist/easyworker-linux-amd64 "${CTX}/worker-bin/easyworker"
+WORKER_LOCAL="${WORKER_BIN_SRC:-${LAB_DIR}/../easyworker/dist/easyworker-linux-amd64}"
+if [ -f "${WORKER_LOCAL}" ]; then
+  cp "${WORKER_LOCAL}" "${CTX}/worker-bin/easyworker"
+else
+  WORKER_URL="${EASYLAB_ARTIFACT_URL:-http://easylab.temp.svc.cluster.local}/pkgs/generic/${WORKER_NAME:-easyworker}/${WORKER_VERSION:-v0.1.0}/easyworker-linux-amd64"
+  echo "easyworker binary not at ${WORKER_LOCAL}; fetching ${WORKER_URL}"
+  curl -fsSL ${ARTIFACT_TOKEN:+-H "Authorization: Bearer ${ARTIFACT_TOKEN}"} -o "${CTX}/worker-bin/easyworker" "${WORKER_URL}"
+fi
 mkdir -p "${CTX}/easy-lab" && cp "${LAB_DIR}/Dockerfile" "${CTX}/easy-lab/Dockerfile"
 
 echo "Building EasyLab image -> ${DEST} (buildkitd=${BUILDKIT})"
