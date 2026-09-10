@@ -33,7 +33,7 @@ spec:
 
         # ---- abcp agent (session/model/turn engine; h2c on 8000) ----
         - name: agent
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260909125215
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260910025703
           imagePullPolicy: IfNotPresent
           env:
             - name: NATS_URL
@@ -44,6 +44,11 @@ spec:
               value: sqlite:///data/agent.db
             - name: PORT
               value: "8080"
+            # The generic agent ships only `default`; prune the easylab-specific
+            # plan/explore/build presets a previous deploy may have seeded here
+            # so standalone never shows them.
+            - name: PRUNE_PRESETS
+              value: plan,explore,build
           ports:
             - { containerPort: 8080, protocol: TCP }
           resources:

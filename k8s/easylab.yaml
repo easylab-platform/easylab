@@ -133,7 +133,7 @@ spec:
 
         # ---- agent (abc session backend)
         - name: agent
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260909113252
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260910025703
           imagePullPolicy: IfNotPresent
           env:
             - name: NATS_URL
@@ -151,6 +151,13 @@ spec:
             # cleartext HTTP/2 prior-knowledge — the agent must serve h2c.
             - name: HTTP_PROTOCOL
               value: h2c
+            # Host-specific system presets (plan/explore/build), injected at
+            # deploy time. The generic agent only ships `default`; these ship
+            # with easylab and are seeded as immutable presets at boot.
+            - name: SYSTEM_PRESETS_FILE
+              value: /etc/agent-presets/presets.json
+            - name: DEFAULT_PRESET
+              value: build
           ports:
             - containerPort: 8000
               protocol: TCP
@@ -159,6 +166,7 @@ spec:
             requests: { cpu: 100m, memory: 128Mi }
           volumeMounts:
             - { mountPath: /data, name: data, subPath: agent-data }
+            - { mountPath: /etc/agent-presets, name: presets, readOnly: true }
 
       volumes:
         - name: data
@@ -171,6 +179,9 @@ spec:
             type: Directory
         - name: podman-sock
           emptyDir: {}
+        - name: presets
+          configMap:
+            name: easylab-presets
 
 ---
 # In-cluster entrypoint for the abc agent (abcp-sdk/agent): cleartext
