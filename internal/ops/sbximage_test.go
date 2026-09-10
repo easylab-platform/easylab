@@ -14,7 +14,7 @@ import (
 func TestFetchWorkerBin(t *testing.T) {
 	payload := []byte("fake-easyworker-binary")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/pkgs/generic/easyworker/v0.3.0/easyworker-linux-amd64" {
+		if r.URL.Path != "/pkgs/generic/easyworker/v0.4.0/easyworker-linux-amd64" {
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -61,7 +61,7 @@ func TestLoadWorkerBinPrefersLocalFile(t *testing.T) {
 
 func TestWorkerRef(t *testing.T) {
 	t.Setenv("EASYLAB_WORKER_REF", "")
-	if n, v := WorkerRef(); n != "easyworker" || v != "v0.3.0" {
+	if n, v := WorkerRef(); n != "easyworker" || v != "v0.4.0" {
 		t.Fatalf("default ref = %s@%s", n, v)
 	}
 	t.Setenv("EASYLAB_WORKER_REF", "myworker@v2.3.4")
@@ -69,7 +69,7 @@ func TestWorkerRef(t *testing.T) {
 		t.Fatalf("ref = %s@%s", n, v)
 	}
 	t.Setenv("EASYLAB_WORKER_REF", "solo")
-	if n, v := WorkerRef(); n != "solo" || v != "v0.3.0" {
+	if n, v := WorkerRef(); n != "solo" || v != "v0.4.0" {
 		t.Fatalf("ref = %s@%s", n, v)
 	}
 }

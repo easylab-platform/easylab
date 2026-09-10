@@ -23,7 +23,7 @@ spec:
       containers:
         # ---- easylab core (Go) — drives podman sidecar via Docker-compatible API
         - name: easylab
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260910093108
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/easylab:20260910110320
           imagePullPolicy: IfNotPresent
           args: ["-addr", "0.0.0.0:8080"]
           env:
