@@ -44,6 +44,11 @@ spec:
               value: sqlite:///data/agent.db
             - name: PORT
               value: "8080"
+            # Trust the dev cluster CA so provider base URLs on *.nip.io
+            # (self-signed chain) verify — e.g. the easylab gateway used as an
+            # openai-compatible provider for ASR/TTS/image models.
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/ssl/certs/dev-ca.crt
           ports:
             - { containerPort: 8080, protocol: TCP }
           resources:
@@ -51,12 +56,16 @@ spec:
             requests: { cpu: 100m, memory: 128Mi }
           volumeMounts:
             - { mountPath: /data, name: data, subPath: agent-data }
+            - { mountPath: /etc/ssl/certs/dev-ca.crt, name: ca, subPath: ca.crt, readOnly: true }
 
       volumes:
         - name: data
           hostPath:
             path: /home/develop/.easylab/standalone-agent
             type: DirectoryOrCreate
+        - name: ca
+          configMap:
+            name: standalone-agent-ca
 ---
 apiVersion: v1
 kind: Service
