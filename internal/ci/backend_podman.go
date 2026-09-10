@@ -113,22 +113,7 @@ func (b *PodmanBackend) Run(ctx context.Context, job *Job, rn *Runner, onLog fun
 			Containerfile: cf,
 			Dockerfile:    "Dockerfile",
 			Image:         "", // publish does not export an image
-			BuildArgs:     []string{"ARTIFACT_URL=" + b.artifactURL, "ARTIFACT_TOKEN=" + b.artifactToken, "PUBLISH_TS=" + ts()},
-		}
-		// npm refuses to publish without credentials even against an
-		// anonymous registry. The .npmrc key must be the registry URL sans
-		// scheme INCLUDING its path (npm matches the key against the
-		// --registry URL; a host-only key never matches a subpath registry).
-		if job.Produce.Protocol == "npm" && b.artifactURL != "" {
-			host := strings.TrimPrefix(strings.TrimPrefix(b.artifactURL, "https://"), "http://")
-			host = strings.TrimSuffix(host, "/")
-			if strings.HasPrefix(b.artifactURL, "https://") {
-				host = strings.TrimSuffix(host, ":443")
-			} else {
-				host = strings.TrimSuffix(host, ":80")
-			}
-			spec.BuildArgs = append(spec.BuildArgs,
-				"NPMRC_LINE=//"+host+"/pkgs/npm/:_authToken="+b.artifactToken)
+			BuildArgs:     publishBuildArgs(job, b.artifactURL, b.artifactToken),
 		}
 		_, err = b.builder.Build(ctx, spec, func(line string) {
 			if onLog != nil {
@@ -160,6 +145,43 @@ func (b *PodmanBackend) runSteps(ctx context.Context, job *Job, img string, onLo
 		_ = st
 	}
 	return "ok", nil
+}
+
+// publishBuildArgs assembles the --build-arg list for a publish-protocol job:
+// the platform creds plus the produce's NAME/VERSION/FILE, which the explicit-
+// arg templates (maven/go/hex/composer/swift/generic) reference as $NAME etc.
+// Without these the RUN commands expanded to empty and those protocols failed.
+func publishBuildArgs(job *Job, artifactURL, artifactToken string) []string {
+	out := []string{
+		"ARTIFACT_URL=" + artifactURL,
+		"ARTIFACT_TOKEN=" + artifactToken,
+		"PUBLISH_TS=" + ts(),
+	}
+	p := job.Produce
+	if p.Name != "" {
+		out = append(out, "NAME="+p.Name)
+	}
+	if p.Version != "" {
+		out = append(out, "VERSION="+p.Version)
+	}
+	if p.File != "" {
+		out = append(out, "FILE="+p.File)
+	}
+	// npm refuses to publish without credentials even against an anonymous
+	// registry. The .npmrc key must be the registry URL sans scheme INCLUDING
+	// its path (npm matches the key against the --registry URL; a host-only
+	// key never matches a subpath registry).
+	if p.Protocol == "npm" && artifactURL != "" {
+		host := strings.TrimPrefix(strings.TrimPrefix(artifactURL, "https://"), "http://")
+		host = strings.TrimSuffix(host, "/")
+		if strings.HasPrefix(artifactURL, "https://") {
+			host = strings.TrimSuffix(host, ":443")
+		} else {
+			host = strings.TrimSuffix(host, ":80")
+		}
+		out = append(out, "NPMRC_LINE=//"+host+"/pkgs/npm/:_authToken="+artifactToken)
+	}
+	return out
 }
 
 func mapToArgs(p Produce, steps []Step) []string {

@@ -9,6 +9,7 @@ import (
 	agentv1 "github.com/abcp-sdk/agent-proto/agent/v1"
 	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
 	agentsdk "github.com/abcp-sdk/agent-sdk-go"
+	"github.com/easylab-platform/easylab/internal/connectauth"
 )
 
 // agentClient talks to the abc agent session API via the generated Connect
@@ -27,7 +28,7 @@ func newAgentClient(base string) *agentClient {
 		svc: agentsdk.NewAgentServiceClient(
 			agentHTTPClient(),
 			base,
-			connect.WithInterceptors(agentAuthInterceptor(envOr("AGENT_API_KEY", ""))),
+			connect.WithInterceptors(connectauth.Bearer(envOr("AGENT_API_KEY", ""))),
 		),
 	}
 }
@@ -39,18 +40,6 @@ func agentHTTPClient() *http.Client {
 	protocols.SetHTTP1(false)
 	protocols.SetUnencryptedHTTP2(true)
 	return &http.Client{Transport: &http.Transport{Protocols: protocols}}
-}
-
-// agentAuthInterceptor attaches `Authorization: Bearer <token>` when non-empty.
-func agentAuthInterceptor(token string) connect.Interceptor {
-	return connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			if token != "" {
-				req.Header().Set("Authorization", "Bearer "+token)
-			}
-			return next(ctx, req)
-		}
-	})
 }
 
 // EnsureSession creates the session; already-exists is success.

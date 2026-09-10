@@ -7,7 +7,9 @@ import (
 	"connectrpc.com/connect"
 
 	agentv1 "github.com/abcp-sdk/agent-proto/agent/v1"
+
 	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
+	"github.com/easylab-platform/easylab/internal/connectauth"
 )
 
 // connAgent is the easylab-side gateway implementation of the agent.v1
@@ -37,20 +39,9 @@ func newConnAgent(baseURL, token string) *connAgent {
 		client: agentv1connect.NewAgentServiceClient(
 			h2cClient(),
 			baseURL,
-			connect.WithInterceptors(agentAuthInterceptor(token)),
+			connect.WithInterceptors(connectauth.Bearer(token)),
 		),
 	}
-}
-
-func agentAuthInterceptor(token string) connect.Interceptor {
-	return connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			if token != "" {
-				req.Header().Set("Authorization", "Bearer "+token)
-			}
-			return next(ctx, req)
-		}
-	})
 }
 
 var _ agentv1connect.AgentServiceHandler = (*connAgent)(nil)

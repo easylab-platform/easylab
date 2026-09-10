@@ -38,16 +38,36 @@ func h2cTransport() *http.Transport {
 	return &http.Transport{Protocols: protocols}
 }
 
-// bearerInterceptor attaches `Authorization: Bearer <token>` to every request.
+// bearerInterceptor attaches `Authorization: Bearer <token>` to every request,
+// unary AND streaming (server-streaming RPCs like RunJobLog must carry it too;
+// connect.UnaryInterceptorFunc is a no-op for streams).
 func bearerInterceptor(token string) connect.Interceptor {
-	return connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			if token != "" {
-				req.Header().Set("Authorization", "Bearer "+token)
-			}
-			return next(ctx, req)
+	return &authInterceptor{token: token}
+}
+
+type authInterceptor struct{ token string }
+
+func (a *authInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		if a.token != "" {
+			req.Header().Set("Authorization", "Bearer "+a.token)
 		}
-	})
+		return next(ctx, req)
+	}
+}
+
+func (a *authInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		conn := next(ctx, spec)
+		if a.token != "" {
+			conn.RequestHeader().Set("Authorization", "Bearer "+a.token)
+		}
+		return conn
+	}
+}
+
+func (a *authInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return next
 }
 
 func trimSlash(s string) string {

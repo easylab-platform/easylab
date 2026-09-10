@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -29,11 +28,10 @@ import (
 // of the dev (sandbox/service) world: runners with session_bound=true are not
 // part of this pool.
 type connWorkflow struct {
-	s       *server
-	reg     *ci.RunnerRegistry
-	sch     *ci.Scheduler
-	logsMu  sync.Mutex
-	jobLogs map[string][]string // job id -> tail of build output
+	s      *server
+	reg    *ci.RunnerRegistry
+	sch    *ci.Scheduler
+	logHub *ci.JobLogHub
 }
 
 var _ easylabv1connect.WorkflowServiceHandler = (*connWorkflow)(nil)
@@ -52,17 +50,30 @@ func NewWorkflowService(s *server) *connWorkflow {
 	back.SetWorkspaceExporter(func(org, repo, branch, dir string) error {
 		return exportRepoTree(s, org, repo, branch, dir)
 	})
-	c := &connWorkflow{s: s, reg: reg, jobLogs: map[string][]string{}}
+	c := &connWorkflow{s: s, reg: reg, logHub: ci.NewJobLogHub()}
 	c.sch = ci.NewScheduler(reg, back, func(jobID, line string) {
-		c.logsMu.Lock()
-		defer c.logsMu.Unlock()
-		logs := append(c.jobLogs[jobID], line)
-		if len(logs) > 400 {
-			logs = logs[len(logs)-400:]
-		}
-		c.jobLogs[jobID] = logs
+		c.logHub.Log(jobID, line)
 	})
 	return c
+}
+
+// runAsync materializes a run, stores it as pending, executes it in a
+// goroutine, and returns the pending snapshot immediately. The run is
+// queryable via GetRun(id) while it executes; live logs stream via RunJobLog.
+func (c *connWorkflow) runAsync(wf *ci.Workflow) *ci.Run {
+	run := c.sch.NewRun(wf)
+	c.s.runs.Store(run.ID, run)
+	go func() {
+		err := c.sch.Run(context.Background(), wf, run)
+		if err != nil {
+			log.Printf("workflow %s run %s failed: %v", wf.ID, run.ID, err)
+		}
+		// Close the per-job log streams with their terminal states.
+		for _, ji := range run.Snapshot().Jobs {
+			c.logHub.Finish(ji.JobID, string(ji.State))
+		}
+	}()
+	return run
 }
 
 func protoWorkflow(w *ci.Workflow) *easylabv1.Workflow {
@@ -130,12 +141,10 @@ func (c *connWorkflow) TriggerRun(ctx context.Context, req *connect.Request[easy
 		return nil, connect.NewError(connect.CodeNotFound, connect.NewError(connect.CodeNotFound, errWorkflowNotFound()))
 	}
 	w := v.(*ci.Workflow)
-	run, err := c.sch.Schedule(context.Background(), w)
-	if err != nil {
-		log.Printf("workflow %s run failed: %v", w.ID, err)
-	}
-	c.s.runs.Store(run.ID, run)
-	return connect.NewResponse(&easylabv1.TriggerRunResponse{Run: protoRun(run)}), nil
+	// Asynchronous: return the pending run immediately; poll GetRun(id) and
+	// stream RunJobLog for progress.
+	run := c.runAsync(w)
+	return connect.NewResponse(&easylabv1.TriggerRunResponse{Run: protoRun(run.Snapshot())}), nil
 }
 
 func (c *connWorkflow) GetRun(ctx context.Context, req *connect.Request[easylabv1.GetRunRequest]) (*connect.Response[easylabv1.GetRunResponse], error) {
@@ -143,7 +152,7 @@ func (c *connWorkflow) GetRun(ctx context.Context, req *connect.Request[easylabv
 	if !ok {
 		return nil, connect.NewError(connect.CodeNotFound, connect.NewError(connect.CodeNotFound, errRunNotFound()))
 	}
-	return connect.NewResponse(&easylabv1.GetRunResponse{Run: protoRun(v.(*ci.Run))}), nil
+	return connect.NewResponse(&easylabv1.GetRunResponse{Run: protoRun(v.(*ci.Run).Snapshot())}), nil
 }
 
 func (c *connWorkflow) ListRuns(ctx context.Context, req *connect.Request[easylabv1.ListRunsRequest]) (*connect.Response[easylabv1.ListRunsResponse], error) {
@@ -151,23 +160,27 @@ func (c *connWorkflow) ListRuns(ctx context.Context, req *connect.Request[easyla
 	c.s.runs.Range(func(_, v interface{}) bool {
 		r := v.(*ci.Run)
 		if req.Msg.WorkflowId == "" || r.WorkflowID == req.Msg.WorkflowId {
-			runs = append(runs, protoRun(r))
+			runs = append(runs, protoRun(r.Snapshot()))
 		}
 		return true
 	})
 	return connect.NewResponse(&easylabv1.ListRunsResponse{Runs: runs}), nil
 }
 
-// RunJobLog streams a job's log for a run (job id within the run).
+// RunJobLog streams a job's log in real time: it replays the buffered tail,
+// then streams live lines until the job's terminal state event.
 func (c *connWorkflow) RunJobLog(ctx context.Context, req *connect.Request[easylabv1.RunJobLogRequest], stream *connect.ServerStream[easylabv1.RunJobLogResponse]) error {
-	c.logsMu.Lock()
-	logs := append([]string(nil), c.jobLogs[req.Msg.JobId]...)
-	c.logsMu.Unlock()
-	if len(logs) == 0 {
-		return stream.Send(&easylabv1.RunJobLogResponse{Stream: "state", Line: "run " + req.Msg.RunId + " job " + req.Msg.JobId + " complete"})
-	}
-	for _, line := range logs {
-		if err := stream.Send(&easylabv1.RunJobLogResponse{Stream: "build", Line: line}); err != nil {
+	ch, cancel := c.logHub.Subscribe(req.Msg.JobId)
+	defer cancel()
+	for ev := range ch {
+		out := &easylabv1.RunJobLogResponse{Stream: "build", Line: ev.Line}
+		if ev.State != "" {
+			out.Stream = "state"
+			if ev.Line == "" {
+				out.Line = ev.State
+			}
+		}
+		if err := stream.Send(out); err != nil {
 			return err
 		}
 	}
@@ -179,9 +192,7 @@ func (c *connWorkflow) CancelRun(ctx context.Context, req *connect.Request[easyl
 	if !ok {
 		return connect.NewResponse(&easylabv1.CancelRunResponse{Ok: false}), nil
 	}
-	r := v.(*ci.Run)
-	r.State = ci.StateCancelled
-	c.s.runs.Store(r.ID, r)
+	v.(*ci.Run).SetState(ci.StateCancelled)
 	return connect.NewResponse(&easylabv1.CancelRunResponse{Ok: true}), nil
 }
 
@@ -270,7 +281,76 @@ func protoRun(r *ci.Run) *easylabv1.Run {
 	}
 }
 
-// errors as plain connect errors
+// RunWorkflowFile loads .easylab/workflows.yaml from the branch tree and runs
+// the named workflow (or all when name is empty). Asynchronous: each matched
+// workflow is materialized as a pending run (queryable by id) and executed in
+// the background; live logs stream via RunJobLog.
+func (c *connWorkflow) RunWorkflowFile(ctx context.Context, req *connect.Request[easylabv1.RunWorkflowFileRequest]) (*connect.Response[easylabv1.RunWorkflowFileResponse], error) {
+	m := req.Msg
+	if m.Org == "" || m.Repo == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("org and repo required"))
+	}
+	data, err := readRepoFile(c.s, m.Org, m.Repo, m.Branch, ".easylab/workflows.yaml")
+	if err != nil {
+		return connect.NewResponse(&easylabv1.RunWorkflowFileResponse{
+			Error: fmt.Sprintf("read .easylab/workflows.yaml at %s/%s@%s: %v", m.Org, m.Repo, m.Branch, err),
+		}), nil
+	}
+	wfs, missing, err := ci.ParseWorkflowFile(data, m.Name)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	// Apply preset-arg overrides from the request (a file may leave args unset).
+	if len(m.Args) > 0 {
+		for _, wf := range wfs {
+			for i := range wf.Jobs {
+				p := &wf.Jobs[i].Produce
+				if v, ok := m.Args["name"]; ok && p.Name == "" {
+					p.Name = v
+				}
+				if v, ok := m.Args["version"]; ok && p.Version == "" {
+					p.Version = v
+				}
+				if v, ok := m.Args["file"]; ok && p.File == "" {
+					p.File = v
+				}
+			}
+		}
+	}
+	out := &easylabv1.RunWorkflowFileResponse{Skipped: missing}
+	for _, wf := range wfs {
+		// Bind the repo coordinates from the request (the file lives there).
+		wf.Org, wf.Repo, wf.Branch = m.Org, m.Repo, m.Branch
+		if wf.ID == "" {
+			wf.ID = "wf-" + newID()
+		}
+		c.s.workflows.Store(wf.ID, wf)
+		out.Runs = append(out.Runs, protoRun(c.runAsync(wf).Snapshot()))
+	}
+	return connect.NewResponse(out), nil
+}
+
+// readRepoFile reads a file at a ref from the repo tree.
+func readRepoFile(s *server, org, repoName, ref, path string) ([]byte, error) {
+	r, err := s.cs.OpenRepo(store.RepoRef{Namespace: org, Name: repoName})
+	if err != nil {
+		return nil, err
+	}
+	ws := revision.NewWorkspace(r)
+	treeID, err := treeOfRef(ws, r, ref)
+	if err != nil {
+		return nil, err
+	}
+	tree, err := ws.ReadTree(treeID)
+	if err != nil {
+		return nil, err
+	}
+	entry, err := ws.FindEntry(tree, path)
+	if err != nil {
+		return nil, err
+	}
+	return ws.ReadBlob(entry.ID)
+}
 func errWorkflowNotFound() error {
 	return connect.NewError(connect.CodeNotFound, fmt.Errorf("workflow not found"))
 }

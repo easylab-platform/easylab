@@ -461,3 +461,46 @@ tools:
           descriptions:
             zh: 沙箱内的目标路径（相对于工作区根目录）。
       required: [code, path]
+  - name: workflow-run
+    description: "Run a workflow declared in the repo's .easylab/workflows.yaml (manual trigger). Loads the file from the given branch, expands the named preset (or all workflows when name is empty) and runs it asynchronously; returns the run id(s). Use the CI run APIs to poll status and stream logs. Presets: npm-publish, pypi-publish, cargo-publish, ... and container-build."
+    descriptions:
+      zh: "运行仓库 .easylab/workflows.yaml 中声明的 workflow（手动触发）。从指定分支加载文件，展开命名预设（name 为空则运行全部），异步执行并返回 run id。用 CI 运行接口轮询状态、流式查看日志。预设：npm-publish、pypi-publish、cargo-publish 等，以及 container-build。"
+    input_schema:
+      type: object
+      properties:
+        org:
+          type: string
+          description: Target organization.
+          descriptions:
+            zh: 目标组织。
+        repo:
+          type: string
+          description: Target repository.
+          descriptions:
+            zh: 目标仓库。
+        branch:
+          type: string
+          description: Branch whose tree holds .easylab/workflows.yaml.
+          descriptions:
+            zh: 存放 .easylab/workflows.yaml 的分支。
+        name:
+          type: string
+          description: Workflow name to run (empty = all workflows in the file).
+          descriptions:
+            zh: 要运行的 workflow 名称（为空则运行文件内全部）。
+        name_arg:
+          type: string
+          description: Optional preset arg override for NAME (e.g. maven groupId).
+          descriptions:
+            zh: 可选的预设参数 name 覆盖（如 maven groupId）。
+        version_arg:
+          type: string
+          description: Optional preset arg override for VERSION.
+          descriptions:
+            zh: 可选的预设参数 version 覆盖。
+        file_arg:
+          type: string
+          description: Optional preset arg override for FILE (generic).
+          descriptions:
+            zh: 可选的预设参数 file 覆盖（generic 用）。
+      required: [org, repo, branch]

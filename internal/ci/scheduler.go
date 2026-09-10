@@ -74,22 +74,40 @@ func NewScheduler(reg *RunnerRegistry, back Backend, onLog func(jobID, line stri
 	return &Scheduler{reg: reg, back: back, onLog: onLog}
 }
 
-// Schedule materializes and runs jobs of a workflow, respecting needs. It
-// returns the per-job instances and the overall run state.
+// Schedule materializes and runs jobs of a workflow synchronously (kept for
+// tests and any caller that wants the terminal state).
 func (s *Scheduler) Schedule(ctx context.Context, wf *Workflow) (run *Run, err error) {
-	run = &Run{ID: "run-" + newID(), WorkflowID: wf.ID, State: StatePending, StartedAt: time.Now()}
-	// build instances
+	run = s.NewRun(wf)
+	return run, s.Run(ctx, wf, run)
+}
+
+// NewRun materializes the job instances for a workflow and returns a run in
+// StatePending WITHOUT executing anything. Callers that run asynchronously
+// store the run first (so GetRun sees it as pending) and then call Run.
+func (s *Scheduler) NewRun(wf *Workflow) *Run {
+	run := &Run{ID: "run-" + newID(), WorkflowID: wf.ID, State: StatePending, StartedAt: time.Now()}
 	for _, j := range wf.Jobs {
 		run.Jobs = append(run.Jobs, JobInstance{JobID: newID(), DefID: j.ID, State: StatePending})
 	}
+	return run
+}
+
+// Run executes a materialized run (see NewRun) to completion, recording the
+// terminal state on the run. Safe to call in a goroutine.
+func (s *Scheduler) Run(ctx context.Context, wf *Workflow, run *Run) error {
+	run.SetState(StateRunning)
 	if err := s.walk(ctx, wf, run); err != nil {
-		run.State = StateFailure
+		run.SetState(StateFailure)
+		run.mu.Lock()
 		run.FinishedAt = time.Now()
-		return run, err
+		run.mu.Unlock()
+		return err
 	}
-	run.State = StateSuccess
+	run.SetState(StateSuccess)
+	run.mu.Lock()
 	run.FinishedAt = time.Now()
-	return run, nil
+	run.mu.Unlock()
+	return nil
 }
 
 // walk executes jobs in topo order following needs.
@@ -111,29 +129,28 @@ func (s *Scheduler) walk(ctx context.Context, wf *Workflow, run *Run) error {
 				continue
 			}
 			// find instance
-			var inst *JobInstance
-			for i := range run.Jobs {
-				if run.Jobs[i].DefID == j.ID {
-					inst = &run.Jobs[i]
+			var inst JobInstance
+			for _, inst = range run.Jobs {
+				if inst.DefID == j.ID {
 					break
 				}
 			}
 			j.Org, j.Repo, j.Branch = wf.Org, wf.Repo, wf.Branch
-			inst.State = StateRunning
+			run.SetJobState(j.ID, StateRunning, "")
 			res, rerr := s.back.Run(ctx, j, s.pickRunner(j), func(line string) {
 				if s.onLog != nil {
 					s.onLog(inst.JobID, line)
 				}
 			})
 			if rerr != nil || res != "ok" {
-				inst.State = StateFailure
-				inst.Result = res
+				result := res
 				if rerr != nil {
-					inst.Result = rerr.Error()
+					result = rerr.Error()
 				}
-				return fmt.Errorf("job %s failed: %s", j.ID, inst.Result)
+				run.SetJobState(j.ID, StateFailure, result)
+				return fmt.Errorf("job %s failed: %s", j.ID, result)
 			}
-			inst.State = StateSuccess
+			run.SetJobState(j.ID, StateSuccess, "")
 			done[j.ID] = true
 			progress = true
 		}

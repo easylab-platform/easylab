@@ -16,6 +16,7 @@ import (
 	easylabv1connect "github.com/easylab-platform/easylab-proto/easylab/v1/easylabv1connect"
 	workerv1 "github.com/easylab-platform/easylab-proto/worker/v1"
 	"github.com/easylab-platform/easylab-proto/worker/v1/workerv1connect"
+	"github.com/easylab-platform/easylab/internal/connectauth"
 	"github.com/easylab-platform/easylab/internal/ops"
 	"github.com/easylab-platform/easylab/internal/sbxreg"
 )
@@ -79,23 +80,12 @@ func (c *connSandbox) wc(ctx context.Context, sandbox string) (workerv1connect.W
 	}
 	opts := []connect.ClientOption{}
 	if tok := c.workerBearer(sandbox); tok != "" {
-		opts = append(opts, connect.WithInterceptors(bearerClientInterceptor(tok)))
+		opts = append(opts, connect.WithInterceptors(connectauth.Bearer(tok)))
 	}
 	return workerv1connect.NewWorkerServiceClient(
 		&http.Client{Transport: workerTransport, Timeout: 65 * time.Second},
 		base, opts...,
 	), nil
-}
-
-// bearerClientInterceptor attaches `Authorization: Bearer <token>` to outgoing
-// worker RPCs (mirrors the platform-wide auth convention).
-func bearerClientInterceptor(token string) connect.Interceptor {
-	return connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			req.Header().Set("Authorization", "Bearer "+token)
-			return next(ctx, req)
-		}
-	})
 }
 
 // ---- lifecycle ----
@@ -498,7 +488,7 @@ func (c *connSandbox) RegisterExternalSandbox(ctx context.Context, req *connect.
 
 	// Verify the token actually works before persisting.
 	vc := workerv1connect.NewWorkerServiceClient(&http.Client{Transport: workerTransport, Timeout: 10 * time.Second},
-		base, connect.WithInterceptors(bearerClientInterceptor(token)))
+		base, connect.WithInterceptors(connectauth.Bearer(token)))
 	info, err := vc.Info(ctx, connect.NewRequest(&workerv1.InfoRequest{}))
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("verify %s: %w", m.Name, err))
@@ -537,7 +527,7 @@ func (c *connSandbox) ListExternalSandboxes(ctx context.Context, req *connect.Re
 			wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			vc := workerv1connect.NewWorkerServiceClient(
 				&http.Client{Transport: workerTransport, Timeout: 3 * time.Second},
-				strings.TrimSuffix(row.Addr, "/"), connect.WithInterceptors(bearerClientInterceptor(row.Token)))
+				strings.TrimSuffix(row.Addr, "/"), connect.WithInterceptors(connectauth.Bearer(row.Token)))
 			if _, err := vc.Info(wctx, connect.NewRequest(&workerv1.InfoRequest{})); err == nil {
 				es.Reachable = true
 			} else {
@@ -575,7 +565,7 @@ func (c *connSandbox) ReleaseExternalSandbox(ctx context.Context, req *connect.R
 	base := strings.TrimSuffix(row.Addr, "/")
 	rel, err := workerv1connect.NewWorkerEnrollClient(
 		&http.Client{Timeout: 15 * time.Second}, base,
-		connect.WithInterceptors(bearerClientInterceptor(row.Token)),
+		connect.WithInterceptors(connectauth.Bearer(row.Token)),
 	).Unrelease(ctx, connect.NewRequest(&workerv1.EnrollUnreleaseRequest{OwnerId: row.OwnerID}))
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("release worker %s: %w", name, err))

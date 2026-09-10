@@ -7,6 +7,7 @@
 package ci
 
 import (
+	"sync"
 	"time"
 )
 
@@ -119,12 +120,50 @@ type JobInstance struct {
 	Result string
 }
 
-// Run is one instantiation of a Workflow.
+// Run is one instantiation of a Workflow. It is mutated by the scheduler
+// goroutine while readers (GetRun/ListRuns) snapshot it, so all state changes
+// go through the methods below and every read takes Snapshot().
 type Run struct {
+	mu         sync.RWMutex
 	ID         string
 	WorkflowID string
 	State      State
 	Jobs       []JobInstance
 	StartedAt  time.Time
 	FinishedAt time.Time
+}
+
+// Snapshot returns a deep copy safe for concurrent reads.
+func (r *Run) Snapshot() *Run {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	cp := &Run{
+		ID: r.ID, WorkflowID: r.WorkflowID, State: r.State,
+		StartedAt: r.StartedAt, FinishedAt: r.FinishedAt,
+		Jobs: make([]JobInstance, len(r.Jobs)),
+	}
+	copy(cp.Jobs, r.Jobs)
+	return cp
+}
+
+// SetState updates the run state.
+func (r *Run) SetState(s State) {
+	r.mu.Lock()
+	r.State = s
+	r.mu.Unlock()
+}
+
+// SetJobState updates one job instance by def id.
+func (r *Run) SetJobState(defID string, s State, result string) {
+	r.mu.Lock()
+	for i := range r.Jobs {
+		if r.Jobs[i].DefID == defID {
+			r.Jobs[i].State = s
+			if result != "" {
+				r.Jobs[i].Result = result
+			}
+			break
+		}
+	}
+	r.mu.Unlock()
 }

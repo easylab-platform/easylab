@@ -129,6 +129,52 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 			return extension.ToolResultData{Content: content}, nil
 		},
 	}
+	m["workflow-run"] = extension.ToolSpec{
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			org, repo, branch := strArg(args, "org"), strArg(args, "repo"), strArg(args, "branch")
+			if org == "" || repo == "" || branch == "" {
+				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
+				if err != nil {
+					return extension.ToolResultData{}, err
+				}
+				if org == "" {
+					org = ws.org
+				}
+				if repo == "" {
+					repo = ws.repo
+				}
+				if branch == "" {
+					branch = ws.branch
+				}
+			}
+			// Run .easylab/workflows.yaml from the branch tree (async).
+			presetArgs := map[string]string{}
+			for arg, key := range map[string]string{"name_arg": "name", "version_arg": "version", "file_arg": "file"} {
+				if v := strArg(args, arg); v != "" {
+					presetArgs[key] = v
+				}
+			}
+			res, err := s.sdk.Workflow.RunWorkflowFile(ctx, connect.NewRequest(&easylabv1.RunWorkflowFileRequest{
+				Org: org, Repo: repo, Branch: branch,
+				Name: strArg(args, "name"), Args: presetArgs,
+			}))
+			if err != nil {
+				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "workflow-run failed: %v", "workflow-run 失败：%v", err)
+			}
+			if e := res.Msg.GetError(); e != "" {
+				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "workflow-run: %s", "workflow-run：%s", e)
+			}
+			var ids []string
+			for _, r := range res.Msg.GetRuns() {
+				ids = append(ids, r.GetId())
+			}
+			content := fmt.Sprintf("Launched %d run(s) from .easylab/workflows.yaml: %s", len(ids), strings.Join(ids, ", "))
+			if sk := res.Msg.GetSkipped(); len(sk) > 0 {
+				content += fmt.Sprintf(" (skipped: %s)", strings.Join(sk, ", "))
+			}
+			return extension.ToolResultData{Content: content, Data: map[string]interface{}{"run_ids": ids}}, nil
+		},
+	}
 	m["package-search"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 			typesRes, err := s.sdk.Registry.ListPackageTypes(ctx, connect.NewRequest(&easylabv1.ListPackageTypesRequest{}))
