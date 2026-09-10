@@ -515,3 +515,73 @@ func (c *connSandbox) RegisterExternalSandbox(ctx context.Context, req *connect.
 		Ok: true, Token: token,
 	}), nil
 }
+
+// ListExternalSandboxes returns the externally-registered workers (mode =
+// external) with a live reachability probe. Managed sandboxes are excluded.
+func (c *connSandbox) ListExternalSandboxes(ctx context.Context, req *connect.Request[easylabv1.ListExternalSandboxesRequest]) (*connect.Response[easylabv1.ListExternalSandboxesResponse], error) {
+	rows, err := c.s.sbx.List()
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	out := make([]*easylabv1.ExternalSandbox, 0)
+	for _, row := range rows {
+		if row.Mode != "external" {
+			continue
+		}
+		es := &easylabv1.ExternalSandbox{
+			Name: row.Name, Addr: row.Addr, Org: row.Org, Repo: row.Repo,
+			Branch: row.Branch, Owner: row.OwnerID,
+			SyncedRev: row.SyncedRev, SyncedBootId: row.SyncedBootID,
+		}
+		if row.Addr != "" && row.Token != "" {
+			wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			vc := workerv1connect.NewWorkerServiceClient(
+				&http.Client{Transport: workerTransport, Timeout: 3 * time.Second},
+				strings.TrimSuffix(row.Addr, "/"), connect.WithInterceptors(bearerClientInterceptor(row.Token)))
+			if _, err := vc.Info(wctx, connect.NewRequest(&workerv1.InfoRequest{})); err == nil {
+				es.Reachable = true
+			} else {
+				es.Error = err.Error()
+			}
+			cancel()
+		}
+		out = append(out, es)
+	}
+	return connect.NewResponse(&easylabv1.ListExternalSandboxesResponse{Sandboxes: out}), nil
+}
+
+// ReleaseExternalSandbox revokes easylab's token on the worker and returns the
+// worker to the claimable state with a fresh one-time code; easylab drops its
+// registration. A released worker can be claimed by any caller with the code.
+func (c *connSandbox) ReleaseExternalSandbox(ctx context.Context, req *connect.Request[easylabv1.ReleaseExternalSandboxRequest]) (*connect.Response[easylabv1.ReleaseExternalSandboxResponse], error) {
+	name := req.Msg.Name
+	if name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name required"))
+	}
+	row, ok, err := c.s.sbx.Get(name)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if !ok {
+		return connect.NewResponse(&easylabv1.ReleaseExternalSandboxResponse{Ok: false, Error: "unknown sandbox"}), nil
+	}
+	if row.Mode != "external" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("sandbox %s is managed (mode=%q); only external sandboxes can be released", name, row.Mode))
+	}
+	if row.Addr == "" || row.Token == "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sandbox %s has no addr/token", name))
+	}
+	base := strings.TrimSuffix(row.Addr, "/")
+	rel, err := workerv1connect.NewWorkerEnrollClient(
+		&http.Client{Timeout: 15 * time.Second}, base,
+		connect.WithInterceptors(bearerClientInterceptor(row.Token)),
+	).Unrelease(ctx, connect.NewRequest(&workerv1.EnrollUnreleaseRequest{OwnerId: row.OwnerID}))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("release worker %s: %w", name, err))
+	}
+	if err := c.s.sbx.Delete(name); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&easylabv1.ReleaseExternalSandboxResponse{Ok: true, Code: rel.Msg.GetCode()}), nil
+}
