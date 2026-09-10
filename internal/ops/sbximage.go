@@ -32,7 +32,7 @@ func WorkerBinPath() string {
 // gets the same canonical filename on every platform.
 const (
 	defaultWorkerName    = "easyworker"
-	defaultWorkerVersion = "v0.1.0"
+	defaultWorkerVersion = "v0.2.0"
 	workerBinFilename    = "easyworker-linux-amd64"
 )
 

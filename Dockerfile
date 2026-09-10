@@ -68,7 +68,7 @@ ENV EASYVCS_HOME=/data \
     EASYLAB_PODMAN_URI=unix:///run/podman/podman.sock \
     DOCKER_HOST=unix:///run/podman/podman.sock \
     EASYLAB_ARTIFACT_URL=http://127.0.0.1:8080 \
-    EASYLAB_WORKER_REF=easyworker@v0.1.0
+    EASYLAB_WORKER_REF=easyworker@v0.2.0
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/easylab-entrypoint.sh"]
 CMD ["-addr", "0.0.0.0:8080"]

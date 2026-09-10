@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -39,10 +41,16 @@ var workerTransport = &http.Transport{
 	IdleConnTimeout: 90 * time.Second,
 }
 
-// workerAddr resolves the sandbox worker's loopback address (published
-// auto-port). The podman flavor has no routable container IPs — loopback
-// publishing is the reachability model.
+// workerAddr resolves the sandbox worker's base address. External sandboxes
+// carry an explicit Addr; managed sandboxes use the podman-published loopback
+// port (the podman flavor has no routable container IPs — loopback publishing
+// is the reachability model).
 func (c *connSandbox) workerAddr(ctx context.Context, sandbox string) (string, error) {
+	if row, ok, err := c.s.sbx.Get(sandbox); err == nil && ok {
+		if row.Mode == "external" && row.Addr != "" {
+			return row.Addr, nil
+		}
+	}
 	pr := c.s.sandboxRunner()
 	if pr == nil {
 		return "", fmt.Errorf("services backend unavailable")
@@ -51,19 +59,43 @@ func (c *connSandbox) workerAddr(ctx context.Context, sandbox string) (string, e
 	if err != nil {
 		return "", err
 	}
-	return addr, nil
+	return "http://" + addr, nil
 }
 
-// wc resolves the sandbox's worker client (127.0.0.1:<published>).
+// workerBearer returns the sandbox's bearer token (empty when none recorded).
+func (c *connSandbox) workerBearer(sandbox string) string {
+	if row, ok, err := c.s.sbx.Get(sandbox); err == nil && ok {
+		return row.Token
+	}
+	return ""
+}
+
+// wc resolves the sandbox's worker client, bearer-authenticated with the
+// sandbox's recorded token.
 func (c *connSandbox) wc(ctx context.Context, sandbox string) (workerv1connect.WorkerServiceClient, error) {
-	addr, err := c.workerAddr(ctx, sandbox)
+	base, err := c.workerAddr(ctx, sandbox)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("sandbox %q: %v", sandbox, err))
 	}
+	opts := []connect.ClientOption{}
+	if tok := c.workerBearer(sandbox); tok != "" {
+		opts = append(opts, connect.WithInterceptors(bearerClientInterceptor(tok)))
+	}
 	return workerv1connect.NewWorkerServiceClient(
 		&http.Client{Transport: workerTransport, Timeout: 65 * time.Second},
-		"http://"+addr,
+		base, opts...,
 	), nil
+}
+
+// bearerClientInterceptor attaches `Authorization: Bearer <token>` to outgoing
+// worker RPCs (mirrors the platform-wide auth convention).
+func bearerClientInterceptor(token string) connect.Interceptor {
+	return connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			req.Header().Set("Authorization", "Bearer "+token)
+			return next(ctx, req)
+		}
+	})
 }
 
 // ---- lifecycle ----
@@ -104,7 +136,14 @@ func (c *connSandbox) LaunchSandbox(ctx context.Context, req *connect.Request[ea
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("ensure image: %w", err))
 	}
 
-	env := []string{"WORKER_WORKSPACE=" + workspace}
+	// Per-sandbox bearer token: the worker is fail-closed and authenticates
+	// every WorkerService call with it. Injected via runtime env (never baked
+	// into the derived image, so the image cache is shared across sandboxes).
+	token, err := newSandboxToken()
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("mint sandbox token: %w", err))
+	}
+	env := []string{"WORKER_WORKSPACE=" + workspace, "WORKER_TOKEN=" + token}
 	for k, v := range m.Env {
 		env = append(env, k+"="+v)
 	}
@@ -155,6 +194,7 @@ func (c *connSandbox) LaunchSandbox(ctx context.Context, req *connect.Request[ea
 	if err := c.s.sbx.Upsert(sbxreg.Sandbox{
 		Name: m.Name, Org: m.Org, Repo: m.Repo, Branch: m.Branch,
 		BaseImage: m.BaseImage, DerivedImage: tag, Workspace: workspace,
+		Token: token, Mode: "managed",
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("registry: %w", err))
 	}
@@ -411,4 +451,67 @@ func rowToInfo(row sbxreg.Sandbox) *easylabv1.SandboxInfo {
 		BaseImage: row.BaseImage, DerivedImage: row.DerivedImage,
 		Workspace: row.Workspace, SyncedRev: row.SyncedRev, SyncedBootId: row.SyncedBootID,
 	}
+}
+
+// newSandboxToken mints a per-sandbox bearer token (the worker installs it from
+// WORKER_TOKEN and requires it on every WorkerService call).
+func newSandboxToken() (string, error) {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// RegisterExternalSandbox adopts an externally-run worker: it either claims the
+// worker with a one-time enrollment code (exclusive) or accepts a
+// pre-provisioned token. The token + address are persisted so easylab's worker
+// passthroughs keep working across restarts.
+func (c *connSandbox) RegisterExternalSandbox(ctx context.Context, req *connect.Request[easylabv1.RegisterExternalSandboxRequest]) (*connect.Response[easylabv1.RegisterExternalSandboxResponse], error) {
+	m := req.Msg
+	if m.Name == "" || m.Addr == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name and addr required"))
+	}
+	if m.Code == "" && m.Token == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("code or token required"))
+	}
+	base := strings.TrimSuffix(m.Addr, "/")
+
+	token := m.Token
+	if token == "" {
+		whc := &http.Client{Timeout: 15 * time.Second}
+		wres, err := workerv1connect.NewWorkerEnrollClient(whc, base).Claim(ctx,
+			connect.NewRequest(&workerv1.EnrollClaimRequest{Code: m.Code, OwnerId: m.Owner}))
+		if err != nil {
+			code := connect.CodeOf(err)
+			if code == connect.CodeAlreadyExists {
+				return nil, connect.NewError(connect.CodeAlreadyExists,
+					fmt.Errorf("worker %s already claimed by another caller", m.Name))
+			}
+			return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("enroll %s: %w", m.Name, err))
+		}
+		token = wres.Msg.GetToken()
+	}
+	if token == "" {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("worker %s returned no token", m.Name))
+	}
+
+	// Verify the token actually works before persisting.
+	vc := workerv1connect.NewWorkerServiceClient(&http.Client{Transport: workerTransport, Timeout: 10 * time.Second},
+		base, connect.WithInterceptors(bearerClientInterceptor(token)))
+	info, err := vc.Info(ctx, connect.NewRequest(&workerv1.InfoRequest{}))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("verify %s: %w", m.Name, err))
+	}
+
+	if err := c.s.sbx.Upsert(sbxreg.Sandbox{
+		Name: m.Name, Org: m.Org, Repo: m.Repo, Branch: m.Branch,
+		Token: token, Mode: "external", Addr: base, OwnerID: m.Owner,
+		SyncedBootID: info.Msg.GetBootId(),
+	}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("registry: %w", err))
+	}
+	return connect.NewResponse(&easylabv1.RegisterExternalSandboxResponse{
+		Ok: true, Token: token,
+	}), nil
 }

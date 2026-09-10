@@ -25,8 +25,20 @@ type Sandbox struct {
 	Workspace    string // default /workspace ('/tmp' for nonroot bases)
 	SyncedRev    string // rev of the workspace tree last pushed
 	SyncedBootID string // worker boot id at sync time (restart detection)
-	CreatedAtMs  int64  `gorm:"autoCreateTime:milli"`
-	UpdatedAtMs  int64  `gorm:"autoUpdateTime:milli"`
+	// Token is the bearer token easylab uses to authenticate to the worker.
+	// Per-sandbox unique. Managed sandboxes get it injected at launch; external
+	// sandboxes get it from the one-time enrollment claim (or operator-supplied).
+	Token string
+	// Mode is "managed" (easylab launched it) or "external" (registered by an
+	// operator; no podman container easylab owns).
+	Mode string
+	// Addr is the worker base URL for external sandboxes (managed sandboxes
+	// resolve their loopback address from the podman-published port instead).
+	Addr string
+	// OwnerID is the caller identity that claimed an external sandbox (audit).
+	OwnerID     string
+	CreatedAtMs int64 `gorm:"autoCreateTime:milli"`
+	UpdatedAtMs int64 `gorm:"autoUpdateTime:milli"`
 }
 
 // Registry is the table handle.
@@ -66,11 +78,24 @@ func (r *Registry) Upsert(s Sandbox) error {
 			if s.SyncedBootID == "" {
 				s.SyncedBootID = old.SyncedBootID
 			}
+			if s.Token == "" {
+				s.Token = old.Token
+			}
+			if s.Mode == "" {
+				s.Mode = old.Mode
+			}
+			if s.Addr == "" {
+				s.Addr = old.Addr
+			}
+			if s.OwnerID == "" {
+				s.OwnerID = old.OwnerID
+			}
 			return tx.Model(&Sandbox{}).Where("name = ?", s.Name).Updates(map[string]interface{}{
 				"org": s.Org, "repo": s.Repo, "branch": s.Branch,
 				"base_image": s.BaseImage, "derived_image": s.DerivedImage,
 				"workspace": s.Workspace, "synced_rev": s.SyncedRev,
-				"synced_boot_id": s.SyncedBootID,
+				"synced_boot_id": s.SyncedBootID, "token": s.Token,
+				"mode": s.Mode, "addr": s.Addr, "owner_id": s.OwnerID,
 				"updated_at_ms": time.Now().UnixMilli(),
 			}).Error
 		}

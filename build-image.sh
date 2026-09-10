@@ -46,7 +46,7 @@ WORKER_LOCAL="${WORKER_BIN_SRC:-${LAB_DIR}/../easyworker/dist/easyworker-linux-a
 if [ -f "${WORKER_LOCAL}" ]; then
   cp "${WORKER_LOCAL}" "${CTX}/worker-bin/easyworker"
 else
-  WORKER_URL="${EASYLAB_ARTIFACT_URL:-http://easylab.temp.svc.cluster.local}/pkgs/generic/${WORKER_NAME:-easyworker}/${WORKER_VERSION:-v0.1.0}/easyworker-linux-amd64"
+  WORKER_URL="${EASYLAB_ARTIFACT_URL:-http://easylab.temp.svc.cluster.local}/pkgs/generic/${WORKER_NAME:-easyworker}/${WORKER_VERSION:-v0.2.0}/easyworker-linux-amd64"
   echo "easyworker binary not at ${WORKER_LOCAL}; fetching ${WORKER_URL}"
   curl -fsSL ${ARTIFACT_TOKEN:+-H "Authorization: Bearer ${ARTIFACT_TOKEN}"} -o "${CTX}/worker-bin/easyworker" "${WORKER_URL}"
 fi
