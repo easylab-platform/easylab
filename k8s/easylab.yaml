@@ -133,7 +133,7 @@ spec:
 
         # ---- agent (abc session backend)
         - name: agent
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260910025703
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260910032827
           imagePullPolicy: IfNotPresent
           env:
             - name: NATS_URL
