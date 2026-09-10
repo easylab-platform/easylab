@@ -109,9 +109,8 @@ func main() {
 	// Start the background mirror scheduler (push on-change, pull on-interval).
 	go s.runMirrorLoop(context.Background())
 
-	// Agent tool extensions (ops + repo) run in-process (single binary): NATS
-	// tool face re-exported by the gateway via easylab-sdk-go on loopback.
-	// Set EASYLAB_EXT_CONTAINERS=1 to use the legacy container launch.
+	// Agent tool extensions (ops + repo) run in-process (single binary): the
+	// NATS tool face talks to the gateway over loopback (internal/easylabclient).
 	go embedExtensions(context.Background())
 
 	mux := s.router()

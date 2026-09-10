@@ -14,7 +14,7 @@ import (
 // embedExtensions runs the ops + repo agent-tool extensions in-process (single
 // binary) instead of launching separate containers. Both connect to NATS
 // (the shared in-pod broker on loopback — all containers share the pod
-// netns) and forward tool calls to the easylab gateway via easylab-sdk-go.
+// netns) and forward tool calls to the easylab gateway via internal/easylabclient.
 // They block until ctx is cancelled; failures are logged, not fatal.
 func embedExtensions(ctx context.Context) {
 	natsURL := os.Getenv("EASYLAB_EXT_NATS_URL")
