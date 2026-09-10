@@ -33,7 +33,7 @@ spec:
 
         # ---- abcp agent (session/model/turn engine; h2c on 8000) ----
         - name: agent
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260910121102
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260910130556
           imagePullPolicy: IfNotPresent
           env:
             - name: NATS_URL
