@@ -10,8 +10,8 @@ github.com/abcp-sdk/abc-protocol-go v1.1.1 h1:u3HDakyNMwPXEPfyU0LWneikXa1o4YvBrB
 github.com/abcp-sdk/abc-protocol-go v1.1.1/go.mod h1:Pj40eYsDYx1n8Gf2BiQU7Rf9IESUggv4JIaXJf9u01o=
 github.com/abcp-sdk/agent-proto v0.5.2 h1:XsIr342U/nHnjRSASkvoLrN9uQbWuq4lnLOnwYwI1Jc=
 github.com/abcp-sdk/agent-proto v0.5.2/go.mod h1:drrTDKXOWLDIc1xXIpuuOZxEeUKjvRgZ46Whdu6vZjk=
-github.com/abcp-sdk/agent-sdk-go v0.6.0 h1:im5JyAMDVuR9wK0npo6rYTDYm26ANxmJ9jb8VbjlpLM=
-github.com/abcp-sdk/agent-sdk-go v0.6.0/go.mod h1:/G/KvEVvuRbd9lQIn2BeN4FBfFGfchC1ewtydtuBIqA=
+github.com/abcp-sdk/agent-sdk-go v0.7.0 h1:h930QZtfQPo4ZnbqpVxXG6XdEtuc3W+gVIlO6LLReBw=
+github.com/abcp-sdk/agent-sdk-go v0.7.0/go.mod h1:/G/KvEVvuRbd9lQIn2BeN4FBfFGfchC1ewtydtuBIqA=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=
 github.com/cenkalti/backoff/v5 v5.0.3/go.mod h1:rkhZdG3JZukswDf7f0cwqPNk4K0sa+F97BxZthm/crw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=

@@ -2,6 +2,7 @@ package repoext
 
 import (
 	"context"
+	"net/http"
 
 	"connectrpc.com/connect"
 
@@ -21,15 +22,35 @@ type agentClient struct {
 }
 
 func newAgentClient(base string) *agentClient {
-	hc := agentsdk.NewHTTPClient()
 	return &agentClient{
 		base: base,
 		svc: agentsdk.NewAgentServiceClient(
-			hc,
+			agentHTTPClient(),
 			base,
-			connect.WithInterceptors(agentsdk.AuthInterceptor(envOr("AGENT_API_KEY", ""))),
+			connect.WithInterceptors(agentAuthInterceptor(envOr("AGENT_API_KEY", ""))),
 		),
 	}
+}
+
+// agentHTTPClient is the cleartext-HTTP/2 (prior knowledge) client matching the
+// agent's HTTP/2-only listener. The consumer owns the transport.
+func agentHTTPClient() *http.Client {
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(false)
+	protocols.SetUnencryptedHTTP2(true)
+	return &http.Client{Transport: &http.Transport{Protocols: protocols}}
+}
+
+// agentAuthInterceptor attaches `Authorization: Bearer <token>` when non-empty.
+func agentAuthInterceptor(token string) connect.Interceptor {
+	return connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			if token != "" {
+				req.Header().Set("Authorization", "Bearer "+token)
+			}
+			return next(ctx, req)
+		}
+	})
 }
 
 // EnsureSession creates the session; already-exists is success.
