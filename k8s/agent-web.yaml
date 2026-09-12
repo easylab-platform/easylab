@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent-web:20260912063037
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent-web:20260912111154
           imagePullPolicy: IfNotPresent
           ports:
             - { containerPort: 8080, protocol: TCP }
