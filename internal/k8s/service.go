@@ -6,23 +6,21 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-// ServiceSpec describes a deployment-backed service.
+// ServiceSpec describes a deployment-backed service. Services are always
+// Linux: they run a user image as a long-lived Deployment (no worker, no
+// VM/profile support).
 type ServiceSpec struct {
-	Name         string
-	Image        string
-	Command      []string
-	Env          []corev1.EnvVar
-	Ports        map[int32]int32 // containerPort -> servicePort
-	Replicas     int32
-	Labels       map[string]string
-	DeviceLimits map[string]string
-	NodeSelector map[string]string
-	NeedsTun     bool
+	Name     string
+	Image    string
+	Command  []string
+	Env      []corev1.EnvVar
+	Ports    map[int32]int32 // containerPort -> servicePort
+	Replicas int32
+	Labels   map[string]string
 }
 
 // LaunchService creates/updates a Deployment + Service.
@@ -42,24 +40,9 @@ func (c *Client) LaunchService(ctx context.Context, s ServiceSpec) (SandboxStatu
 	if len(s.Command) > 0 {
 		container.Command = s.Command
 	}
-	if len(s.DeviceLimits) > 0 {
-		lim := corev1.ResourceList{}
-		for k, v := range s.DeviceLimits {
-			lim[corev1.ResourceName(k)] = resource.MustParse(v)
-		}
-		container.Resources.Limits = lim
-	}
 	for cp := range s.Ports {
 		container.Ports = append(container.Ports, corev1.ContainerPort{ContainerPort: cp})
 	}
-	var vols []corev1.Volume
-	var mounts []corev1.VolumeMount
-	if s.NeedsTun {
-		vols = append(vols, corev1.Volume{Name: "devtun", VolumeSource: corev1.VolumeSource{
-			HostPath: &corev1.HostPathVolumeSource{Path: "/dev/net/tun", Type: hpPtr(corev1.HostPathCharDev)}}})
-		mounts = append(mounts, corev1.VolumeMount{Name: "devtun", MountPath: "/dev/net/tun"})
-	}
-	container.VolumeMounts = mounts
 
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: s.Name, Namespace: c.namespace, Labels: labels},
@@ -69,9 +52,7 @@ func (c *Client) LaunchService(ctx context.Context, s ServiceSpec) (SandboxStatu
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					NodeSelector: s.NodeSelector,
-					Volumes:      vols,
-					Containers:   []corev1.Container{container},
+					Containers: []corev1.Container{container},
 				},
 			},
 		},

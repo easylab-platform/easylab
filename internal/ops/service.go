@@ -14,13 +14,11 @@ func envOr(k, def string) string {
 	return def
 }
 
-// ServiceRequest declares a service to launch as a podman container running
-// INSIDE the EasyLab container (the fully self-contained "internal podman"
-// backend). Every service gets its own podman network (bridge + embedded DNS);
-// services sharing a Group/Network resolve each other by name
-// (`http://<svc>:<port>`), and ports are published on the EasyLab loopback so a
-// reverse proxy can reach them. Real cgroup resource limits are applied via
-// --cpus/--memory; the pod must mount /sys/fs/cgroup read-write (privileged).
+// ServiceRequest declares a long-lived service, deployed on Kubernetes as a
+// Deployment + Service in the runtime namespace. Services are always Linux
+// containers running the caller's own image: no worker is injected and no VM
+// runtime is supported (see the sandbox/CI job paths for that). Ports are
+// exposed through the Service; replicas back the Deployment.
 type ServiceRequest struct {
 	// Name is the container/network name (must be unique), e.g. "api".
 	Name string `json:"name"`

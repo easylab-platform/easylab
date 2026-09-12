@@ -20,7 +20,7 @@ registry:
 gateway:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
-    tag: "20260912153837"
+    tag: "20260912161741"
     pullPolicy: IfNotPresent
   # External base URL advertised to clients (OCI /token realm, git, ...).
   # Empty derives it from the install namespace: the in-cluster Service URL
