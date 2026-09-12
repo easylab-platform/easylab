@@ -16,7 +16,9 @@ import (
 // (the shared in-pod broker on loopback — all containers share the pod
 // netns) and forward tool calls to the easylab gateway via internal/easylabclient.
 // They block until ctx is cancelled; failures are logged, not fatal.
-func embedExtensions(ctx context.Context) {
+// registryHost is the resolved OCI registry host used to qualify pushed image
+// refs (portable: derived from the namespace unless overridden).
+func embedExtensions(ctx context.Context, registryHost string) {
 	natsURL := os.Getenv("EASYLAB_EXT_NATS_URL")
 	if natsURL == "" {
 		natsURL = "nats://127.0.0.1:4222"
@@ -40,7 +42,7 @@ func embedExtensions(ctx context.Context) {
 			NATSURL:       natsURL,
 			Token:         token,
 			ArtifactURL:   base, // gateway serves /v2 + /pkgs itself (loopback)
-			ArtifactHost:  os.Getenv("EASYLAB_REGISTRY_HOST"),
+			ArtifactHost:  registryHost,
 			ArtifactToken: token,
 		}); err != nil {
 			log.Error("embedded ops-extension stopped", "err", err)

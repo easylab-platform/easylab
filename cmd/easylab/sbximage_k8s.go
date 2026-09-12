@@ -65,21 +65,37 @@ ENTRYPOINT ["/usr/local/bin/easyworker"]
 }
 
 // sandboxRegistryRef returns the fully-qualified derived sandbox image ref.
-// The host is the TLS ingress name the node already trusts, so kubelet pulls
-// the derived image anonymously over HTTPS without any cluster registry
-// configuration or pull secret.
+// The host comes from the k8s client's registry host (in-cluster Service DNS
+// by default, or EASYLAB_REGISTRY_HOST), so it is portable across clusters.
 func (s *server) sandboxRegistryRef(short string) string {
-	host := envOrStr("EASYLAB_REGISTRY_HOST", "easylab.temp.10.199.64.20.nip.io")
+	host := s.registryHost()
 	return host + "/easylab/sandbox:" + short
+}
+
+// registryHost resolves the registry host: an explicit EASYLAB_REGISTRY_HOST
+// wins, then the k8s client's configured host, then the namespace-derived
+// in-cluster Service DNS.
+func (s *server) registryHost() string {
+	if v := os.Getenv("EASYLAB_REGISTRY_HOST"); v != "" {
+		return v
+	}
+	if s.k8s != nil && s.k8s.RegistryHost() != "" {
+		return s.k8s.RegistryHost()
+	}
+	ns := envOrStr("EASYLAB_NAMESPACE", "temp")
+	return fmt.Sprintf("easylab.%s.svc.cluster.local:80", ns)
 }
 
 // imageExists reports whether the registry already has the image tag
 // (best effort: a missing repo/tag is a 404; any other failure rebuilds). The
-// probe uses the in-cluster service URL (always reachable from the pod), while
-// the returned image ref uses the node-facing TLS host.
+// probe uses the in-cluster artifact URL (always reachable from the pod).
 func (s *server) imageExists(ctx context.Context, ref string) bool {
 	_, repo, tag := splitRef(ref)
-	base := envOrStr("EASYLAB_ARTIFACT_URL", "http://easylab.temp.svc.cluster.local:80")
+	base := os.Getenv("EASYLAB_ARTIFACT_URL")
+	if base == "" {
+		ns := envOrStr("EASYLAB_NAMESPACE", "temp")
+		base = fmt.Sprintf("http://easylab.%s.svc.cluster.local:80", ns)
+	}
 	u := strings.TrimSuffix(base, "/") + "/v2/" + repo + "/manifests/" + tag
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, u, nil)
 	if err != nil {

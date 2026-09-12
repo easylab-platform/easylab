@@ -56,3 +56,23 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "easylab.%s.svc.cluster.local:80" (include "easylab.namespace" .) -}}
 {{- end -}}
 {{- end -}}
+
+{{/* External base URL advertised to clients; defaults to the in-cluster
+   Service URL (http://easylab.<ns>.svc.cluster.local). */}}
+{{- define "easylab.selfBase" -}}
+{{- if .Values.gateway.selfBase -}}
+{{- .Values.gateway.selfBase -}}
+{{- else -}}
+{{- printf "http://easylab.%s.svc.cluster.local" (include "easylab.namespace" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Artifact (OCI + /pkgs) base URL used by builds; defaults to the gateway
+   Service over plain HTTP. */}}
+{{- define "easylab.artifactURL" -}}
+{{- if .Values.gateway.artifactURL -}}
+{{- .Values.gateway.artifactURL -}}
+{{- else -}}
+{{- printf "http://easylab.%s.svc.cluster.local:80" (include "easylab.namespace" .) -}}
+{{- end -}}
+{{- end -}}

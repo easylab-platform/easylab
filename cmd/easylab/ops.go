@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/easylab-platform/easylab/internal/k8s"
@@ -19,17 +17,6 @@ type opsState struct {
 	builders   *ops.TaskRegistry
 	namespaces *ops.NamespaceRegistry
 	services   ops.ServiceRunner
-}
-
-// registryHost returns the internal registry host the podman sidecar should
-// build/push against. Defaults to the loopback /v2 (the same pod serves it);
-// override with EASYVCS_REGISTRY (e.g. a service DNS name when EasyLab is a
-// multi-pod deployment).
-func registryHost() string {
-	if v := os.Getenv("EASYVCS_REGISTRY"); v != "" {
-		return v
-	}
-	return "127.0.0.1:8080"
 }
 
 // newOpsState wires the /ops substrate: image builds + container services now

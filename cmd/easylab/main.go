@@ -109,11 +109,22 @@ func main() {
 	}
 	// Kubernetes execution backend (sandboxes, CI jobs, services, builds).
 	// Absent in dev/off-cluster; handlers degrade to Unimplemented.
+	ns := envOrStr("EASYLAB_NAMESPACE", "temp")
+	// Self base URL advertised to clients (OCI /token realm, git, packages).
+	// Default to the in-cluster Service URL derived from the namespace so it is
+	// portable; set EASYVCS_SELF_BASE (or -self-base) for external access.
+	if *selfBase == "" {
+		*selfBase = fmt.Sprintf("http://easylab.%s.svc.cluster.local", ns)
+	}
+	// Registry host defaults to the in-cluster Service DNS of this deployment,
+	// derived from the namespace so it is portable across clusters/domains.
+	// Override with EASYLAB_REGISTRY_HOST (e.g. an external TLS ingress).
+	registryHost := envOrStr("EASYLAB_REGISTRY_HOST", fmt.Sprintf("easylab.%s.svc.cluster.local:80", ns))
 	var sK8s *k8s.Client
 	if kc, kerr := k8s.New(k8s.Config{
-		Namespace:     envOrStr("EASYLAB_NAMESPACE", "temp"),
+		Namespace:     ns,
 		BuildkitImage: envOrStr("EASYLAB_BUILDKIT_IMAGE", "moby/buildkit:rootless"),
-		RegistryHost:  envOrStr("EASYLAB_REGISTRY_HOST", "easylab.temp.10.199.64.20.nip.io"),
+		RegistryHost:  registryHost,
 		RegistryToken: envOrStr("EASYVCS_TOKEN", "devtoken"),
 		Proxy:         envOrStr("EASYLAB_UPSTREAM_PROXY", ""),
 	}); kerr == nil {
@@ -129,7 +140,7 @@ func main() {
 
 	// Agent tool extensions (ops + repo) run in-process (single binary): the
 	// NATS tool face talks to the gateway over loopback (internal/easylabclient).
-	go embedExtensions(context.Background())
+	go embedExtensions(context.Background(), registryHost)
 
 	mux := s.router()
 	_ = mux

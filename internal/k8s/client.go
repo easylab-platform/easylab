@@ -26,8 +26,11 @@ type Client struct {
 	// buildkitImage is the official rootless buildkit image used for ephemeral
 	// build pods.
 	buildkitImage string
-	// registryHost is the in-cluster registry host buildkit pushes to and
-	// workers pull from (e.g. easylab.temp.svc.cluster.local:80).
+	// registryHost is the registry host builds push to and workers pull from.
+	// Defaults to the in-cluster Service DNS (easylab.<ns>.svc.cluster.local:80)
+	// and can be overridden with EASYLAB_REGISTRY_HOST (e.g. an external
+	// ingress). Using Service DNS keeps the deployment portable across
+	// clusters/hosts (no ingress IP/domain hardcoded).
 	registryHost string
 	// registryToken authenticates pushes to the easylab OCI registry.
 	registryToken string

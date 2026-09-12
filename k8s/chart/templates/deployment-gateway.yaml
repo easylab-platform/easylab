@@ -31,7 +31,7 @@ spec:
             # External URL advertised to clients (OCI /token realm, protocol
             # registries, self_base) — must be resolvable, never loopback.
             - name: EASYVCS_SELF_BASE
-              value: {{ .Values.gateway.selfBase | quote }}
+              value: {{ include "easylab.selfBase" . | quote }}
             - name: EASYVCS_REGISTRY
               value: {{ include "easylab.registryHost" . | quote }}
             # Embedded tool extensions reach the split-out nats/agent over
@@ -45,7 +45,7 @@ spec:
             - name: EASYVCS_TOKEN
               value: {{ .Values.gateway.token | quote }}
             - name: EASYLAB_ARTIFACT_URL
-              value: {{ .Values.gateway.artifactURL | quote }}
+              value: {{ include "easylab.artifactURL" . | quote }}
             - name: ARTIFACT_TOKEN
               value: {{ .Values.gateway.token | quote }}
             # ---- Kubernetes execution backend ----

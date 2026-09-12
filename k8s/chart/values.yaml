@@ -8,24 +8,31 @@ namespaceOverride: ""
 
 nameOverride: ""
 
-# OCI registry host (no scheme) that easylab serves. Builds push here and
-# nodes/workers pull derived images from here. It is the TLS ingress name the
-# node already trusts (same wildcard cert as the rest of the cluster), so pulls
-# are anonymous over HTTPS with no cluster registry config or pull secret.
+# OCI registry host (no scheme) that easylab serves: where builds push and
+# nodes/workers pull derived images from. Leave empty to derive it from the
+# install namespace (easylab.<ns>.svc.cluster.local:80), the portable default
+# for the in-cluster Service approach. Set an external host only if the
+# deployment exposes the registry on an ingress.
 registry:
-  host: easylab.temp.10.199.64.20.nip.io
+  host: ""
 
 # ---- gateway (easylab Go binary) ----
 gateway:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
-    tag: "20260912103228"
+    tag: "20260912113831"
     pullPolicy: IfNotPresent
   # External base URL advertised to clients (OCI /token realm, git, ...).
-  # Port MUST match the gateway Service port (clients reach it there).
-  selfBase: http://easylab.temp.svc.cluster.local
+  # Empty derives it from the install namespace: the in-cluster Service URL
+  # http://easylab.<ns>.svc.cluster.local (port 80). Set an external URL only
+  # when clients outside the cluster must reach the gateway.
+  selfBase: ""
   token: devtoken
-  artifactURL: http://easylab.temp.svc.cluster.local:80
+  # Artifact (OCI + /pkgs) base URL used by builds. Empty derives
+  # http://easylab.<ns>.svc.cluster.local:80.
+  artifactURL: ""
+  # Upstream HTTP(S) proxy for build pods reaching public registries. This is
+  # environment-specific; empty disables it (clusters with direct egress).
   upstreamProxy: http://mihomo.develop.svc.cluster.local:7890
   enforceH2: "0"
   resources:
