@@ -14,13 +14,19 @@ import (
 	"github.com/easylab-platform/easylab/internal/k8s"
 )
 
-// ensureSandboxImage makes sure a derived sandbox image (base + injected
-// worker) exists in easylab's OCI registry, building it with an ephemeral
-// buildkit pod when missing. Returns (imageRef, built). The derived tag is
-// deterministic over (base, worker binary) so it is built once per pair.
-func (s *server) ensureSandboxImage(ctx context.Context, baseImage, workspace string) (string, bool, error) {
+// ensureSandboxImage resolves the image for a sandbox runtime. For a derived
+// profile (linux) it builds base+worker and pushes to easylab's registry; for
+// a VM profile (windows/macos) the profile's prebuilt image is returned as-is.
+// Returns (imageRef, built).
+func (s *server) ensureSandboxImage(ctx context.Context, profile k8s.RuntimeProfile, baseImage, workspace string) (string, bool, error) {
 	if s.k8s == nil {
 		return "", false, fmt.Errorf("k8s backend unavailable")
+	}
+	if !profile.Derived {
+		if profile.Image == "" {
+			return "", false, fmt.Errorf("runtime %q has no image configured", profile.Name)
+		}
+		return profile.Image, false, nil
 	}
 	bin, err := os.ReadFile(workerBinPath())
 	if err != nil {

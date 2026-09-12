@@ -23,6 +23,7 @@ type Sandbox struct {
 	BaseImage    string
 	DerivedImage string
 	Workspace    string // default /workspace ('/tmp' for nonroot bases)
+	Runtime      string // execution profile: linux (default) / windows / macos
 	SyncedRev    string // rev of the workspace tree last pushed
 	SyncedBootID string // worker boot id at sync time (restart detection)
 	// Token is the bearer token easylab uses to authenticate to the worker.
@@ -93,7 +94,7 @@ func (r *Registry) Upsert(s Sandbox) error {
 			return tx.Model(&Sandbox{}).Where("name = ?", s.Name).Updates(map[string]interface{}{
 				"org": s.Org, "repo": s.Repo, "branch": s.Branch,
 				"base_image": s.BaseImage, "derived_image": s.DerivedImage,
-				"workspace": s.Workspace, "synced_rev": s.SyncedRev,
+				"workspace": s.Workspace, "runtime": s.Runtime, "synced_rev": s.SyncedRev,
 				"synced_boot_id": s.SyncedBootID, "token": s.Token,
 				"mode": s.Mode, "addr": s.Addr, "owner_id": s.OwnerID,
 				"updated_at_ms": time.Now().UnixMilli(),

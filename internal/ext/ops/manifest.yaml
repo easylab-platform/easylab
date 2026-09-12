@@ -25,10 +25,15 @@ tools:
       properties:
         image:
           type: string
-          description: Base image for the sandbox (easylab-reachable, e.g. docker.io/library/<toolchain>:<tag>). The worker binary is injected automatically.
+          description: Base image for the sandbox (easylab-reachable, e.g. docker.io/library/<toolchain>:<tag>). The worker binary is injected automatically. Required for the default linux runtime; ignored for VM runtimes.
           descriptions:
-            zh: 沙箱的基础镜像（easylab 可拉取，如 docker.io/library/<工具链>:<tag>）。worker 二进制会被自动注入。
-      required: [image]
+            zh: 沙箱的基础镜像（easylab 可拉取，如 docker.io/library/<工具链>:<tag>）。worker 二进制会被自动注入。默认 linux 运行时必填；VM 运行时忽略。
+        runtime:
+          type: string
+          description: "Execution runtime: linux (default; base image + injected worker), windows, or macos (VM-backed worker image served by easylab)."
+          descriptions:
+            zh: "执行运行时：linux（默认；基础镜像 + 注入 worker）、windows 或 macos（easylab 提供的 VM worker 镜像）。"
+      required: []
   - name: sandbox-run
     description: Run a shell command in the session sandbox. The workspace is synced to the repo branch head first (repo files refreshed; sandbox-only files kept).
     descriptions:

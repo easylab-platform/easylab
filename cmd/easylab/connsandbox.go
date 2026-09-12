@@ -84,13 +84,17 @@ func (c *connSandbox) wc(ctx context.Context, sandbox string) (workerv1connect.W
 // ---- lifecycle ----
 
 func (c *connSandbox) EnsureSandboxImage(ctx context.Context, req *connect.Request[easylabv1.EnsureSandboxImageRequest]) (*connect.Response[easylabv1.EnsureSandboxImageResponse], error) {
-	if req.Msg.BaseImage == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base_image required"))
-	}
 	if c.s.k8s == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("k8s backend unavailable"))
 	}
-	tag, built, err := c.s.ensureSandboxImage(ctx, req.Msg.BaseImage, "/workspace")
+	profile, err := c.s.k8s.ResolveRuntime(req.Msg.Runtime)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	if profile.Derived && req.Msg.BaseImage == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base_image required"))
+	}
+	tag, built, err := c.s.ensureSandboxImage(ctx, profile, req.Msg.BaseImage, "/workspace")
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -101,17 +105,26 @@ func (c *connSandbox) EnsureSandboxImage(ctx context.Context, req *connect.Reque
 // -> wait healthz -> optional Sync (org != "") -> registry upsert.
 func (c *connSandbox) LaunchSandbox(ctx context.Context, req *connect.Request[easylabv1.LaunchSandboxRequest]) (*connect.Response[easylabv1.LaunchSandboxResponse], error) {
 	m := req.Msg
-	if m.Name == "" || m.BaseImage == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name and base_image required"))
+	if m.Name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name required"))
 	}
 	if c.s.k8s == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("k8s backend unavailable"))
+	}
+	profile, err := c.s.k8s.ResolveRuntime(m.Runtime)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	// base_image drives the derived (linux) build; VM runtimes carry their own
+	// image in the profile.
+	if profile.Derived && m.BaseImage == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base_image required"))
 	}
 	workspace := m.Workspace
 	if workspace == "" {
 		workspace = "/workspace"
 	}
-	tag, _, err := c.s.ensureSandboxImage(ctx, m.BaseImage, workspace)
+	tag, _, err := c.s.ensureSandboxImage(ctx, profile, m.BaseImage, workspace)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("ensure image: %w", err))
 	}
@@ -119,23 +132,32 @@ func (c *connSandbox) LaunchSandbox(ctx context.Context, req *connect.Request[ea
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("mint sandbox token: %w", err))
 	}
-	env := map[string]string{"WORKER_TOKEN": token}
+	// Profile defaults first (VM parameters), then request env, then the token
+	// (always authoritative).
+	env := map[string]string{}
+	for k, v := range profile.Env {
+		env[k] = v
+	}
 	for k, v := range m.Env {
 		env[k] = v
 	}
+	env["WORKER_TOKEN"] = token
 	if _, err := c.s.k8s.LaunchSandbox(ctx, k8s.SandboxSpec{
 		Name: m.Name, Image: tag, Workspace: workspace, Env: env,
+		NeedsTun: profile.NeedsTun, DeviceLimits: profile.DeviceLimits,
+		NodeSelector: profile.NodeSelector, WorkerPort: profile.Port(),
+		Profile: &profile,
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("launch: %w", err))
 	}
-	if err := c.s.k8s.WaitSandboxReady(ctx, m.Name, sandboxWorkerPort, 60*time.Second); err != nil {
+	if err := c.s.k8s.WaitSandboxReady(ctx, m.Name, profile.Port(), profile.ReadyTimeoutDuration()); err != nil {
 		_ = c.s.k8s.DeleteSandbox(ctx, m.Name)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("worker did not become healthy on %s: %w", m.Name, err))
 	}
 	if err := c.s.sbx.Upsert(sbxreg.Sandbox{
 		Name: m.Name, Org: m.Org, Repo: m.Repo, Branch: m.Branch,
 		BaseImage: m.BaseImage, DerivedImage: tag, Workspace: workspace,
-		Token: token, Mode: "managed",
+		Runtime: profile.Name, Token: token, Mode: "managed",
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("registry: %w", err))
 	}
@@ -377,7 +399,8 @@ func rowToInfo(row sbxreg.Sandbox) *easylabv1.SandboxInfo {
 	return &easylabv1.SandboxInfo{
 		Name: row.Name, Org: row.Org, Repo: row.Repo, Branch: row.Branch,
 		BaseImage: row.BaseImage, DerivedImage: row.DerivedImage,
-		Workspace: row.Workspace, SyncedRev: row.SyncedRev, SyncedBootId: row.SyncedBootID,
+		Workspace: row.Workspace, Runtime: row.Runtime,
+		SyncedRev: row.SyncedRev, SyncedBootId: row.SyncedBootID,
 	}
 }
 

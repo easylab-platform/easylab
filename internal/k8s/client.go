@@ -40,6 +40,8 @@ type Client struct {
 	// workerImage is the default linux worker image (base+worker) when a job
 	// has no explicit container.
 	workerImage string
+	// runtimes are the sandbox execution profiles (linux/windows/macos/...).
+	runtimes map[string]RuntimeProfile
 }
 
 // Config configures a Client.
@@ -93,6 +95,7 @@ func newClient(cs kubernetes.Interface, cfg Config) *Client {
 		registryToken: cfg.RegistryToken,
 		proxy:         cfg.Proxy,
 		workerImage:   cfg.WorkerImage,
+		runtimes:      loadRuntimes(),
 	}
 }
 

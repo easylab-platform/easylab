@@ -46,6 +46,8 @@ spec:
               value: {{ .Values.gateway.token | quote }}
             - name: EASYLAB_ARTIFACT_URL
               value: {{ include "easylab.artifactURL" . | quote }}
+            - name: ARTIFACT_MAX_BODY
+              value: {{ .Values.gateway.maxBodyBytes | default "34359738368" | quote }}
             - name: ARTIFACT_TOKEN
               value: {{ .Values.gateway.token | quote }}
             # ---- Kubernetes execution backend ----
@@ -57,6 +59,10 @@ spec:
               value: {{ .Values.backend.buildkitImage | quote }}
             - name: EASYLAB_REGISTRY_HOST
               value: {{ include "easylab.registryHost" . | quote }}
+            {{- if .Values.sandboxes.runtimes }}
+            - name: EASYLAB_SANDBOX_RUNTIMES
+              value: {{ .Values.sandboxes.runtimes | toJson | quote }}
+            {{- end }}
             {{- with .Values.gateway.upstreamProxy }}
             - name: EASYLAB_UPSTREAM_PROXY
               value: {{ . | quote }}

@@ -20,7 +20,7 @@ registry:
 gateway:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
-    tag: "20260912113831"
+    tag: "20260912134022"
     pullPolicy: IfNotPresent
   # External base URL advertised to clients (OCI /token realm, git, ...).
   # Empty derives it from the install namespace: the in-cluster Service URL
@@ -31,6 +31,9 @@ gateway:
   # Artifact (OCI + /pkgs) base URL used by builds. Empty derives
   # http://easylab.<ns>.svc.cluster.local:80.
   artifactURL: ""
+  # Maximum upload body (bytes) for the package/OCI registry. Large VM images
+  # (30+ GB layers) need this well above the 8 GiB default.
+  maxBodyBytes: "34359738368"
   # Upstream HTTP(S) proxy for build pods reaching public registries. This is
   # environment-specific; empty disables it (clusters with direct egress).
   upstreamProxy: http://mihomo.develop.svc.cluster.local:7890
@@ -48,6 +51,26 @@ backend:
   # Host path backing the /data hostPath mount (ephemeral build pods read the
   # build context + write logs there).
   hostDataDir: /home/develop/.easylab
+
+# ---- Sandbox runtimes ----
+# Per-runtime overrides merged over easylab's built-in profiles. The linux
+# profile is derived (base image + injected worker); windows/macos are VM
+# worker images served by easylab's registry (mirrored into it). Values here
+# are rendered to EASYLAB_SANDBOX_RUNTIMES (JSON) on the gateway.
+sandboxes:
+  runtimes:
+    windows:
+      image: easylab/vm-images/easyworker-windows:v1.2.0
+      readyTimeout: 15m
+      nodeSelector:
+        kubernetes.io/hostname: iv-yebxendp8gwh2yokqhjs
+      imagePullSecrets: []
+    macos:
+      image: easylab/vm-images/easyworker-macos:v1.2.0
+      readyTimeout: 15m
+      nodeSelector:
+        kubernetes.io/hostname: iv-yebxendp8gwh2yokqhjs
+      imagePullSecrets: []
 
 # ---- NATS broker (separate Deployment) ----
 nats:

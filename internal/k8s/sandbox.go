@@ -30,6 +30,9 @@ type SandboxSpec struct {
 	NodeSelector map[string]string
 	NeedsTun     bool
 	WorkerPort   int32
+	// Profile carries the resolved runtime profile's device/security/resources
+	// (nil for the plain linux case, which uses built-in defaults).
+	Profile *RuntimeProfile
 }
 
 // SandboxStatus is a live sandbox view.
@@ -55,13 +58,38 @@ func (c *Client) LaunchSandbox(ctx context.Context, s SandboxSpec) (SandboxStatu
 	if workspace == "" {
 		workspace = "/workspace"
 	}
+	nodeSelector := s.NodeSelector
+	deviceLimits := s.DeviceLimits
+	needsTun := s.NeedsTun
+	var secCtx *corev1.SecurityContext
+	var resources = defaultResources()
+	if p := s.Profile; p != nil {
+		if len(p.NodeSelector) > 0 {
+			nodeSelector = p.NodeSelector
+		}
+		if len(p.DeviceLimits) > 0 {
+			deviceLimits = p.DeviceLimits
+		}
+		needsTun = needsTun || p.NeedsTun
+		if p.SecurityContext != nil {
+			secCtx = p.SecurityContext
+		}
+		if p.Resources != nil {
+			resources = *p.Resources
+		}
+	}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: s.Name, Namespace: c.namespace,
 			Labels: map[string]string{"easylab/sandbox": "1", "app": s.Name}},
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyAlways,
-			NodeSelector:  s.NodeSelector,
+			NodeSelector:  nodeSelector,
 		},
+	}
+	if p := s.Profile; p != nil && len(p.ImagePullSecrets) > 0 {
+		for _, name := range p.ImagePullSecrets {
+			pod.Spec.ImagePullSecrets = append(pod.Spec.ImagePullSecrets, corev1.LocalObjectReference{Name: name})
+		}
 	}
 	env := []corev1.EnvVar{
 		{Name: "WORKER_WORKSPACE", Value: workspace},
@@ -72,18 +100,20 @@ func (c *Client) LaunchSandbox(ctx context.Context, s SandboxSpec) (SandboxStatu
 	}
 	main := corev1.Container{
 		Name: "worker", Image: s.Image, Env: env,
-		Ports:     []corev1.ContainerPort{{Name: "worker", ContainerPort: port}},
-		Resources: defaultResources(),
+		Ports:           []corev1.ContainerPort{{Name: "worker", ContainerPort: port}},
+		Resources:       resources,
+		SecurityContext: secCtx,
 	}
 	if len(s.Command) > 0 {
 		main.Command = s.Command
 	}
-	if len(s.DeviceLimits) > 0 {
-		lim := corev1.ResourceList{}
-		for k, v := range s.DeviceLimits {
-			lim[corev1.ResourceName(k)] = resource.MustParse(v)
+	if len(deviceLimits) > 0 {
+		if main.Resources.Limits == nil {
+			main.Resources.Limits = corev1.ResourceList{}
 		}
-		main.Resources.Limits = lim
+		for k, v := range deviceLimits {
+			main.Resources.Limits[corev1.ResourceName(k)] = resource.MustParse(v)
+		}
 	}
 	var vols []corev1.Volume
 	var mounts []corev1.VolumeMount
@@ -103,7 +133,7 @@ func (c *Client) LaunchSandbox(ctx context.Context, s SandboxSpec) (SandboxStatu
 			main.Command = []string{"/easylab-worker/easyworker"}
 		}
 	}
-	if s.NeedsTun {
+	if needsTun {
 		vols = append(vols, corev1.Volume{Name: "devtun", VolumeSource: corev1.VolumeSource{
 			HostPath: &corev1.HostPathVolumeSource{Path: "/dev/net/tun", Type: hpPtr(corev1.HostPathCharDev)}}})
 		mounts = append(mounts, corev1.VolumeMount{Name: "devtun", MountPath: "/dev/net/tun"})

@@ -89,10 +89,10 @@ func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{},
 
 // launchWorkspaceSandbox launches a worker-backed sandbox via easylab
 // SandboxService, associated with this session's workspace (idempotent).
-func (s *server) launchWorkspaceSandbox(ctx context.Context, ws workspace, sid, baseImage string) (ContainerInfo, error) {
+func (s *server) launchWorkspaceSandbox(ctx context.Context, ws workspace, sid, baseImage, runtime string) (ContainerInfo, error) {
 	key := labelKey(sid)
 	res, err := s.sdk.Sandbox.LaunchSandbox(ctx, connect.NewRequest(&easylabv1.LaunchSandboxRequest{
-		Name: key, BaseImage: baseImage,
+		Name: key, BaseImage: baseImage, Runtime: runtime,
 		Org: ws.org, Repo: ws.repo, Branch: ws.branchOrDefault(),
 	}))
 	if err != nil {

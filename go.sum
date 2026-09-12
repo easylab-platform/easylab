@@ -64,6 +64,12 @@ github.com/easylab-platform/artifact/oci v0.2.0 h1:zzpuXls7JCyGEuyMNybeVzU0QnH8W
 github.com/easylab-platform/artifact/oci v0.2.0/go.mod h1:DpTYHYOplKfVXyaE2pC78lUCG2Xf3DzipH+/G4xhezA=
 github.com/easylab-platform/artifact/oci v0.2.1 h1:Irg4AYoTz0L6Pcneb7Qu6uCekAgE9MXtChm6dZ/+VPk=
 github.com/easylab-platform/artifact/oci v0.2.1/go.mod h1:DpTYHYOplKfVXyaE2pC78lUCG2Xf3DzipH+/G4xhezA=
+github.com/easylab-platform/artifact/oci v0.2.2 h1:LgcSE23b9TZdVKD0wO5OJg3w7T4/viJgTKhIllrADz0=
+github.com/easylab-platform/artifact/oci v0.2.2/go.mod h1:DpTYHYOplKfVXyaE2pC78lUCG2Xf3DzipH+/G4xhezA=
+github.com/easylab-platform/artifact/oci v0.2.3 h1:tyitAA6zImavJ/UWu3t2CsjxFp9Ohms5MfZXN8FHUEs=
+github.com/easylab-platform/artifact/oci v0.2.3/go.mod h1:DpTYHYOplKfVXyaE2pC78lUCG2Xf3DzipH+/G4xhezA=
+github.com/easylab-platform/artifact/oci v0.2.4 h1:pJcUGJMxncdAdKq/jP0kaOiQS/+UGVmzG5yIe0YcOaM=
+github.com/easylab-platform/artifact/oci v0.2.4/go.mod h1:DpTYHYOplKfVXyaE2pC78lUCG2Xf3DzipH+/G4xhezA=
 github.com/easylab-platform/artifact/pub v0.2.0 h1:mjAlmpZTR8pCWONrpSeJe1IYD8cMN1I17DWvKwN0kQ4=
 github.com/easylab-platform/artifact/pub v0.2.0/go.mod h1:Y7NwcLyht/urHxJ0oaDgpGtNmj6Xrk4glQ7n0AIL8NY=
 github.com/easylab-platform/artifact/pypi v0.2.0 h1:6w/KBvBRTp0ee1RC6rc3Kjng93i9rTtS/LtNl5BVFek=
@@ -76,6 +82,8 @@ github.com/easylab-platform/artifact/system v0.2.0 h1:oRj+EvFKXRM8HFMVot+tdShthp
 github.com/easylab-platform/artifact/system v0.2.0/go.mod h1:2bRT0+YakhsoUfuTKd9tSCAmMr+/97o4omLGU4KkX10=
 github.com/easylab-platform/easylab-proto v0.10.0 h1:kK2ehoUYOn2huTulpn1FZdztceiDjPV8j+WmIDxTpas=
 github.com/easylab-platform/easylab-proto v0.10.0/go.mod h1:PcZuLRhnUB6ZQmF1/vC8ip2IVhOArtp86+ZnCJfXHoY=
+github.com/easylab-platform/easylab-proto v0.11.0 h1:ylLRR+GivWS2kujJCkbvZx2Ifp20TSUMIUXOC49C0oA=
+github.com/easylab-platform/easylab-proto v0.11.0/go.mod h1:PcZuLRhnUB6ZQmF1/vC8ip2IVhOArtp86+ZnCJfXHoY=
 github.com/easylab-platform/easyvcs v0.5.1 h1:DVt9ie3mIrUIJuq2edoM3qQ5TAIcdv0FxVrfe5C0lP4=
 github.com/easylab-platform/easyvcs v0.5.1/go.mod h1:jFri6d5KqRGaXz6h0TSHoj3TvamFxkrO+bodzwRhGVo=
 github.com/emicklei/go-restful/v3 v3.12.2 h1:DhwDP0vY3k8ZzE0RunuJy8GhNpPL6zqLkDf9B/a0/xU=

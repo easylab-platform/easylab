@@ -111,21 +111,31 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 	m["sandbox-create"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 			image := strArg(args, "image")
-			if image == "" {
+			runtime := strArg(args, "runtime")
+			if runtime == "" {
+				runtime = "linux"
+			}
+			// VM runtimes (windows/macos) carry their own image; only the linux
+			// (derived) path needs a base image.
+			if image == "" && runtime == "linux" {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-create: missing 'image' (base image easylab can pull)", "sandbox-create：缺少 'image'（easylab 可拉取的基础镜像）")
 			}
 			ws, sid, err := s.resolveWorkspace(ctx, args, sessionName)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			info, err := s.launchWorkspaceSandbox(ctx, ws, sid, image)
+			info, err := s.launchWorkspaceSandbox(ctx, ws, sid, image, runtime)
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-create failed: %v", "sandbox-create 失败：%v", err)
 			}
 			s.publishSandboxVars(ctx, sid, info)
+			label := image
+			if label == "" {
+				label = runtime
+			}
 			return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName,
-				fmt.Sprintf("Created sandbox from %s (container %s, status %s).", image, info.ContainerID, info.Status),
-				fmt.Sprintf("已从 %s 创建沙箱（容器 %s，状态 %s）。", image, info.ContainerID, info.Status))}, nil
+				fmt.Sprintf("Created %s sandbox from %s (container %s, status %s).", runtime, label, info.ContainerID, info.Status),
+				fmt.Sprintf("已从 %s 创建 %s 沙箱（容器 %s，状态 %s）。", label, runtime, info.ContainerID, info.Status))}, nil
 		},
 	}
 
