@@ -11,16 +11,26 @@ import (
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 
 	"connectrpc.com/connect"
+	"github.com/easylab-platform/easylab/internal/k8s"
 	"github.com/easylab-platform/easylab/internal/ops"
 	"github.com/easylab-platform/easyvcs/object"
 	"github.com/easylab-platform/easyvcs/revision"
-	"github.com/easylab-platform/easyvcs/store"
 )
 
 // connOps implements easylabv1connect.OpsServiceHandler over the EasyLab ops
-// substrate (task registry + podman service runner).
+// substrate (task registry + k8s service runner).
 type connOps struct {
 	s *server
+}
+
+// rewriteImage rewrites external image refs (docker.io, ghcr.io, ...) to pull
+// through easylab's own OCI registry, which the node can reach. The node has
+// no direct egress to public registries.
+func (c *connOps) rewriteImage(ref string) string {
+	if c.s.k8s == nil {
+		return ref
+	}
+	return k8s.RewriteImageRef(ref, c.s.k8s.RegistryHost())
 }
 
 func (c *connOps) OpsStatus(ctx context.Context, req *connect.Request[easylabv1.OpsStatusRequest]) (*connect.Response[easylabv1.OpsStatusResponse], error) {
@@ -97,7 +107,7 @@ func (c *connOps) LaunchService(ctx context.Context, req *connect.Request[easyla
 	}
 	svc := ops.ServiceRequest{
 		Name:        req.Msg.Name,
-		Image:       req.Msg.Image,
+		Image:       c.rewriteImage(req.Msg.Image),
 		Command:     req.Msg.Command,
 		Ports:       ports,
 		Env:         env,
@@ -115,8 +125,7 @@ func (c *connOps) LaunchService(ctx context.Context, req *connect.Request[easyla
 	return connect.NewResponse(&easylabv1.LaunchServiceResponse{Ok: true, Name: st.Name, Url: st.WorkerURL}), nil
 }
 
-func (c *connOps) DeleteService(ctx context.Context, req *connect.Request[easylabv1.DeleteServiceRequest]) (*connect.Response[easylabv1.DeleteServiceResponse], error) {
-	if c.s.ops.services == nil {
+func (c *connOps) DeleteService(ctx context.Context, req *connect.Request[easylabv1.DeleteServiceRequest]) (*connect.Response[easylabv1.DeleteServiceResponse], error) {	if c.s.ops.services == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("services backend unavailable"))
 	}
 	if err := c.s.ops.services.Delete(ctx, req.Msg.Name); err != nil {
@@ -138,47 +147,18 @@ func (c *connOps) ScaleService(ctx context.Context, req *connect.Request[easylab
 }
 
 func (c *connOps) SandboxExec(ctx context.Context, req *connect.Request[easylabv1.SandboxExecRequest]) (*connect.Response[easylabv1.SandboxExecResponse], error) {
-	pr := c.s.sandboxRunner()
-	if pr == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("sandbox backend unavailable"))
-	}
-	if req.Msg.Command == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("command required"))
-	}
-	out, err := pr.Exec(ctx, req.Msg.Name, req.Msg.Command)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-	return connect.NewResponse(&easylabv1.SandboxExecResponse{Output: out}), nil
+	// Sandbox command execution goes through the worker API, not the ops
+	// substrate. This REST-ish passthrough is deprecated in favor of the
+	// SandboxService Execute RPC.
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("use SandboxService.Execute"))
 }
 
 func (c *connOps) SandboxRead(ctx context.Context, req *connect.Request[easylabv1.SandboxReadRequest]) (*connect.Response[easylabv1.SandboxReadResponse], error) {
-	pr := c.s.sandboxRunner()
-	if pr == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("sandbox backend unavailable"))
-	}
-	if req.Msg.Path == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("path required"))
-	}
-	data, err := pr.ReadContainerFile(ctx, req.Msg.Name, req.Msg.Path)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
-	}
-	return connect.NewResponse(&easylabv1.SandboxReadResponse{Content: string(data)}), nil
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("use SandboxService.FileRead"))
 }
 
 func (c *connOps) SandboxWrite(ctx context.Context, req *connect.Request[easylabv1.SandboxWriteRequest]) (*connect.Response[easylabv1.SandboxWriteResponse], error) {
-	pr := c.s.sandboxRunner()
-	if pr == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("sandbox backend unavailable"))
-	}
-	if req.Msg.Path == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("path required"))
-	}
-	if err := pr.ContainerFile(ctx, req.Msg.Name, req.Msg.Path, []byte(req.Msg.Content)); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-	return connect.NewResponse(&easylabv1.SandboxWriteResponse{Ok: true}), nil
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("use SandboxService.FileWrite"))
 }
 
 func (c *connOps) SandboxJobKill(ctx context.Context, req *connect.Request[easylabv1.SandboxJobKillRequest]) (*connect.Response[easylabv1.SandboxJobKillResponse], error) {
@@ -246,27 +226,10 @@ func serviceInfo(s ops.ServiceStatus) *easylabv1.ServiceInfo {
 // ---- Sync: repo snapshot into a service container ----
 
 func (c *connOps) Sync(ctx context.Context, req *connect.Request[easylabv1.SyncRequest]) (*connect.Response[easylabv1.SyncResponse], error) {
-	pr := c.s.sandboxRunner()
-	if pr == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("sandbox backend unavailable"))
-	}
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
-	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
-	}
-	ws := revision.NewWorkspace(repo)
-	treeID, err := treeOfRef(ws, repo, req.Msg.Rev)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
-	}
-	tar, files, err := buildTreeTar(ws, treeID)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	if err := pr.SyncTar(ctx, req.Msg.Name, req.Msg.Dest, tar); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	return connect.NewResponse(&easylabv1.SyncResponse{Ok: true, Files: int32(files)}), nil
+	// Services are k8s Deployments now; pushing a repo tree into a service
+	// container is no longer part of the model. Workspace sync for sandboxes
+	// goes through SandboxService.SyncWorkspace (worker SyncFolder).
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("Sync: use SandboxService.SyncWorkspace"))
 }
 
 // buildTreeTar packs the snapshot tree at treeID into an uncompressed tar,

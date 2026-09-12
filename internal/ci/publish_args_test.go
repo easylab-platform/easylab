@@ -4,28 +4,21 @@ import "testing"
 
 func TestPublishBuildArgsExplicit(t *testing.T) {
 	job := &Job{Produce: Produce{Action: ActionPublishProtocol, Protocol: "maven", Name: "com.acme", Version: "1.2.3"}}
-	args := publishBuildArgs(job, "http://easylab", "tok")
-	joined := map[string]bool{}
-	for _, a := range args {
-		joined[a] = true
-	}
-	for _, want := range []string{"NAME=com.acme", "VERSION=1.2.3", "ARTIFACT_URL=http://easylab", "ARTIFACT_TOKEN=tok"} {
-		if !joined[want] {
-			t.Errorf("missing build-arg %q in %v", want, args)
+	args := publishBuildArgsMap(job, "http://easylab", "tok")
+	for k, want := range map[string]string{
+		"NAME": "com.acme", "VERSION": "1.2.3",
+		"ARTIFACT_URL": "http://easylab", "ARTIFACT_TOKEN": "tok",
+	} {
+		if args[k] != want {
+			t.Errorf("build-arg %s = %q, want %q (all: %v)", k, args[k], want, args)
 		}
 	}
 }
 
 func TestPublishBuildArgsNPMRCLine(t *testing.T) {
 	job := &Job{Produce: Produce{Action: ActionPublishProtocol, Protocol: "npm"}}
-	args := publishBuildArgs(job, "http://easylab:8080", "tok")
-	found := false
-	for _, a := range args {
-		if a == "NPMRC_LINE=//easylab:8080/pkgs/npm/:_authToken=tok" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("npmrc line missing: %v", args)
+	args := publishBuildArgsMap(job, "http://easylab:8080", "tok")
+	if args["NPMRC_LINE"] != "//easylab:8080/pkgs/npm/:_authToken=tok" {
+		t.Fatalf("npmrc line wrong: %v", args)
 	}
 }

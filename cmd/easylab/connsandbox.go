@@ -17,7 +17,7 @@ import (
 	workerv1 "github.com/easylab-platform/easylab-proto/worker/v1"
 	"github.com/easylab-platform/easylab-proto/worker/v1/workerv1connect"
 	"github.com/easylab-platform/easylab/internal/connectauth"
-	"github.com/easylab-platform/easylab/internal/ops"
+	"github.com/easylab-platform/easylab/internal/k8s"
 	"github.com/easylab-platform/easylab/internal/sbxreg"
 )
 
@@ -43,27 +43,20 @@ var workerTransport = &http.Transport{
 }
 
 // workerAddr resolves the sandbox worker's base address. External sandboxes
-// carry an explicit Addr; managed sandboxes use the podman-published loopback
-// port (the podman flavor has no routable container IPs — loopback publishing
-// is the reachability model).
+// carry an explicit Addr; managed sandboxes use the k8s Service DNS
+// (<name>.<ns>.svc:48080).
 func (c *connSandbox) workerAddr(ctx context.Context, sandbox string) (string, error) {
 	if row, ok, err := c.s.sbx.Get(sandbox); err == nil && ok {
 		if row.Mode == "external" && row.Addr != "" {
 			return row.Addr, nil
 		}
 	}
-	pr := c.s.sandboxRunner()
-	if pr == nil {
-		return "", fmt.Errorf("services backend unavailable")
+	if c.s.k8s == nil {
+		return "", fmt.Errorf("k8s backend unavailable")
 	}
-	addr, err := pr.WorkerAddr(ctx, sandbox, sandboxWorkerPort)
-	if err != nil {
-		return "", err
-	}
-	return "http://" + addr, nil
+	return "http://" + c.s.k8s.ServiceDNS(sandbox) + ":" + fmt.Sprint(sandboxWorkerPort), nil
 }
 
-// workerBearer returns the sandbox's bearer token (empty when none recorded).
 func (c *connSandbox) workerBearer(sandbox string) string {
 	if row, ok, err := c.s.sbx.Get(sandbox); err == nil && ok {
 		return row.Token
@@ -94,11 +87,10 @@ func (c *connSandbox) EnsureSandboxImage(ctx context.Context, req *connect.Reque
 	if req.Msg.BaseImage == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base_image required"))
 	}
-	pr := c.s.sandboxRunner()
-	if pr == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("services backend unavailable"))
+	if c.s.k8s == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("k8s backend unavailable"))
 	}
-	tag, built, err := pr.EnsureSandboxImage(ctx, req.Msg.BaseImage, "/workspace")
+	tag, built, err := c.s.ensureSandboxImage(ctx, req.Msg.BaseImage, "/workspace")
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -112,75 +104,34 @@ func (c *connSandbox) LaunchSandbox(ctx context.Context, req *connect.Request[ea
 	if m.Name == "" || m.BaseImage == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name and base_image required"))
 	}
-	pr := c.s.sandboxRunner()
-	if pr == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("services backend unavailable"))
+	if c.s.k8s == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("k8s backend unavailable"))
 	}
 	workspace := m.Workspace
 	if workspace == "" {
 		workspace = "/workspace"
 	}
-
-	tag, _, err := pr.EnsureSandboxImage(ctx, m.BaseImage, workspace)
+	tag, _, err := c.s.ensureSandboxImage(ctx, m.BaseImage, workspace)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("ensure image: %w", err))
 	}
-
-	// Per-sandbox bearer token: the worker is fail-closed and authenticates
-	// every WorkerService call with it. Injected via runtime env (never baked
-	// into the derived image, so the image cache is shared across sandboxes).
 	token, err := newSandboxToken()
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("mint sandbox token: %w", err))
 	}
-	env := []string{"WORKER_WORKSPACE=" + workspace, "WORKER_TOKEN=" + token}
+	env := map[string]string{"WORKER_TOKEN": token}
 	for k, v := range m.Env {
-		env = append(env, k+"="+v)
+		env[k] = v
 	}
-	labels := map[string]string{
-		"easylab/sandbox.image": m.BaseImage,
-		"easylab/derived.image": tag,
-		"easylab/sandbox":       "1",
-	}
-	if m.Org != "" {
-		labels["easylab/org"], labels["easylab/repo"], labels["easylab/branch"] = m.Org, m.Repo, m.Branch
-	}
-	_, err = pr.Launch(ctx, ops.ServiceRequest{
-		Name:        m.Name,
-		Image:       tag,
-		Ports:       map[int]int{sandboxWorkerPort: -1}, // -1 = auto loopback publish
-		Env:         env,
-		Restart:     "always",
-		CPUs:        m.Cpus,
-		MemoryBytes: m.MemoryBytes,
-		Labels:      labels,
-	}, nil)
-	if err != nil {
+	if _, err := c.s.k8s.LaunchSandbox(ctx, k8s.SandboxSpec{
+		Name: m.Name, Image: tag, Workspace: workspace, Env: env,
+	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("launch: %w", err))
 	}
-
-	// Wait for the worker to answer healthz on its published loopback port.
-	var healthy bool
-	for i := 0; i < 40; i++ {
-		addr, _ := pr.WorkerAddr(ctx, m.Name, sandboxWorkerPort)
-		if addr != "" {
-			if err := probeHealth(ctx, addr); err == nil {
-				healthy = true
-				break
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(500 * time.Millisecond):
-		}
+	if err := c.s.k8s.WaitSandboxReady(ctx, m.Name, sandboxWorkerPort, 60*time.Second); err != nil {
+		_ = c.s.k8s.DeleteSandbox(ctx, m.Name)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("worker did not become healthy on %s: %w", m.Name, err))
 	}
-	if !healthy {
-		_ = pr.Delete(ctx, m.Name) // roll back a half-started sandbox
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("worker did not become healthy on %s", m.Name))
-	}
-
-	// Register (standalone when org == "") and sync associated workspaces.
 	if err := c.s.sbx.Upsert(sbxreg.Sandbox{
 		Name: m.Name, Org: m.Org, Repo: m.Repo, Branch: m.Branch,
 		BaseImage: m.BaseImage, DerivedImage: tag, Workspace: workspace,
@@ -193,27 +144,11 @@ func (c *connSandbox) LaunchSandbox(ctx context.Context, req *connect.Request[ea
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("sync: %w", err))
 		}
 	}
-
 	info, err := c.sandboxInfo(ctx, m.Name)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return connect.NewResponse(&easylabv1.LaunchSandboxResponse{Sandbox: info}), nil
-}
-
-func probeHealth(ctx context.Context, addr string) error {
-	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(cctx, http.MethodGet, "http://"+addr+"/healthz", nil)
-	resp, err := workerTransport.RoundTrip(req)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("healthz %d", resp.StatusCode)
-	}
-	return nil
 }
 
 // SyncWorkspace pushes the workspace tree into the sandbox and records
@@ -231,12 +166,10 @@ func (c *connSandbox) SyncWorkspace(ctx context.Context, req *connect.Request[ea
 }
 
 func (c *connSandbox) DeleteSandbox(ctx context.Context, req *connect.Request[easylabv1.DeleteSandboxRequest]) (*connect.Response[easylabv1.DeleteSandboxResponse], error) {
-	pr := c.s.sandboxRunner()
-	if pr == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("services backend unavailable"))
-	}
-	if err := pr.Delete(ctx, req.Msg.Name); err != nil && !strings.Contains(err.Error(), "No such") {
-		return connect.NewResponse(&easylabv1.DeleteSandboxResponse{Error: err.Error()}), nil
+	if c.s.k8s != nil {
+		if err := c.s.k8s.DeleteSandbox(ctx, req.Msg.Name); err != nil {
+			return connect.NewResponse(&easylabv1.DeleteSandboxResponse{Error: err.Error()}), nil
+		}
 	}
 	_ = c.s.sbx.Delete(req.Msg.Name)
 	return connect.NewResponse(&easylabv1.DeleteSandboxResponse{Ok: true}), nil
@@ -308,16 +241,23 @@ func (c *connSandbox) sandboxInfo(ctx context.Context, name string) (*easylabv1.
 		return nil, fmt.Errorf("sandbox %q not registered", name)
 	}
 	info := rowToInfo(row)
+	if c.s.k8s != nil {
+		if st, serr := c.s.k8s.Status(ctx, name); serr == nil {
+			info.PodIp = st.PodIP
+			info.Phase = st.Phase
+			if st.Ready {
+				info.Phase = "Running"
+			}
+		} else {
+			info.Phase = "stopped"
+		}
+	}
 	if addr, err := c.workerAddr(ctx, name); err == nil && addr != "" {
-		info.PodIp = addr
-		info.Phase = "Running"
-		wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		if w, err := c.wc(wctx, name); err == nil {
+		if w, err := c.wc(ctx, name); err == nil {
+			wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
 			if inf, err := w.Info(wctx, connect.NewRequest(&workerv1.InfoRequest{})); err == nil {
 				info.BootId = inf.Msg.BootId
-			} else {
-				info.Error = "worker: " + err.Error()
 			}
 			if jobs, err := w.ListJobs(wctx, connect.NewRequest(&workerv1.ListJobsRequest{})); err == nil {
 				info.TotalJobs = int32(len(jobs.Msg.Jobs))
@@ -328,8 +268,6 @@ func (c *connSandbox) sandboxInfo(ctx context.Context, name string) (*easylabv1.
 				}
 			}
 		}
-	} else {
-		info.Phase = "stopped"
 	}
 	return info, nil
 }

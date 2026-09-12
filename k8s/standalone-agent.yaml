@@ -33,7 +33,7 @@ spec:
 
         # ---- abcp agent (session/model/turn engine; h2c on 8000) ----
         - name: agent
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260911045443
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260911151044
           imagePullPolicy: IfNotPresent
           env:
             - name: NATS_URL
@@ -49,6 +49,10 @@ spec:
             # openai-compatible provider for ASR/TTS/image models.
             - name: NODE_EXTRA_CA_CERTS
               value: /etc/ssl/certs/dev-ca.crt
+            # Browser (Flutter Web) clients are cross-origin; allow the hosted
+            # web app's origin (or "*" for dev).
+            - name: AGENT_CORS_ORIGIN
+              value: "*"
           ports:
             - { containerPort: 8080, protocol: TCP }
           resources:

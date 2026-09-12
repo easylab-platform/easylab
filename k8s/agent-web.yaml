@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-web
+  namespace: temp
+  labels:
+    app: agent-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-web
+  template:
+    metadata:
+      labels:
+        app: agent-web
+    spec:
+      containers:
+        - name: web
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent-web:20260912063037
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { containerPort: 8080, protocol: TCP }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            limits: { cpu: 200m, memory: 128Mi }
+            requests: { cpu: 20m, memory: 32Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-web
+  namespace: temp
+  labels:
+    app: agent-web
+spec:
+  type: ClusterIP
+  selector:
+    app: agent-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

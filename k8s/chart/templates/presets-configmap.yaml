@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: easylab-presets
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+data:
+  presets.json: |
+{{ .Files.Get "files/presets.json" | indent 4 }}

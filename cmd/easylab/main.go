@@ -41,6 +41,8 @@ import (
 	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
 	"github.com/easylab-platform/easylab-proto/easylab/v1/easylabv1connect"
 
+	"github.com/easylab-platform/easylab/internal/k8s"
+	"github.com/easylab-platform/easylab/internal/ops"
 	"github.com/easylab-platform/easylab/internal/sbxreg"
 	"github.com/easylab-platform/easyvcs/object"
 	"github.com/easylab-platform/easyvcs/revision"
@@ -62,6 +64,7 @@ type server struct {
 	selfBase string
 	ops      *opsState
 	sbx      *sbxreg.Registry
+	k8s      *k8s.Client
 	workflows sync.Map       // workflow id -> *ci.Workflow (declarations)
 	runs     sync.Map       // run id -> *ci.Run (instantiations)
 	// auth is the artifactkit Auth over the easyvcs credential store
@@ -104,7 +107,23 @@ func main() {
 	if err != nil {
 		log.Fatal("init sandbox registry:", err)
 	}
-	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, sbx: sbxReg, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
+	// Kubernetes execution backend (sandboxes, CI jobs, services, builds).
+	// Absent in dev/off-cluster; handlers degrade to Unimplemented.
+	var sK8s *k8s.Client
+	if kc, kerr := k8s.New(k8s.Config{
+		Namespace:     envOrStr("EASYLAB_NAMESPACE", "temp"),
+		BuildkitImage: envOrStr("EASYLAB_BUILDKIT_IMAGE", "moby/buildkit:rootless"),
+		RegistryHost:  envOrStr("EASYLAB_REGISTRY_HOST", "easylab.temp.svc.cluster.local:80"),
+		RegistryToken: envOrStr("EASYVCS_TOKEN", "devtoken"),
+		ImagePullSecret: envOrStr("EASYLAB_PULL_SECRET", "easylab-regcred"),
+		Proxy:           envOrStr("EASYLAB_UPSTREAM_PROXY", ""),
+	}); kerr == nil {
+		opsState.services = ops.NewK8sServiceRunner(kc)
+		sK8s = kc
+	} else {
+		log.Printf("k8s backend disabled: %v", kerr)
+	}
+	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, sbx: sbxReg, k8s: sK8s, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
 
 	// Start the background mirror scheduler (push on-change, pull on-interval).
 	go s.runMirrorLoop(context.Background())
@@ -327,8 +346,15 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 }
 
 func (s *server) serveOCIToken(w http.ResponseWriter, r *http.Request, auth artifactkit.Auth) {
+	// The Distribution token endpoint accepts two request shapes: the GET
+	// "token" flow (scope in the query string, credentials via Basic/Bearer
+	// headers) and the OAuth2 password grant (POST form; username/password/
+	// scope in the body). buildkit's push uses the POST form. Read both.
+	_ = r.ParseForm()
+	scopeVals := append([]string{}, r.URL.Query()["scope"]...)
+	scopeVals = append(scopeVals, r.PostForm["scope"]...)
 	scopes := []string{}
-	for _, v := range r.URL.Query()["scope"] {
+	for _, v := range scopeVals {
 		for _, f := range strings.Fields(v) {
 			if f != "" {
 				scopes = append(scopes, f)
@@ -336,6 +362,20 @@ func (s *server) serveOCIToken(w http.ResponseWriter, r *http.Request, auth arti
 		}
 	}
 	username := auth.Authenticate(r.Context(), r)
+	if username == "" {
+		// OAuth2 password grant: the credentials arrive in the form body. The
+		// password carries the credential (same as Basic), so resolve it to the
+		// principal's username; the refresh_token field may carry a raw token.
+		if pass := r.PostForm.Get("password"); pass != "" {
+			if u, ok := auth.CheckToken(r.Context(), pass); ok {
+				username = u
+			}
+		} else if ref := r.PostForm.Get("refresh_token"); ref != "" {
+			if u, ok := auth.CheckToken(r.Context(), ref); ok {
+				username = u
+			}
+		}
+	}
 	canWrite := scopeRequestsWrite(scopes)
 	if username == "" && canWrite {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"errors": []any{

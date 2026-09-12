@@ -64,11 +64,12 @@ RUN chmod +x /usr/local/bin/easylab-entrypoint.sh
 ENV EASYVCS_HOME=/data \
     EASYVCS_SELF_BASE="" \
     EASYVCS_OPS_NAMESPACES=default \
-    EASYVCS_BUILD_BACKEND=podman \
-    EASYLAB_PODMAN_URI=unix:///run/podman/podman.sock \
-    DOCKER_HOST=unix:///run/podman/podman.sock \
-    EASYLAB_ARTIFACT_URL=http://127.0.0.1:8080 \
-    EASYLAB_WORKER_REF=easyworker@v0.4.1
+    EASYLAB_NAMESPACE=temp \
+    EASYLAB_BUILDKIT_IMAGE=moby/buildkit:rootless \
+    EASYLAB_REGISTRY_HOST=easylab.temp.svc.cluster.local:80 \
+    EASYLAB_PULL_SECRET=easylab-regcred \
+    EASYLAB_ARTIFACT_URL=http://easylab.temp.svc.cluster.local:80 \
+    EASYLAB_WORKER_REF=easyworker@v0.5.0
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/easylab-entrypoint.sh"]
 CMD ["-addr", "0.0.0.0:8080"]

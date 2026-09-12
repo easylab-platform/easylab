@@ -1,0 +1,6 @@
+apiVersion: v2
+name: easylab
+description: EasyLab gateway + Kubernetes execution backend (sandboxes, CI builds, service deploys)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

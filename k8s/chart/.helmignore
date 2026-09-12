@@ -1,0 +1,5 @@
+# Files that should not be packaged into the chart.
+.git
+.gitignore
+*.tmp
+*.bak

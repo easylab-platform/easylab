@@ -1,0 +1,101 @@
+# EasyLab umbrella values. The easylab gateway, NATS broker, and the abc agent
+# run as SEPARATE Deployments (no sidecars) and talk over Service DNS.
+
+# Namespace the objects land in. Leave empty to use the release namespace
+# (install with `-n temp`); also where easylab creates sandboxes / CI build
+# pods / service deployments at runtime.
+namespaceOverride: ""
+
+nameOverride: ""
+
+# In-cluster OCI registry host (registry:port) that easylab itself serves.
+# Image refs, pushes, and health probes use this; workers pull derived images
+# from it via imagePullSecret.
+registry:
+  host: easylab.temp.svc.cluster.local:80
+
+# ---- gateway (easylab Go binary) ----
+gateway:
+  image:
+    repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
+    tag: "20260912092829"
+    pullPolicy: IfNotPresent
+  # External base URL advertised to clients (OCI /token realm, git, ...).
+  # Port MUST match the gateway Service port (clients reach it there).
+  selfBase: http://easylab.temp.svc.cluster.local
+  token: devtoken
+  artifactURL: http://easylab.temp.svc.cluster.local:80
+  upstreamProxy: http://mihomo.develop.svc.cluster.local:7890
+  enforceH2: "0"
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: "2", memory: 2Gi }
+  service:
+    type: ClusterIP
+    port: 80
+
+# ---- Kubernetes execution backend tuning ----
+backend:
+  buildkitImage: moby/buildkit:rootless
+  # Host path backing the /data hostPath mount (ephemeral build pods read the
+  # build context + write logs there).
+  hostDataDir: /home/develop/.easylab
+  # imagePullSecret attached to sandbox/service pods.
+  pullSecret: easylab-regcred
+
+# ---- NATS broker (separate Deployment) ----
+nats:
+  image:
+    repository: forgejo.develop.10.199.64.20.nip.io/easylab/nats
+    tag: latest
+    pullPolicy: IfNotPresent
+  # Service name other workloads address (nats.<ns>.svc:4222).
+  service:
+    name: nats
+    type: ClusterIP
+  resources:
+    requests: { cpu: 100m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+# ---- abc agent (session/model/turn engine, h2c) ----
+agent:
+  image:
+    repository: forgejo.develop.10.199.64.20.nip.io/easylab/agent
+    tag: "20260910060820"
+    pullPolicy: IfNotPresent
+  # Service name published for the agent (repo extension defaults to this).
+  serviceName: abcp-agent
+  port: 8000
+  corsOrigin: "*"
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  service:
+    type: ClusterIP
+    port: 80
+
+# ---- persistence ----
+persistence:
+  # hostPath root for /data (single-node dev cluster). DirectoryOrCreate.
+  hostPath: /home/develop/.easylab
+  type: DirectoryOrCreate
+
+# ---- image pull secrets ----
+# The chart renders a docker-registry Secret for the easylab OCI registry so
+# kubelet can pull derived sandbox images. Set existingSecret to reference a
+# pre-provisioned Secret instead (then no Secret is rendered).
+imagePullSecrets:
+  easylab:
+    create: true
+    name: easylab-regcred
+    username: devtoken
+    password: devtoken
+  # Secrets cluster/kubelet already has (not rendered here, only referenced).
+  existing: []
+
+# ---- RBAC: easylab ServiceAccount may CRUD its runtime objects in-namespace ----
+rbac:
+  create: true
+  serviceAccount:
+    create: true
+    name: easylab

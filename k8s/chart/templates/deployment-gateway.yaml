@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "easylab.name" . }}
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+    app: {{ include "easylab.name" . }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "easylab.name" . }}
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "easylab.labels" . | nindent 8 }}
+        app: {{ include "easylab.name" . }}
+    spec:
+      serviceAccountName: {{ include "easylab.serviceAccountName" . }}
+      containers:
+        - name: easylab
+          image: {{ include "easylab.gatewayImage" . }}
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          args: ["-addr", "0.0.0.0:8080"]
+          env:
+            - name: EASYVCS_HOME
+              value: /data
+            # External URL advertised to clients (OCI /token realm, protocol
+            # registries, self_base) — must be resolvable, never loopback.
+            - name: EASYVCS_SELF_BASE
+              value: {{ .Values.gateway.selfBase | quote }}
+            - name: EASYVCS_REGISTRY
+              value: {{ include "easylab.registryHost" . | quote }}
+            # Embedded tool extensions reach the split-out nats/agent over
+            # Service DNS (no sidecars).
+            - name: EASYLAB_EXT_NATS_URL
+              value: {{ printf "nats://%s.%s.svc.cluster.local:4222" .Values.nats.service.name (include "easylab.namespace" .) | quote }}
+            - name: EASYLAB_AGENT_URL
+              value: {{ printf "http://%s.%s.svc.cluster.local" .Values.agent.serviceName (include "easylab.namespace" .) | quote }}
+            - name: EASYVCS_ENFORCE_H2
+              value: {{ .Values.gateway.enforceH2 | quote }}
+            - name: EASYVCS_TOKEN
+              value: {{ .Values.gateway.token | quote }}
+            - name: EASYLAB_ARTIFACT_URL
+              value: {{ .Values.gateway.artifactURL | quote }}
+            - name: ARTIFACT_TOKEN
+              value: {{ .Values.gateway.token | quote }}
+            # ---- Kubernetes execution backend ----
+            - name: EASYLAB_NAMESPACE
+              value: {{ include "easylab.runtimeNamespace" . | quote }}
+            - name: EASYLAB_HOST_DATA_DIR
+              value: {{ .Values.backend.hostDataDir | quote }}
+            - name: EASYLAB_BUILDKIT_IMAGE
+              value: {{ .Values.backend.buildkitImage | quote }}
+            - name: EASYLAB_REGISTRY_HOST
+              value: {{ include "easylab.registryHost" . | quote }}
+            - name: EASYLAB_PULL_SECRET
+              value: {{ .Values.backend.pullSecret | quote }}
+            {{- with .Values.gateway.upstreamProxy }}
+            - name: EASYLAB_UPSTREAM_PROXY
+              value: {{ . | quote }}
+            {{- end }}
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          volumeMounts:
+            - { mountPath: /data, name: data }
+      volumes:
+        - name: data
+          hostPath:
+            path: {{ .Values.persistence.hostPath }}
+            type: {{ .Values.persistence.type }}

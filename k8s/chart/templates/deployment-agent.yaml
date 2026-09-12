@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.agent.serviceName }}
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+    app: {{ .Values.agent.serviceName }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.agent.serviceName }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        {{- include "easylab.labels" . | nindent 8 }}
+        app: {{ .Values.agent.serviceName }}
+    spec:
+      containers:
+        - name: agent
+          image: {{ include "easylab.agentImage" . }}
+          imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          env:
+            - name: NATS_URL
+              value: {{ printf "nats://%s.%s.svc.cluster.local:4222" .Values.nats.service.name (include "easylab.namespace" .) | quote }}
+            - name: DB_BACKEND
+              value: sqlite
+            - name: DATABASE_URL
+              value: sqlite:///data/agent.db
+            - name: PORT
+              value: {{ .Values.agent.port | quote }}
+            - name: HTTP_PROTOCOL
+              value: h2c
+            - name: SYSTEM_PRESETS_FILE
+              value: /etc/agent-presets/presets.json
+            - name: DEFAULT_PRESET
+              value: build
+            - name: AGENT_CORS_ORIGIN
+              value: {{ .Values.agent.corsOrigin | quote }}
+          ports:
+            - containerPort: {{ .Values.agent.port }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.agent.resources | nindent 12 }}
+          volumeMounts:
+            - { mountPath: /data, name: data, subPath: agent-data }
+            - { mountPath: /etc/agent-presets, name: presets, readOnly: true }
+      volumes:
+        - name: data
+          hostPath:
+            path: {{ .Values.persistence.hostPath }}
+            type: {{ .Values.persistence.type }}
+        - name: presets
+          configMap:
+            name: easylab-presets

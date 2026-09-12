@@ -36,16 +36,13 @@ type connWorkflow struct {
 
 var _ easylabv1connect.WorkflowServiceHandler = (*connWorkflow)(nil)
 
-// NewWorkflowService wires the CI scheduler: podman backend for oci-build; a
-// registry for host runners; sandbox worker backend for steps.
+// NewWorkflowService wires the CI scheduler: the Kubernetes backend for
+// oci-build/publish-protocol; a registry for host runners.
 func NewWorkflowService(s *server) *connWorkflow {
 	reg := ci.NewRunnerRegistry()
-	// The builder may be nil in tests (bare &server{cs:cs}); the scheduler
-	// still works for registry/runner/zoom when no backend produces jobs.
-	back := ci.NewPodmanBackend(nil)
-	if s.ops != nil && s.ops.builder != nil {
-		back = ci.NewPodmanBackend(s.ops.builder)
-	}
+	// The k8s client may be nil off-cluster (tests/dev); the scheduler still
+	// works for registry/runner/zoom when no backend produces jobs.
+	back := ci.NewK8sBackend(s.k8s)
 	// Seed produce build contexts with the repo tree at the branch head.
 	back.SetWorkspaceExporter(func(org, repo, branch, dir string) error {
 		return exportRepoTree(s, org, repo, branch, dir)

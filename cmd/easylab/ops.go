@@ -4,13 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
+	"github.com/easylab-platform/easylab/internal/k8s"
 	"github.com/easylab-platform/easylab/internal/ops"
 	"github.com/easylab-platform/easyvcs/store"
 )
@@ -19,7 +18,6 @@ import (
 type opsState struct {
 	builders   *ops.TaskRegistry
 	namespaces *ops.NamespaceRegistry
-	builder    ops.Builder
 	services   ops.ServiceRunner
 }
 
@@ -34,27 +32,14 @@ func registryHost() string {
 	return "127.0.0.1:8080"
 }
 
-// newOpsState wires the /ops substrate from environment. Image builds and
-// container services run in the podman privileged sidecar, driven over the
-// Docker-compatible API via docker/client (static, no embedded tooling).
+// newOpsState wires the /ops substrate: image builds + container services now
+// run on Kubernetes (no privileged podman sidecar). The k8s client is created
+// separately (main) so startup can degrade gracefully when not in-cluster.
 func newOpsState() (*opsState, error) {
 	return &opsState{
 		builders:   ops.NewTaskRegistry(),
 		namespaces: ops.FromEnv(),
-		builder:    ops.NewBuilderFromEnv(),
-		services:   newServiceRunner(),
 	}, nil
-}
-
-// newServiceRunner returns the sole service backend: internal podman.
-func newServiceRunner() ops.ServiceRunner {
-	workRoot := registryRoot() + "/podman"
-	_ = os.MkdirAll(workRoot, 0o755)
-	return ops.NewPodmanServiceRunnerWithProxy(
-		registryHost(), workRoot,
-		os.Getenv("EASYVCS_SELF_BASE"),
-		os.Getenv("EASYLAB_UPSTREAM_PROXY"),
-	)
 }
 
 type opsBuildReq struct {
@@ -152,43 +137,32 @@ func (s *server) opsBuild(w http.ResponseWriter, r *http.Request) {
 			labErr(w, http.StatusBadRequest, fmt.Errorf("image required"))
 			return
 		}
+		if s.k8s == nil {
+			labErr(w, http.StatusNotImplemented, fmt.Errorf("k8s backend unavailable"))
+			return
+		}
 		id := s.ops.builders.NewID("build")
 		task := s.ops.builders.Create(id, ops.KindBuild)
-
-		if req.Registry == "" {
-			req.Registry = registryHost()
-		}
-		if req.CacheRepo == "" {
-			// Default cache-repo = the image repository (sans tag), so layers
-			// land in the same registry repo and are reused on next builds.
-			if i := strings.LastIndex(req.Image, ":"); i > 0 {
-				req.CacheRepo = req.Image[:i]
+		ctxDir := req.Context
+		dockerfile := req.Dockerfile
+		image := req.Image
+		buildArgs := map[string]string{}
+		for _, a := range req.BuildArgs {
+			if i := strings.Index(a, "="); i > 0 {
+				buildArgs[a[:i]] = a[i+1:]
 			}
-		}
-
-		spec := ops.BuildSpec{
-			Context:       req.Context,
-			Containerfile: req.Containerfile,
-			Dockerfile:    req.Dockerfile,
-			Image:         req.Image,
-			Registry:      req.Registry,
-			RegistryAuth:  req.RegistryAuth,
-			CacheRepo:     req.CacheRepo,
-			BuildArgs:     req.BuildArgs,
-			NoCache:       req.NoCache,
-			Timeout:       time.Duration(req.TimeoutS) * time.Second,
 		}
 		go func() {
-			res, err := s.ops.builder.Build(context.Background(), spec, func(line string) {
-				task.Log(line)
-			})
+			err := s.k8s.BuildImage(context.Background(), k8s.BuildOptions{
+				ContextDir: ctxDir, Dockerfile: dockerfile, Image: image,
+				BuildArgs: buildArgs, NoCache: req.NoCache,
+			}, func(line string) { task.Log(line) })
 			if err != nil {
-				task.Finish(false, res.Out, err.Error())
+				task.Finish(false, "", err.Error())
 				return
 			}
-			task.Finish(true, fmt.Sprintf("image=%s", res.Image), "")
+			task.Finish(true, "image="+image, "")
 		}()
-
 		writeJSON(w, http.StatusOK, map[string]any{"build_id": id})
 	})(w, r)
 }
@@ -225,6 +199,9 @@ func (s *server) opsServiceLaunch(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			labErr(w, http.StatusBadRequest, err)
 			return
+		}
+		if s.k8s != nil {
+			req.Image = k8s.RewriteImageRef(req.Image, s.k8s.RegistryHost())
 		}
 		st, err := s.ops.services.Launch(r.Context(), req, nil)
 		if err != nil {
@@ -289,90 +266,22 @@ func (s *server) opsServiceScale(w http.ResponseWriter, r *http.Request) {
 	})(w, r)
 }
 
-// ---- sandbox pass-through (persistent podman container; no repo commit) ----
-
-// sandboxRunner returns the podman runner (with Exec/ContainerFile) if
-// available, else nil.
-func (s *server) sandboxRunner() *ops.PodmanServiceRunner {
-	if pr, ok := s.ops.services.(*ops.PodmanServiceRunner); ok {
-		return pr
-	}
-	return nil
-}
-
-type opsSandboxExecReq struct {
-	Command string `json:"command"`
-}
+// ---- sandbox pass-through (deprecated; use SandboxService) ----
 
 func (s *server) opsSandboxExec(w http.ResponseWriter, r *http.Request) {
 	s.labRequireWrite(func(w http.ResponseWriter, r *http.Request) {
-		pr := s.sandboxRunner()
-		if pr == nil {
-			labErr(w, http.StatusNotImplemented, fmt.Errorf("sandbox backend unavailable"))
-			return
-		}
-		var req opsSandboxExecReq
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			labErr(w, http.StatusBadRequest, err)
-			return
-		}
-		if req.Command == "" {
-			labErr(w, http.StatusBadRequest, fmt.Errorf("command required"))
-			return
-		}
-		out, err := pr.Exec(r.Context(), r.PathValue("name"), req.Command)
-		if err != nil {
-			labErr(w, http.StatusBadRequest, err)
-			return
-		}
-		labJSON(w, http.StatusOK, map[string]any{"output": out})
+		labErr(w, http.StatusNotImplemented, fmt.Errorf("use SandboxService.Execute"))
 	})(w, r)
 }
 
 func (s *server) opsSandboxReadFile(w http.ResponseWriter, r *http.Request) {
 	s.labRequireWrite(func(w http.ResponseWriter, r *http.Request) {
-		pr := s.sandboxRunner()
-		if pr == nil {
-			labErr(w, http.StatusNotImplemented, fmt.Errorf("sandbox backend unavailable"))
-			return
-		}
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			labErr(w, http.StatusBadRequest, fmt.Errorf("path required"))
-			return
-		}
-		data, err := pr.ReadContainerFile(r.Context(), r.PathValue("name"), path)
-		if err != nil {
-			labErr(w, http.StatusNotFound, err)
-			return
-		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
+		labErr(w, http.StatusNotImplemented, fmt.Errorf("use SandboxService.FileRead"))
 	})(w, r)
 }
 
 func (s *server) opsSandboxWriteFile(w http.ResponseWriter, r *http.Request) {
 	s.labRequireWrite(func(w http.ResponseWriter, r *http.Request) {
-		pr := s.sandboxRunner()
-		if pr == nil {
-			labErr(w, http.StatusNotImplemented, fmt.Errorf("sandbox backend unavailable"))
-			return
-		}
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			labErr(w, http.StatusBadRequest, fmt.Errorf("path required"))
-			return
-		}
-		data, err := io.ReadAll(r.Body)
-		if err != nil {
-			labErr(w, http.StatusBadRequest, err)
-			return
-		}
-		if err := pr.ContainerFile(r.Context(), r.PathValue("name"), path, data); err != nil {
-			labErr(w, http.StatusBadRequest, err)
-			return
-		}
-		labJSON(w, http.StatusOK, map[string]any{"written": path})
+		labErr(w, http.StatusNotImplemented, fmt.Errorf("use SandboxService.FileWrite"))
 	})(w, r)
 }

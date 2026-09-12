@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.nats.service.name }}
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+    app: {{ .Values.nats.service.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.nats.service.name }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        {{- include "easylab.labels" . | nindent 8 }}
+        app: {{ .Values.nats.service.name }}
+    spec:
+      containers:
+        - name: nats
+          image: {{ include "easylab.natsImage" . }}
+          imagePullPolicy: {{ .Values.nats.image.pullPolicy }}
+          args: ["-js", "-p", "4222", "-m", "8222", "-sd", "/data/nats"]
+          ports:
+            - containerPort: 4222
+              protocol: TCP
+            - containerPort: 8222
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.nats.resources | nindent 12 }}
+          volumeMounts:
+            - { mountPath: /data, name: data, subPath: nats }
+      volumes:
+        - name: data
+          hostPath:
+            path: {{ .Values.persistence.hostPath }}
+            type: {{ .Values.persistence.type }}

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.agent.serviceName }}
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.agent.service.type }}
+  selector:
+    app: {{ .Values.agent.serviceName }}
+  ports:
+    - name: h2c
+      port: {{ .Values.agent.service.port }}
+      targetPort: {{ .Values.agent.port }}
+      protocol: TCP
