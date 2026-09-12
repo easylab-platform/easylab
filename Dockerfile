@@ -65,9 +65,9 @@ ENV EASYVCS_HOME=/data \
     EASYVCS_SELF_BASE="" \
     EASYVCS_OPS_NAMESPACES=default \
     EASYLAB_NAMESPACE=temp \
-    EASYLAB_BUILDKIT_IMAGE=moby/buildkit:rootless \
+    EASYLAB_BUILDKIT_IMAGE=easylab/buildkit-worker:latest \
     EASYLAB_ARTIFACT_URL=http://easylab.temp.svc.cluster.local:80 \
-    EASYLAB_WORKER_REF=easyworker@v0.5.0
+    EASYLAB_WORKER_REF=easyworker@v0.5.2
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/easylab-entrypoint.sh"]
 CMD ["-addr", "0.0.0.0:8080"]

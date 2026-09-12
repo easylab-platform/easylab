@@ -33,6 +33,13 @@ type SandboxSpec struct {
 	// Profile carries the resolved runtime profile's device/security/resources
 	// (nil for the plain linux case, which uses built-in defaults).
 	Profile *RuntimeProfile
+
+	// WorkerBinHostDir, when set, mounts a hostPath directory at
+	// /easylab-worker and runs /easylab-worker/easyworker (job/build pods that
+	// inject the worker into a toolchain image without a derived image).
+	WorkerBinHostDir string
+	// NoService skips the ClusterIP Service (ephemeral jobs dial the pod IP).
+	NoService bool
 }
 
 // SandboxStatus is a live sandbox view.
@@ -138,6 +145,14 @@ func (c *Client) LaunchSandbox(ctx context.Context, s SandboxSpec) (SandboxStatu
 			HostPath: &corev1.HostPathVolumeSource{Path: "/dev/net/tun", Type: hpPtr(corev1.HostPathCharDev)}}})
 		mounts = append(mounts, corev1.VolumeMount{Name: "devtun", MountPath: "/dev/net/tun"})
 	}
+	if s.WorkerBinHostDir != "" {
+		vols = append(vols, corev1.Volume{Name: "worker-bin", VolumeSource: corev1.VolumeSource{
+			HostPath: &corev1.HostPathVolumeSource{Path: s.WorkerBinHostDir, Type: hpPtr(corev1.HostPathDirectoryOrCreate)}}})
+		mounts = append(mounts, corev1.VolumeMount{Name: "worker-bin", MountPath: "/easylab-worker"})
+		if len(main.Command) == 0 {
+			main.Command = []string{"/easylab-worker/easyworker"}
+		}
+	}
 	main.VolumeMounts = append(main.VolumeMounts, mounts...)
 	pod.Spec.Volumes = vols
 	pod.Spec.Containers = []corev1.Container{main}
@@ -151,15 +166,17 @@ func (c *Client) LaunchSandbox(ctx context.Context, s SandboxSpec) (SandboxStatu
 	if _, err := c.cs.CoreV1().Pods(c.namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 		return SandboxStatus{}, fmt.Errorf("create pod: %w", err)
 	}
-	svc := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: s.Name, Namespace: c.namespace, Labels: map[string]string{"app": s.Name}},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{"app": s.Name},
-			Ports:    []corev1.ServicePort{{Name: "worker", Port: port, TargetPort: intstr.FromInt32(port)}},
-		},
-	}
-	if _, err := c.cs.CoreV1().Services(c.namespace).Create(ctx, svc, metav1.CreateOptions{}); err != nil {
-		return SandboxStatus{}, fmt.Errorf("create service: %w", err)
+	if !s.NoService {
+		svc := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: s.Name, Namespace: c.namespace, Labels: map[string]string{"app": s.Name}},
+			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{"app": s.Name},
+				Ports:    []corev1.ServicePort{{Name: "worker", Port: port, TargetPort: intstr.FromInt32(port)}},
+			},
+		}
+		if _, err := c.cs.CoreV1().Services(c.namespace).Create(ctx, svc, metav1.CreateOptions{}); err != nil {
+			return SandboxStatus{}, fmt.Errorf("create service: %w", err)
+		}
 	}
 	return c.Status(ctx, s.Name)
 }

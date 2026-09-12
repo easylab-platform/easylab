@@ -123,7 +123,7 @@ func main() {
 	var sK8s *k8s.Client
 	if kc, kerr := k8s.New(k8s.Config{
 		Namespace:     ns,
-		BuildkitImage: envOrStr("EASYLAB_BUILDKIT_IMAGE", "moby/buildkit:rootless"),
+		BuildkitImage: envOrStr("EASYLAB_BUILDKIT_IMAGE", "easylab/buildkit-worker:latest"),
 		RegistryHost:  registryHost,
 		RegistryToken: envOrStr("EASYVCS_TOKEN", "devtoken"),
 		Proxy:         envOrStr("EASYLAB_UPSTREAM_PROXY", ""),
@@ -134,6 +134,16 @@ func main() {
 		log.Printf("k8s backend disabled: %v", kerr)
 	}
 	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, sbx: sbxReg, k8s: sK8s, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
+
+	// Publish the worker binary to the shared /data mount so build/job pods
+	// can inject it from a hostPath without a per-job derived image.
+	if s.k8s != nil {
+		if bin, berr := os.ReadFile(workerBinPath()); berr == nil {
+			if perr := publishWorker(bin); perr != nil {
+				log.Printf("publish worker binary: %v", perr)
+			}
+		}
+	}
 
 	// Start the background mirror scheduler (push on-change, pull on-interval).
 	go s.runMirrorLoop(context.Background())

@@ -9,3 +9,6 @@
 go.work.bak
 *.db
 /worker-bin/
+
+# buildkit-worker build output
+.last-buildkit-image

@@ -23,8 +23,8 @@ type Client struct {
 	cs        kubernetes.Interface
 	namespace string
 
-	// buildkitImage is the official rootless buildkit image used for ephemeral
-	// build pods.
+	// buildkitImage is the easylab buildkit-worker image (buildkitd +
+	// easyworker in one container) run as an ephemeral job for builds.
 	buildkitImage string
 	// registryHost is the registry host builds push to and workers pull from.
 	// Defaults to the in-cluster Service DNS (easylab.<ns>.svc.cluster.local:80)
@@ -83,7 +83,7 @@ func newClient(cs kubernetes.Interface, cfg Config) *Client {
 		cfg.Namespace = "default"
 	}
 	if cfg.BuildkitImage == "" {
-		cfg.BuildkitImage = "moby/buildkit:rootless"
+		cfg.BuildkitImage = "easylab/buildkit-worker:latest"
 	}
 	if cfg.RegistryHost == "" {
 		cfg.RegistryHost = "easylab"
@@ -118,3 +118,7 @@ func (c *Client) Clientset() kubernetes.Interface { return c.cs }
 func (c *Client) ServiceDNS(name string) string {
 	return fmt.Sprintf("%s.%s.svc.cluster.local", name, c.namespace)
 }
+
+// WorkerHostDir returns the node hostPath directory holding the published
+// worker binary (empty when the host data dir is unknown).
+func (c *Client) WorkerHostDir() string { return workerHostDir() }

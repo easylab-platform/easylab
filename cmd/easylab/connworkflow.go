@@ -47,6 +47,10 @@ func NewWorkflowService(s *server) *connWorkflow {
 	back.SetWorkspaceExporter(func(org, repo, branch, dir string) error {
 		return exportRepoTree(s, org, repo, branch, dir)
 	})
+	// Seed CI job sandboxes with the same tree (as a tar).
+	back.SetWorkspaceTarball(func(org, repo, branch string) ([]byte, error) {
+		return exportRepoTar(s, org, repo, branch)
+	})
 	c := &connWorkflow{s: s, reg: reg, logHub: ci.NewJobLogHub()}
 	c.sch = ci.NewScheduler(reg, back, func(jobID, line string) {
 		c.logHub.Log(jobID, line)
@@ -380,6 +384,22 @@ func exportRepoTree(s *server, org, repoName, branch, dir string) error {
 		return err
 	}
 	return extractTarTo(dir, tarball)
+}
+
+// exportRepoTar returns the org/repo@branch tree as a tarball (used to seed a
+// CI job sandbox's workspace).
+func exportRepoTar(s *server, org, repoName, branch string) ([]byte, error) {
+	r, err := s.cs.OpenRepo(store.RepoRef{Namespace: org, Name: repoName})
+	if err != nil {
+		return nil, fmt.Errorf("open %s/%s: %w", org, repoName, err)
+	}
+	ws := revision.NewWorkspace(r)
+	treeID, err := treeOfRef(ws, r, branch)
+	if err != nil {
+		return nil, fmt.Errorf("ref %s: %w", branch, err)
+	}
+	tarball, _, err := buildTreeTar(ws, treeID)
+	return tarball, err
 }
 
 // extractTarTo unpacks a tarball into dir (regular files + directories).

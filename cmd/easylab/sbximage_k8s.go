@@ -137,3 +137,46 @@ func workerBinPath() string {
 	}
 	return "/usr/local/lib/easyworker/easyworker-linux-amd64"
 }
+
+// workerHostPath returns the hostPath of the worker binary (published in the
+// image under /data), so job/build pods can mount it from the node without a
+// per-job derived image. Best effort: empty when the host data dir is unknown
+// or the binary is absent.
+func workerHostPath() string {
+	root := os.Getenv("EASYLAB_HOST_DATA_DIR")
+	if root == "" {
+		return ""
+	}
+	p := filepath.Join(root, "worker", "easyworker")
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
+}
+
+// workerHostDir returns the hostPath directory holding the worker binary.
+func workerHostDir() string {
+	p := workerHostPath()
+	if p == "" {
+		return ""
+	}
+	return filepath.Dir(p)
+}
+
+// publishWorker copies the worker binary to /data/worker/easyworker so the
+// hostPath is available to build/job pods. Idempotent.
+func publishWorker(bin []byte) error {
+	dir := filepath.Join(k8s.DataDir(), "worker")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	p := filepath.Join(dir, "easyworker")
+	if err := os.WriteFile(p, bin, 0o755); err != nil {
+		return err
+	}
+	// Match the rootless buildkit job's uid 1000/10000 so the binary is
+	// executable there.
+	_ = os.Chmod(p, 0o755)
+	_ = os.Chmod(dir, 0o755)
+	return nil
+}

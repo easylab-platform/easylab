@@ -3,8 +3,8 @@ package main
 import (
 	"archive/tar"
 	"bytes"
-	"context"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -13,11 +13,11 @@ import (
 
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 
+	"connectrpc.com/connect"
 	artifactkit "github.com/easylab-platform/artifact/core"
 	"github.com/easylab-platform/easyvcs/mirror"
 	"github.com/easylab-platform/easyvcs/revision"
 	"github.com/easylab-platform/easyvcs/store"
-	"connectrpc.com/connect"
 )
 
 // DeleteOrg removes every repository under a namespace/organization.
@@ -306,4 +306,3 @@ func releaseViewFromArtifact(a artifactkit.Artifact) *easylabv1.ReleaseView {
 	}
 	return view
 }
-

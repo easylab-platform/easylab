@@ -1,8 +1,8 @@
 package main
 
 import (
-	"sort"
 	"context"
+	"sort"
 	"strings"
 
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"

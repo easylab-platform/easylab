@@ -74,10 +74,10 @@ func defaultRuntimes() map[string]RuntimeProfile {
 			ReadyTimeout: "60s",
 		},
 		"windows": {
-			Name:       "windows",
-			Derived:    false,
-			Image:      "easylab/vm-images/easyworker-windows:v1.2.0",
-			WorkerPort: 48080,
+			Name:         "windows",
+			Derived:      false,
+			Image:        "easylab/vm-images/easyworker-windows:v1.2.0",
+			WorkerPort:   48080,
 			NeedsTun:     true,
 			DeviceLimits: map[string]string{"squat.ai/kvm": "1"},
 			SecurityContext: &corev1.SecurityContext{
@@ -103,10 +103,10 @@ func defaultRuntimes() map[string]RuntimeProfile {
 			ReadyTimeout: "15m",
 		},
 		"macos": {
-			Name:       "macos",
-			Derived:    false,
-			Image:      "easylab/vm-images/easyworker-macos:v1.2.0",
-			WorkerPort: 48080,
+			Name:         "macos",
+			Derived:      false,
+			Image:        "easylab/vm-images/easyworker-macos:v1.2.0",
+			WorkerPort:   48080,
 			NeedsTun:     true,
 			DeviceLimits: map[string]string{"squat.ai/kvm": "1"},
 			SecurityContext: &corev1.SecurityContext{

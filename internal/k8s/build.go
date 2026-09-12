@@ -1,18 +1,17 @@
 package k8s
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // BuildOptions describes one image build.
@@ -24,288 +23,157 @@ type BuildOptions struct {
 	Image      string // destination ref, pushed to easylab's OCI registry
 	BuildArgs  map[string]string
 	NoCache    bool
+	// Timeout bounds the build (0 => 30m).
+	Timeout time.Duration
 }
 
-// BuildImage builds + pushes an image using an ephemeral, NON-privileged
-// rootless buildkit pod. Two containers share a unix-socket emptyDir:
-//   - buildkitd (rootless, SYS_ADMIN + Unconfined, same posture as the shared
-//     buildkitd) serves the build
-//   - buildctl drives the build and pushes to easylab's registry
-//
-// The pod mounts the shared data root (hostPath), so easylab reads build
-// progress straight off <meta>/log and the exit code off <meta>/status —
-// no pods/log or pods/exec RBAC needed.
-//
-// Cache is registry-backed (type=registry,ref=<host>/<cacheRepo>) so it is
-// shared across ephemeral build pods and survives pod recreation.
+// BuildImage builds + pushes an image using the unified job primitive. The
+// image is the easylab buildkit-worker (buildkitd + easyworker in one
+// container); easylab launches it as a normal worker job, syncs the build
+// context into it and runs `buildctl` through the worker API — no sidecar, no
+// shared socket volume, no hostPath meta files. Cache is registry-backed
+// (type=registry) so it is shared across ephemeral build pods and survives
+// pod recreation.
 func (c *Client) BuildImage(ctx context.Context, opt BuildOptions, logf func(string)) error {
-	if _, err := c.hostDataRoot(); err != nil {
-		return err
+	if opt.Image == "" {
+		return fmt.Errorf("build image required")
 	}
-	id := fmt.Sprintf("b%d", time.Now().UnixNano())
-	// Local file I/O uses CONTAINER paths (under /data, the hostPath mount);
-	// only the pod spec uses the corresponding HOST paths.
-	base := filepath.Join(dataDir(), "buildtmp", id)
-	metaDir := filepath.Join(base, "meta")
-	if err := os.MkdirAll(metaDir, 0o755); err != nil {
-		return err
+	ctxDir := opt.ContextDir
+	if ctxDir == "" {
+		return fmt.Errorf("build context required")
 	}
-	// The build containers run as uid 1000 (rootless buildkit), while easylab
-	// runs as root. hostPath volumes keep the creator's ownership, so open the
-	// meta dir so buildctl can write log/status and read config.
-	if err := os.Chmod(metaDir, 0o777); err != nil {
-		return err
+	tarball, err := tarDir(ctxDir)
+	if err != nil {
+		return fmt.Errorf("tar build context: %w", err)
 	}
-	hostBase := c.hostPath(base)
-	hostCtx := c.hostPath(opt.ContextDir)
 	filename := opt.Dockerfile
 	if filename == "" {
 		filename = "Dockerfile"
 	}
-	if err := c.writeBuildMeta(metaDir, opt, filename); err != nil {
+	token, err := c.randomToken()
+	if err != nil {
 		return err
 	}
-	logPath := filepath.Join(metaDir, "log")
-	statusPath := filepath.Join(metaDir, "status")
-	_ = os.Remove(statusPath)
 
-	pod := c.buildPodSpec(id, hostCtx, hostBase, opt)
-	if _, err := c.cs.CoreV1().Pods(c.namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("create build pod: %w", err)
+	env := map[string]string{
+		"EASYLAB_REGISTRY_HOST":  c.registryHost,
+		"EASYLAB_REGISTRY_TOKEN": c.registryToken,
 	}
-	defer func() {
-		_ = c.cs.CoreV1().Pods(c.namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})
-	}()
+	for k, v := range c.proxyVars() {
+		env[k] = v
+	}
 
-	if err := c.tailBuild(ctx, logPath, statusPath, logf); err != nil {
-		return err
+	name := fmt.Sprintf("easylab-build-%d", time.Now().UnixNano())
+	spec := JobSpec{
+		Name:      name,
+		Image:     c.qualifyRuntimeImage(c.buildkitImage),
+		Workspace: "/workspace",
+		Env:       env,
+		Tarball:   tarball,
+		Commands:  []JobCommand{{Name: "build", Run: buildctlCommand(c, opt, filename), Workdir: "/workspace"}},
+		Timeout:   opt.Timeout,
+		Profile: &RuntimeProfile{
+			Name:         "buildkit",
+			Derived:      false,
+			WorkerPort:   48080,
+			ReadyTimeout: "2m",
+			// Match the cluster buildkitd posture: rootless uid/gid 1000 with
+			// SYS_ADMIN and unconfined seccomp/apparmor. RunAsGroup and
+			// appArmorProfile are required for rootlesskit to set up its mount
+			// namespace, exactly as the shared buildkitd StatefulSet does.
+			SecurityContext: &corev1.SecurityContext{
+				RunAsUser:                int64Ptr(1000),
+				RunAsGroup:               int64Ptr(1000),
+				RunAsNonRoot:             boolPtr(true),
+				AllowPrivilegeEscalation: boolPtr(true),
+				Capabilities:             &corev1.Capabilities{Add: []corev1.Capability{"SYS_ADMIN"}},
+				AppArmorProfile:          &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined},
+				SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined},
+			},
+		},
 	}
-	if b, err := os.ReadFile(statusPath); err != nil || strings.TrimSpace(string(b)) != "0" {
-		return fmt.Errorf("buildkit build failed (exit %s)", strings.TrimSpace(string(b)))
+	res, err := c.RunJob(ctx, spec, token, logf)
+	if err != nil {
+		return fmt.Errorf("buildkit build failed: %w", err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("buildkit build failed (exit %d)", res.ExitCode)
 	}
 	return nil
 }
 
-// writeBuildMeta writes the buildkitd registry config and the buildctl args
-// into the shared meta dir (visible to the build pod via hostPath).
-func (c *Client) writeBuildMeta(metaDir string, opt BuildOptions, filename string) error {
-	auth := base64.StdEncoding.EncodeToString([]byte("agent:" + c.registryToken))
-	// Register credentials under both the registry host:port and the bare host,
-	// so buildkit matches regardless of how it normalizes the ref (it uses the
-	// host of the *challenge realm* for the token request, which may omit :80).
-	auths := map[string]map[string]string{c.registryHost: {"auth": auth}}
-	if host, _, ok := strings.Cut(c.registryHost, ":"); ok {
-		auths[host] = map[string]string{"auth": auth}
+// buildctlCommand assembles the buildctl invocation the worker runs against
+// its local buildkitd. The worker's builtin shell runs an allowlisted env, so
+// the daemon address is passed explicitly (not via BUILDKIT_HOST). Progress is
+// merged to stdout (2>&1) so WatchJob streams the whole build live.
+func buildctlCommand(c *Client, opt BuildOptions, filename string) string {
+	args := []string{
+		"buildctl --addr unix:///run/user/1000/buildkit/buildkitd.sock build",
+		"--frontend dockerfile.v0",
+		"--local context=/workspace",
+		"--local dockerfile=/workspace",
+		"--opt filename=" + filename,
 	}
-	cfg := map[string]any{"auths": auths}
-	b, _ := json.Marshal(cfg)
-	if err := os.WriteFile(filepath.Join(metaDir, "config.json"), b, 0o644); err != nil {
-		return err
-	}
-	// Trust easylab's own registry. It is an in-cluster plain-HTTP Service
-	// (easylab.<ns>.svc.cluster.local:80) by default; the same config works
-	// for an external HTTPS registry (http falls back to https, insecure skips
-	// the self-signed cert). The push token is obtained by buildctl from the
-	// /token realm using the docker config credentials above.
-	toml := fmt.Sprintf("[registry.%q]\n  http = true\n  insecure = true\n", c.registryHost)
-	if err := os.WriteFile(filepath.Join(metaDir, "buildkitd.toml"), []byte(toml), 0o644); err != nil {
-		return err
-	}
-	args := []string{"--opt", "filename=" + filename}
 	for k, v := range opt.BuildArgs {
-		args = append(args, "--opt", "build-arg:"+k+"="+v)
+		args = append(args, "--opt build-arg:"+k+"="+v)
 	}
 	if opt.NoCache {
 		args = append(args, "--no-cache")
 	}
-	// Registry cache: shared across ephemeral pods, survives recreation.
 	if ref := c.cacheRefFor(opt.Image); ref != "" {
-		args = append(args, "--export-cache", "type=registry,ref="+ref+",mode=max",
-			"--import-cache", "type=registry,ref="+ref)
+		args = append(args, "--export-cache type=registry,ref="+ref+",mode=max")
+		args = append(args, "--import-cache type=registry,ref="+ref)
 	}
-	return os.WriteFile(filepath.Join(metaDir, "buildctl.args"), []byte(joinLines(args)), 0o644)
+	args = append(args, "--output type=image,name="+opt.Image+",push=true")
+	args = append(args, "--progress plain")
+	return strings.Join(args, " ") + " 2>&1"
 }
 
-// proxyEnv returns HTTP(S)_PROXY/NO_PROXY env for the build containers so
-// base-image/manifest fetches route through the upstream proxy.
-func (c *Client) proxyEnv() []corev1.EnvVar {
-	if c.proxy == "" {
-		return nil
-	}
-	return []corev1.EnvVar{
-		{Name: "HTTP_PROXY", Value: c.proxy},
-		{Name: "HTTPS_PROXY", Value: c.proxy},
-		{Name: "NO_PROXY", Value: "localhost,127.0.0.1,.svc.cluster.local,.svc," + c.registryHost},
-	}
-}
-
-// cacheRefFor derives the registry cache tag for an image ref
-// (<host>/<repo>:<tag> -> <host>/easylab-cache/<repo>:<tag>).
-func (c *Client) cacheRefFor(image string) string {
-	name := image
-	host := ""
-	if i := strings.IndexByte(name, '/'); i >= 0 {
-		host = name[:i]
-	}
-	tag := "latest"
-	if i := strings.LastIndexByte(name, ':'); i >= 0 && i > strings.LastIndexByte(name, '/') {
-		tag = name[i+1:]
-		name = name[:i]
-	}
-	repo := name
-	if host != "" {
-		repo = name[len(host)+1:]
-	}
-	return fmt.Sprintf("%s/easylab-cache/%s:%s", c.registryHost, repo, tag)
-}
-
-func (c *Client) buildPodSpec(id, hostCtx, hostBase string, opt BuildOptions) *corev1.Pod {
-	unconfined := corev1.SeccompProfileTypeUnconfined
-	appArmor := corev1.AppArmorProfileTypeUnconfined
-	rootless := true
-	uid := int64(1000)
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "easylab-build-" + id, Namespace: c.namespace, Labels: map[string]string{"easylab/build": "1"}},
-		Spec: corev1.PodSpec{
-			RestartPolicy: corev1.RestartPolicyNever,
-			SecurityContext: &corev1.PodSecurityContext{
-				SeccompProfile: &corev1.SeccompProfile{Type: unconfined},
-			},
-			Volumes: []corev1.Volume{
-				{Name: "sock", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-				{Name: "ctx", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: hostCtx, Type: hpPtr(corev1.HostPathDirectory)}}},
-				{Name: "meta", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: hostBase + "/meta", Type: hpPtr(corev1.HostPathDirectoryOrCreate)}}},
-			},
-			Containers: []corev1.Container{
-				{
-					Name:  "buildkitd",
-					Image: c.buildkitImage,
-					Args: []string{
-						"--addr", "unix:///run/buildkit/buildkitd.sock",
-						"--config", "/meta/buildkitd.toml",
-						// Rootless buildkit: run the OCI worker without an
-						// inner process sandbox (the container already bounds
-						// the build).
-						"--oci-worker-no-process-sandbox",
-					},
-					SecurityContext: &corev1.SecurityContext{
-						RunAsUser:                &uid,
-						RunAsNonRoot:             &rootless,
-						AllowPrivilegeEscalation: boolPtr(true),
-						AppArmorProfile:          &corev1.AppArmorProfile{Type: appArmor},
-						Capabilities:             &corev1.Capabilities{Add: []corev1.Capability{"SYS_ADMIN"}},
-						SeccompProfile:           &corev1.SeccompProfile{Type: unconfined},
-					},
-					Env: append([]corev1.EnvVar{
-						// Registry auth (push + base-image pulls) happens in the
-						// buildkitd daemon, so it must read the docker config.
-						{Name: "DOCKER_CONFIG", Value: "/meta"},
-					}, c.proxyEnv()...),
-					VolumeMounts: []corev1.VolumeMount{
-						{Name: "sock", MountPath: "/run/buildkit"},
-						{Name: "meta", MountPath: "/meta"},
-					},
-					Resources: buildResources("1", "2Gi"),
-				},
-				{
-					Name:    "buildctl",
-					Image:   c.buildkitImage,
-					Command: []string{"/bin/sh", "-c"},
-					Args: []string{`set -e
-: > /meta/log
-buildctl --addr unix:///run/buildkit/buildkitd.sock build \
-  --frontend dockerfile.v0 \
-  --local context=/ctx \
-  --local dockerfile=/ctx \
-  $(cat /meta/buildctl.args) \
-  --output type=image,name="$IMAGE",push=true \
-  --progress plain >>/meta/log 2>&1
-echo $? > /meta/status`},
-					Env: append([]corev1.EnvVar{
-						{Name: "IMAGE", Value: opt.Image},
-						{Name: "DOCKER_CONFIG", Value: "/meta"},
-					}, c.proxyEnv()...),
-					SecurityContext: &corev1.SecurityContext{RunAsUser: &uid, RunAsNonRoot: &rootless},
-					VolumeMounts: []corev1.VolumeMount{
-						{Name: "sock", MountPath: "/run/buildkit"},
-						{Name: "ctx", MountPath: "/ctx", ReadOnly: true},
-						{Name: "meta", MountPath: "/meta"},
-					},
-					Resources: buildResources("1", "1Gi"),
-				},
-			},
-		},
-	}
-}
-
-// buildResources returns requests+limits (the namespace quota requires both).
-func buildResources(cpu, mem string) corev1.ResourceRequirements {
-	return corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse(cpu),
-			corev1.ResourceMemory: resource.MustParse(mem),
-		},
-		Limits: corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse(cpu),
-			corev1.ResourceMemory: resource.MustParse(mem),
-		},
-	}
-}
-
-// tailBuild streams the log file to logf until the status file appears.
-func (c *Client) tailBuild(ctx context.Context, logPath, statusPath string, logf func(string)) error {
-	deadline := time.Now().Add(30 * time.Minute)
-	offset := int64(0)
-	for time.Now().Before(deadline) {
-		if f, err := os.Open(logPath); err == nil {
-			if _, err := f.Seek(offset, 0); err == nil {
-				buf := make([]byte, 32*1024)
-				for {
-					n, rerr := f.Read(buf)
-					if n > 0 {
-						if logf != nil {
-							for _, line := range splitLines(string(buf[:n])) {
-								logf(line)
-							}
-						}
-						offset += int64(n)
-					}
-					if rerr != nil {
-						break
-					}
-				}
-			}
-			f.Close()
+// tarDir packages a directory tree (files + dirs) as an uncompressed tar. The
+// paths are relative to dir (the worker unpacks at the workspace root).
+func tarDir(dir string) ([]byte, error) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
 		}
-		if _, err := os.Stat(statusPath); err == nil {
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
 			return nil
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(300 * time.Millisecond):
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
 		}
+		hdr.Name = filepath.ToSlash(rel)
+		if info.IsDir() {
+			hdr.Name += "/"
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			_, cerr := io.Copy(tw, f)
+			f.Close()
+			if cerr != nil {
+				return cerr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return fmt.Errorf("build timed out")
-}
-
-func (c *Client) hostDataRoot() (string, error) {
-	if v := os.Getenv("EASYLAB_HOST_DATA_DIR"); v != "" {
-		return v, nil
+	if err := tw.Close(); err != nil {
+		return nil, err
 	}
-	return "", fmt.Errorf("EASYLAB_HOST_DATA_DIR unset (host path of the easylab /data mount)")
+	return buf.Bytes(), nil
 }
-
-// hostPath maps an in-container data path (/data/...) to its host path.
-func (c *Client) hostPath(containerPath string) string {
-	root, _ := c.hostDataRoot()
-	dataDir := dataDir()
-	rel := containerPath
-	if len(rel) >= len(dataDir) && rel[:len(dataDir)] == dataDir {
-		rel = rel[len(dataDir):]
-	}
-	return filepath.Join(root, rel)
-}
-
-func hpPtr(t corev1.HostPathType) *corev1.HostPathType { return &t }
-func boolPtr(b bool) *bool                             { return &b }

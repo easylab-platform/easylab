@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	artifactkit "github.com/easylab-platform/artifact/core"
 	"github.com/easylab-platform/easyvcs/object"
 	"github.com/easylab-platform/easyvcs/revision"
-	artifactkit "github.com/easylab-platform/artifact/core"
 	"github.com/easylab-platform/easyvcs/store"
 )
 

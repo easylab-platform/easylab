@@ -20,7 +20,7 @@ registry:
 gateway:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
-    tag: "20260912134022"
+    tag: "20260912153837"
     pullPolicy: IfNotPresent
   # External base URL advertised to clients (OCI /token realm, git, ...).
   # Empty derives it from the install namespace: the in-cluster Service URL
@@ -47,7 +47,9 @@ gateway:
 
 # ---- Kubernetes execution backend tuning ----
 backend:
-  buildkitImage: moby/buildkit:rootless
+  # One-container buildkit-worker (buildkitd + easyworker); easylab runs
+  # builds as worker jobs. Image ref is qualified with the registry host.
+  buildkitImage: forgejo.develop.10.199.64.20.nip.io/easylab/buildkit-worker:20260912153825
   # Host path backing the /data hostPath mount (ephemeral build pods read the
   # build context + write logs there).
   hostDataDir: /home/develop/.easylab
