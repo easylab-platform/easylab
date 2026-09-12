@@ -20,7 +20,7 @@ registry:
 gateway:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
-    tag: "20260912161741"
+    tag: "20260912173605"
     pullPolicy: IfNotPresent
   # External base URL advertised to clients (OCI /token realm, git, ...).
   # Empty derives it from the install namespace: the in-cluster Service URL
@@ -62,13 +62,13 @@ backend:
 sandboxes:
   runtimes:
     windows:
-      image: easylab/vm-images/easyworker-windows:v1.2.0
+      image: easylab/vm-images/easyworker-windows:v1.2.1
       readyTimeout: 15m
       nodeSelector:
         kubernetes.io/hostname: iv-yebxendp8gwh2yokqhjs
       imagePullSecrets: []
     macos:
-      image: easylab/vm-images/easyworker-macos:v1.2.0
+      image: easylab/vm-images/easyworker-macos:v1.2.1
       readyTimeout: 15m
       nodeSelector:
         kubernetes.io/hostname: iv-yebxendp8gwh2yokqhjs

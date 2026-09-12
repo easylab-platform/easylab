@@ -76,7 +76,7 @@ func defaultRuntimes() map[string]RuntimeProfile {
 		"windows": {
 			Name:         "windows",
 			Derived:      false,
-			Image:        "easylab/vm-images/easyworker-windows:v1.2.0",
+			Image:        "easylab/vm-images/easyworker-windows:v1.2.1",
 			WorkerPort:   48080,
 			NeedsTun:     true,
 			DeviceLimits: map[string]string{"squat.ai/kvm": "1"},
@@ -105,7 +105,7 @@ func defaultRuntimes() map[string]RuntimeProfile {
 		"macos": {
 			Name:         "macos",
 			Derived:      false,
-			Image:        "easylab/vm-images/easyworker-macos:v1.2.0",
+			Image:        "easylab/vm-images/easyworker-macos:v1.2.1",
 			WorkerPort:   48080,
 			NeedsTun:     true,
 			DeviceLimits: map[string]string{"squat.ai/kvm": "1"},
