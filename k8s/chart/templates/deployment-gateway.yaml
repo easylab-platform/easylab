@@ -57,8 +57,6 @@ spec:
               value: {{ .Values.backend.buildkitImage | quote }}
             - name: EASYLAB_REGISTRY_HOST
               value: {{ include "easylab.registryHost" . | quote }}
-            - name: EASYLAB_PULL_SECRET
-              value: {{ .Values.backend.pullSecret | quote }}
             {{- with .Values.gateway.upstreamProxy }}
             - name: EASYLAB_UPSTREAM_PROXY
               value: {{ . | quote }}

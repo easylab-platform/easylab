@@ -44,6 +44,8 @@ github.com/easylab-platform/artifact/conan v0.2.0 h1:lVfFVNPMZhVXnE4n82FJw/hDeoA
 github.com/easylab-platform/artifact/conan v0.2.0/go.mod h1:ksIv9Ux5E6cCkA80jsNpWryxxNB1Ie8ZINepyo+PLAk=
 github.com/easylab-platform/artifact/core v0.3.0 h1:vtX4cSQn5QYqLdKP3/kJAUuNqIs2/cWfa3d+HhZYfoE=
 github.com/easylab-platform/artifact/core v0.3.0/go.mod h1:f+3LQI8t9mbU2N1pqgX23o4Fob4AV7wY5OmqNkU5gU4=
+github.com/easylab-platform/artifact/core v0.3.1 h1:ymtttjPOjeIpTtFLyhIu9jDdZMy90/t33ToIV4cKJkA=
+github.com/easylab-platform/artifact/core v0.3.1/go.mod h1:f+3LQI8t9mbU2N1pqgX23o4Fob4AV7wY5OmqNkU5gU4=
 github.com/easylab-platform/artifact/generic v0.2.0 h1:XB3ME6YwRieLVr9N70r2JrImR/mIrKGwOUI4Upcu1wc=
 github.com/easylab-platform/artifact/generic v0.2.0/go.mod h1:81E9jWP8BAANoeGPcbevVmDANkF/0QrE2amOZ2NQfeQ=
 github.com/easylab-platform/artifact/go v0.2.0 h1:Hv0vQ5GYmcm/9zwdgEfl+XTG+ubBVQZVQ0LS7Fb1voA=
@@ -60,6 +62,8 @@ github.com/easylab-platform/artifact/nuget v0.2.0 h1:1JtBMAUVxl0lnoX1B0hdaXalrcA
 github.com/easylab-platform/artifact/nuget v0.2.0/go.mod h1:80WpfjssQkvahN5Kj3nALLCysD5c4uyvA3c7b98XbqI=
 github.com/easylab-platform/artifact/oci v0.2.0 h1:zzpuXls7JCyGEuyMNybeVzU0QnH8WX1ljfAlVcOw17o=
 github.com/easylab-platform/artifact/oci v0.2.0/go.mod h1:DpTYHYOplKfVXyaE2pC78lUCG2Xf3DzipH+/G4xhezA=
+github.com/easylab-platform/artifact/oci v0.2.1 h1:Irg4AYoTz0L6Pcneb7Qu6uCekAgE9MXtChm6dZ/+VPk=
+github.com/easylab-platform/artifact/oci v0.2.1/go.mod h1:DpTYHYOplKfVXyaE2pC78lUCG2Xf3DzipH+/G4xhezA=
 github.com/easylab-platform/artifact/pub v0.2.0 h1:mjAlmpZTR8pCWONrpSeJe1IYD8cMN1I17DWvKwN0kQ4=
 github.com/easylab-platform/artifact/pub v0.2.0/go.mod h1:Y7NwcLyht/urHxJ0oaDgpGtNmj6Xrk4glQ7n0AIL8NY=
 github.com/easylab-platform/artifact/pypi v0.2.0 h1:6w/KBvBRTp0ee1RC6rc3Kjng93i9rTtS/LtNl5BVFek=

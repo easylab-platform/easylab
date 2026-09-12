@@ -65,16 +65,22 @@ ENTRYPOINT ["/usr/local/bin/easyworker"]
 }
 
 // sandboxRegistryRef returns the fully-qualified derived sandbox image ref.
+// The host is the TLS ingress name the node already trusts, so kubelet pulls
+// the derived image anonymously over HTTPS without any cluster registry
+// configuration or pull secret.
 func (s *server) sandboxRegistryRef(short string) string {
-	host := envOrStr("EASYLAB_REGISTRY_HOST", "easylab.temp.svc.cluster.local:80")
+	host := envOrStr("EASYLAB_REGISTRY_HOST", "easylab.temp.10.199.64.20.nip.io")
 	return host + "/easylab/sandbox:" + short
 }
 
 // imageExists reports whether the registry already has the image tag
-// (best effort: a missing repo/tag is a 404; any other failure rebuilds).
+// (best effort: a missing repo/tag is a 404; any other failure rebuilds). The
+// probe uses the in-cluster service URL (always reachable from the pod), while
+// the returned image ref uses the node-facing TLS host.
 func (s *server) imageExists(ctx context.Context, ref string) bool {
-	host, repo, tag := splitRef(ref)
-	u := "http://" + host + "/v2/" + repo + "/manifests/" + tag
+	_, repo, tag := splitRef(ref)
+	base := envOrStr("EASYLAB_ARTIFACT_URL", "http://easylab.temp.svc.cluster.local:80")
+	u := strings.TrimSuffix(base, "/") + "/v2/" + repo + "/manifests/" + tag
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, u, nil)
 	if err != nil {
 		return false

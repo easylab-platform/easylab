@@ -97,4 +97,3 @@ func RewriteImageRef(ref, host string) string {
 	// so the pull goes through easylab's pull-through proxy.
 	return host + "/" + ref
 }
-

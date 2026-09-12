@@ -31,11 +31,6 @@ type Client struct {
 	registryHost string
 	// registryToken authenticates pushes to the easylab OCI registry.
 	registryToken string
-	// buildTarget is unused placeholder; kept for symmetry.
-	buildTarget string
-	// imagePullSecret is attached to sandbox/service pods when pulling from the
-	// easylab registry.
-	imagePullSecret string
 	// proxy is the upstream HTTP(S) proxy used by ephemeral build pods to
 	// reach public registries (base images).
 	proxy string
@@ -46,13 +41,12 @@ type Client struct {
 
 // Config configures a Client.
 type Config struct {
-	Namespace       string
-	BuildkitImage   string
-	RegistryHost    string
-	RegistryToken   string
-	ImagePullSecret string
-	Proxy           string
-	WorkerImage     string
+	Namespace     string
+	BuildkitImage string
+	RegistryHost  string
+	RegistryToken string
+	Proxy         string
+	WorkerImage   string
 }
 
 // New builds a client from the in-cluster config (production) or, when
@@ -89,17 +83,13 @@ func newClient(cs kubernetes.Interface, cfg Config) *Client {
 	if cfg.RegistryHost == "" {
 		cfg.RegistryHost = "easylab"
 	}
-	if cfg.ImagePullSecret == "" {
-		cfg.ImagePullSecret = "easylab-regcred"
-	}
 	return &Client{
 		cs: cs, namespace: cfg.Namespace,
 		buildkitImage: cfg.BuildkitImage,
 		registryHost:  cfg.RegistryHost,
 		registryToken: cfg.RegistryToken,
-		imagePullSecret: cfg.ImagePullSecret,
-		proxy:           cfg.Proxy,
-		workerImage:     cfg.WorkerImage,
+		proxy:         cfg.Proxy,
+		workerImage:   cfg.WorkerImage,
 	}
 }
 

@@ -59,14 +59,14 @@ func envOrStr(k, def string) string {
 }
 
 type server struct {
-	cs       *store.CentralStore
-	registry *artifactkit.Registry
-	selfBase string
-	ops      *opsState
-	sbx      *sbxreg.Registry
-	k8s      *k8s.Client
-	workflows sync.Map       // workflow id -> *ci.Workflow (declarations)
-	runs     sync.Map       // run id -> *ci.Run (instantiations)
+	cs        *store.CentralStore
+	registry  *artifactkit.Registry
+	selfBase  string
+	ops       *opsState
+	sbx       *sbxreg.Registry
+	k8s       *k8s.Client
+	workflows sync.Map // workflow id -> *ci.Workflow (declarations)
+	runs      sync.Map // run id -> *ci.Run (instantiations)
 	// auth is the artifactkit Auth over the easyvcs credential store
 	// (unified minted-token semantics via StoreAuth; see easyvcs_token_store.go).
 	auth artifactkit.Auth
@@ -113,10 +113,9 @@ func main() {
 	if kc, kerr := k8s.New(k8s.Config{
 		Namespace:     envOrStr("EASYLAB_NAMESPACE", "temp"),
 		BuildkitImage: envOrStr("EASYLAB_BUILDKIT_IMAGE", "moby/buildkit:rootless"),
-		RegistryHost:  envOrStr("EASYLAB_REGISTRY_HOST", "easylab.temp.svc.cluster.local:80"),
+		RegistryHost:  envOrStr("EASYLAB_REGISTRY_HOST", "easylab.temp.10.199.64.20.nip.io"),
 		RegistryToken: envOrStr("EASYVCS_TOKEN", "devtoken"),
-		ImagePullSecret: envOrStr("EASYLAB_PULL_SECRET", "easylab-regcred"),
-		Proxy:           envOrStr("EASYLAB_UPSTREAM_PROXY", ""),
+		Proxy:         envOrStr("EASYLAB_UPSTREAM_PROXY", ""),
 	}); kerr == nil {
 		opsState.services = ops.NewK8sServiceRunner(kc)
 		sK8s = kc

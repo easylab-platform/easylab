@@ -59,9 +59,8 @@ func (c *Client) LaunchSandbox(ctx context.Context, s SandboxSpec) (SandboxStatu
 		ObjectMeta: metav1.ObjectMeta{Name: s.Name, Namespace: c.namespace,
 			Labels: map[string]string{"easylab/sandbox": "1", "app": s.Name}},
 		Spec: corev1.PodSpec{
-			RestartPolicy:    corev1.RestartPolicyAlways,
-			NodeSelector:     s.NodeSelector,
-			ImagePullSecrets: c.pullSecrets(),
+			RestartPolicy: corev1.RestartPolicyAlways,
+			NodeSelector:  s.NodeSelector,
 		},
 	}
 	env := []corev1.EnvVar{
@@ -113,6 +112,12 @@ func (c *Client) LaunchSandbox(ctx context.Context, s SandboxSpec) (SandboxStatu
 	pod.Spec.Volumes = vols
 	pod.Spec.Containers = []corev1.Container{main}
 
+	// Idempotent launch: a session reuses the same sandbox name. Recreate the
+	// pod so the worker picks up the freshly minted WORKER_TOKEN (the registry
+	// token is regenerated on every LaunchSandbox).
+	if err := c.deleteSandboxWait(ctx, s.Name); err != nil {
+		return SandboxStatus{}, err
+	}
 	if _, err := c.cs.CoreV1().Pods(c.namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 		return SandboxStatus{}, fmt.Errorf("create pod: %w", err)
 	}
@@ -144,16 +149,21 @@ func (c *Client) Status(ctx context.Context, name string) (SandboxStatus, error)
 	return st, nil
 }
 
-// WaitSandboxReady polls the worker health endpoint on the pod IP.
+// WaitSandboxReady polls until the worker is reachable through its Service
+// (the same path every later call uses). Checking the pod IP alone races
+// kube-proxy: the pod can accept TCP before the ClusterIP forwards, which
+// surfaced as "connection refused" on the first SyncFolder.
 func (c *Client) WaitSandboxReady(ctx context.Context, name string, port int32, timeout time.Duration) error {
 	if port == 0 {
 		port = 48080
 	}
+	svcAddr := fmt.Sprintf("%s:%d", c.ServiceDNS(name), port)
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		p, err := c.cs.CoreV1().Pods(c.namespace).Get(ctx, name, metav1.GetOptions{})
 		if err == nil && p.Status.Phase == corev1.PodRunning && p.Status.PodIP != "" {
-			if dialHealth(ctx, p.Status.PodIP, port) == nil {
+			// Pod is up; require the Service path (ClusterIP -> pod) too.
+			if dialHealth(ctx, p.Status.PodIP, port) == nil && dialAddr(ctx, svcAddr) == nil {
 				return nil
 			}
 		}
@@ -172,6 +182,29 @@ func (c *Client) DeleteSandbox(ctx context.Context, name string) error {
 	err := c.cs.CoreV1().Pods(c.namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil && !isNotFound(err) {
 		return err
+	}
+	return nil
+}
+
+// deleteSandboxWait removes the pod + service and waits until the pod is gone,
+// so a subsequent create with the same name does not conflict.
+func (c *Client) deleteSandboxWait(ctx context.Context, name string) error {
+	_ = c.cs.CoreV1().Services(c.namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	err := c.cs.CoreV1().Pods(c.namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !isNotFound(err) {
+		return err
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		_, gerr := c.cs.CoreV1().Pods(c.namespace).Get(ctx, name, metav1.GetOptions{})
+		if isNotFound(gerr) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
 	}
 	return nil
 }
@@ -196,17 +229,15 @@ func (c *Client) ListSandboxes(ctx context.Context) ([]SandboxStatus, error) {
 	return out, nil
 }
 
-func (c *Client) pullSecrets() []corev1.LocalObjectReference {
-	if c.imagePullSecret == "" {
-		return nil
-	}
-	return []corev1.LocalObjectReference{{Name: c.imagePullSecret}}
-}
-
 // dialHealth opens a TCP connection to the worker port (health probe).
 func dialHealth(ctx context.Context, ip string, port int32) error {
+	return dialAddr(ctx, fmt.Sprintf("%s:%d", ip, port))
+}
+
+// dialAddr opens a TCP connection to host:port (health probe).
+func dialAddr(ctx context.Context, addr string) error {
 	d := net.Dialer{Timeout: time.Second}
-	conn, err := d.DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", ip, port))
+	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}

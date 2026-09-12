@@ -69,10 +69,9 @@ func (c *Client) LaunchService(ctx context.Context, s ServiceSpec) (SandboxStatu
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					NodeSelector:     s.NodeSelector,
-					ImagePullSecrets: c.pullSecrets(),
-					Volumes:          vols,
-					Containers:       []corev1.Container{container},
+					NodeSelector: s.NodeSelector,
+					Volumes:      vols,
+					Containers:   []corev1.Container{container},
 				},
 			},
 		},

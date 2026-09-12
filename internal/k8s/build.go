@@ -102,14 +102,18 @@ func (c *Client) writeBuildMeta(metaDir string, opt BuildOptions, filename strin
 	if err := os.WriteFile(filepath.Join(metaDir, "config.json"), b, 0o644); err != nil {
 		return err
 	}
-	// Trust easylab's own registry over plain HTTP (self-signed/HTTP only).
-	// The push token is obtained by buildkit from the /token endpoint using the
-	// docker config credentials above; buildkitd.toml has no auth field.
-	toml := fmt.Sprintf("[registry.%q]\n  http = true\n  insecure = true\n", c.registryHost)
+	// Trust easylab's own registry. The ref uses the TLS ingress host; the
+	// cert is cluster-signed, so skip verification (insecure => HTTPS with
+	// InsecureSkipVerify). The push token is obtained by buildctl from the
+	// /token realm using the docker config credentials above.
+	toml := fmt.Sprintf("[registry.%q]\n  insecure = true\n", c.registryHost)
 	if err := os.WriteFile(filepath.Join(metaDir, "buildkitd.toml"), []byte(toml), 0o644); err != nil {
 		return err
 	}
 	args := []string{"--opt", "filename=" + filename}
+	// buildctl's session authprovider fetches the token over HTTPS itself; it
+	// needs the same skip-verify override (buildkitd.toml covers the daemon).
+	args = append(args, "--registry-auth-tlscontext", "host="+c.registryHost+",insecure=true")
 	for k, v := range opt.BuildArgs {
 		args = append(args, "--opt", "build-arg:"+k+"="+v)
 	}
@@ -133,7 +137,7 @@ func (c *Client) proxyEnv() []corev1.EnvVar {
 	return []corev1.EnvVar{
 		{Name: "HTTP_PROXY", Value: c.proxy},
 		{Name: "HTTPS_PROXY", Value: c.proxy},
-		{Name: "NO_PROXY", Value: "localhost,127.0.0.1,.svc.cluster.local,.svc"},
+		{Name: "NO_PROXY", Value: "localhost,127.0.0.1,.svc.cluster.local,.svc," + c.registryHost},
 	}
 }
 

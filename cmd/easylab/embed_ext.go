@@ -40,6 +40,7 @@ func embedExtensions(ctx context.Context) {
 			NATSURL:       natsURL,
 			Token:         token,
 			ArtifactURL:   base, // gateway serves /v2 + /pkgs itself (loopback)
+			ArtifactHost:  os.Getenv("EASYLAB_REGISTRY_HOST"),
 			ArtifactToken: token,
 		}); err != nil {
 			log.Error("embedded ops-extension stopped", "err", err)

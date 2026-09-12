@@ -66,8 +66,7 @@ ENV EASYVCS_HOME=/data \
     EASYVCS_OPS_NAMESPACES=default \
     EASYLAB_NAMESPACE=temp \
     EASYLAB_BUILDKIT_IMAGE=moby/buildkit:rootless \
-    EASYLAB_REGISTRY_HOST=easylab.temp.svc.cluster.local:80 \
-    EASYLAB_PULL_SECRET=easylab-regcred \
+    EASYLAB_REGISTRY_HOST=easylab.temp.10.199.64.20.nip.io \
     EASYLAB_ARTIFACT_URL=http://easylab.temp.svc.cluster.local:80 \
     EASYLAB_WORKER_REF=easyworker@v0.5.0
 EXPOSE 8080

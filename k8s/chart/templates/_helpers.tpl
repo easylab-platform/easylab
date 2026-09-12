@@ -47,23 +47,12 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s:%s" .Values.agent.image.repository (.Values.agent.image.tag | toString) -}}
 {{- end -}}
 
-{{/* Registry host, defaulted from the install namespace if not set. */}}
+{{/* Registry host (TLS ingress name nodes already trust); falls back to the
+   in-cluster Service DNS when unset. */}}
 {{- define "easylab.registryHost" -}}
 {{- if .Values.registry.host -}}
 {{- .Values.registry.host -}}
 {{- else -}}
 {{- printf "easylab.%s.svc.cluster.local:80" (include "easylab.namespace" .) -}}
 {{- end -}}
-{{- end -}}
-
-{{/* All imagePullSecrets (easylab registry plus any referenced externals). */}}
-{{- define "easylab.imagePullSecrets" -}}
-{{- $names := list -}}
-{{- if .Values.imagePullSecrets.easylab.create -}}
-{{- $names = append $names (.Values.imagePullSecrets.easylab.name | default "easylab-regcred") -}}
-{{- end -}}
-{{- range .Values.imagePullSecrets.existing -}}
-{{- $names = append $names . -}}
-{{- end -}}
-{{- toYaml $names -}}
 {{- end -}}

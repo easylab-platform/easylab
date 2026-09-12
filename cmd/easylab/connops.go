@@ -125,7 +125,8 @@ func (c *connOps) LaunchService(ctx context.Context, req *connect.Request[easyla
 	return connect.NewResponse(&easylabv1.LaunchServiceResponse{Ok: true, Name: st.Name, Url: st.WorkerURL}), nil
 }
 
-func (c *connOps) DeleteService(ctx context.Context, req *connect.Request[easylabv1.DeleteServiceRequest]) (*connect.Response[easylabv1.DeleteServiceResponse], error) {	if c.s.ops.services == nil {
+func (c *connOps) DeleteService(ctx context.Context, req *connect.Request[easylabv1.DeleteServiceRequest]) (*connect.Response[easylabv1.DeleteServiceResponse], error) {
+	if c.s.ops.services == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("services backend unavailable"))
 	}
 	if err := c.s.ops.services.Delete(ctx, req.Msg.Name); err != nil {
@@ -191,7 +192,6 @@ func (c *connOps) GetTask(ctx context.Context, req *connect.Request[easylabv1.Ge
 		State: string(task.State()),
 	}}), nil
 }
-
 
 func (c *connOps) TaskLog(ctx context.Context, req *connect.Request[easylabv1.TaskLogRequest], stream *connect.ServerStream[easylabv1.TaskLogResponse]) error {
 	task := c.s.ops.builders.Get(req.Msg.Id)

@@ -31,6 +31,15 @@ func (s *server) syncSandboxWorkspace(ctx context.Context, name, org, repoName, 
 	if err != nil {
 		return err
 	}
+	// Skip-if-already-synced: the workspace is wiped (Clean) on every sync, so
+	// re-sending the same rev would delete files the sandbox created since. A
+	// sync is only needed when the branch head changed or the worker restarted
+	// (boot id differs).
+	bootID := s.workerBootID(ctx, name)
+	if row, ok, _ := s.sbx.Get(name); ok &&
+		row.SyncedRev == treeID.String() && row.SyncedBootID != "" && row.SyncedBootID == bootID {
+		return nil
+	}
 	c := &connSandbox{s: s}
 	w, err := c.wc(ctx, name)
 	if err != nil {
@@ -44,7 +53,7 @@ func (s *server) syncSandboxWorkspace(ctx context.Context, name, org, repoName, 
 		return fmt.Errorf("sync folder: %w", err)
 	}
 	// Record the synced rev + the worker boot id that owns this workspace.
-	return s.sbx.MarkSynced(name, treeID.String(), s.workerBootID(ctx, name))
+	return s.sbx.MarkSynced(name, treeID.String(), bootID)
 }
 
 // workerBootID fetches the sandbox worker's boot id ("" when unreachable).
