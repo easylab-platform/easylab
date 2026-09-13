@@ -8,6 +8,8 @@ github.com/abcp-sdk/agent-proto v0.11.0 h1:WIwKHDZ7lgHaPRzvk04gfuA+pQWVXrz+HLRqW
 github.com/abcp-sdk/agent-proto v0.11.0/go.mod h1:drrTDKXOWLDIc1xXIpuuOZxEeUKjvRgZ46Whdu6vZjk=
 github.com/abcp-sdk/agent-sdk-go v0.13.0 h1:ZaCmUL5iKwT/n+foMnr7YY/BKYqt8pK6F5nQrKp92tE=
 github.com/abcp-sdk/agent-sdk-go v0.13.0/go.mod h1:10vAPLuAyR9MtketPTyMwe9ZMbY3xQuZ0DOhdojOmRI=
+github.com/abcp-sdk/agent-sdk-go v0.14.0 h1:Vxm3/0KZcPOR8rDusvWJKTu1+cbacj0knvVqDIOFEWk=
+github.com/abcp-sdk/agent-sdk-go v0.14.0/go.mod h1:kq8RNuXfuFJBAjnWTA/Hk7MF+pd8WWwwJt2XcVpLL5Q=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

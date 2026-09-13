@@ -6,7 +6,7 @@ require (
 	connectrpc.com/connect v1.20.0
 	github.com/abcp-sdk/abc-protocol-go v1.2.0
 	github.com/abcp-sdk/agent-proto v0.11.0
-	github.com/abcp-sdk/agent-sdk-go v0.13.0
+	github.com/abcp-sdk/agent-sdk-go v0.14.0
 	github.com/easylab-platform/artifact/cargo v0.2.0
 	github.com/easylab-platform/artifact/composer v0.2.0
 	github.com/easylab-platform/artifact/conan v0.2.0
