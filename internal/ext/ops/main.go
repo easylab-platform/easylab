@@ -1,6 +1,7 @@
 package opsext
 
 import (
+	"connectrpc.com/connect"
 	"context"
 	_ "embed"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
 
 	easylabclient "github.com/easylab-platform/easylab/internal/easylabclient"
+	"github.com/easylab-platform/easylab/internal/ext"
 )
 
 //go:embed manifest.yaml
@@ -84,7 +86,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	s := &server{
-		sdk:               easylabclient.New(base, easylabToken),
+		sdk:               easylabclient.New(base, easylabToken, connect.WithInterceptors(ext.LabTenantInterceptor())),
 		artifact:          artifact,
 		artifactImageHost: artifactHost,
 		artifactToken:     artifactToken,

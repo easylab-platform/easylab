@@ -3,6 +3,7 @@ package opsext
 import (
 	"context"
 	"errors"
+	"github.com/easylab-platform/easylab/internal/ext"
 
 	"connectrpc.com/connect"
 	"fmt"
@@ -110,6 +111,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 
 	m["sandbox-create"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			image := strArg(args, "image")
 			runtime := strArg(args, "runtime")
 			if runtime == "" {
@@ -141,6 +143,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 
 	m["sandbox-run"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			command := strArg(args, "command")
 			if command == "" {
 				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-run: missing 'command'", "sandbox-run：缺少 'command'")
@@ -180,6 +183,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 
 	m["sandbox-read"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			path := strArg(args, "path")
 			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, true)
 			if err != nil {
@@ -194,6 +198,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 	}
 	m["sandbox-download"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			code := strArg(args, "code")
 			path := strArg(args, "path")
 			if code == "" || path == "" {
@@ -215,6 +220,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 	}
 	m["sandbox-write"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			path := strArg(args, "path")
 			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
@@ -228,6 +234,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 	}
 	m["sandbox-edit"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			path := strArg(args, "path")
 			startLine := intArg64(args, "start-line", 0)
 			endLine := intArg64(args, "end-line", 0)
@@ -242,6 +249,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 	}
 	m["sandbox-job-list"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
@@ -255,6 +263,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 	}
 	m["sandbox-job-output"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
@@ -276,6 +285,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 	}
 	m["sandbox-job-wait"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
@@ -295,6 +305,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 	}
 	m["sandbox-job-stdin"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
@@ -315,6 +326,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 	}
 	m["sandbox-job-kill"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
@@ -330,6 +342,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 	}
 	m["sandbox-port"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err

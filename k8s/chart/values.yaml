@@ -20,7 +20,7 @@ registry:
 gateway:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
-    tag: "20260913135857"
+    tag: "20260913150308"
     pullPolicy: IfNotPresent
   # External base URL advertised to clients (OCI /token realm, git, ...).
   # Empty derives it from the install namespace: the in-cluster Service URL
@@ -102,10 +102,25 @@ agent:
   port: 8000
   corsOrigin: "*"
   extraEnv:
-    - name: AGENT_AUTH_MODE
-      value: "none"
     - name: AGENT_DEFAULT_TENANT
       value: "default"
+  # Phase 2 activation: token->tenant auth (required). The bootstrap pair
+  # provisions the default tenant (and its credential) on first boot of an
+  # empty database; the admin token reaches only the AdminService.
+  # Credentials the gateway presents to the agent: every forwarded RPC of the
+  # default tenant uses forwardToken; adminToken reaches only the
+  # AdminService (tenant provisioning).
+  forwardToken: "06801d6eab61494a916b826551dad7ddfd88b43fb1c57a25"
+  adminToken: "679d52ee3e238d9984667278afbecc5437705b401fe74b2e"
+  authEnv:
+    - name: AGENT_AUTH_MODE
+      value: "required"
+    - name: AGENT_ADMIN_TOKEN
+      value: "679d52ee3e238d9984667278afbecc5437705b401fe74b2e"
+    - name: AGENT_BOOTSTRAP_TENANT
+      value: "default"
+    - name: AGENT_BOOTSTRAP_TOKEN
+      value: "06801d6eab61494a916b826551dad7ddfd88b43fb1c57a25"
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: "1", memory: 1Gi }

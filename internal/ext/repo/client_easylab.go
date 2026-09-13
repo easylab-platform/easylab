@@ -16,6 +16,7 @@ import (
 
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	easylabclient "github.com/easylab-platform/easylab/internal/easylabclient"
+	"github.com/easylab-platform/easylab/internal/ext"
 )
 
 // easylabClient bridges ext/repo onto the easylab lab API.
@@ -39,8 +40,8 @@ func newClient(base, token string) *easylabClient {
 	return &easylabClient{
 		base:  base,
 		token: token,
-		svc:   easylabclient.New(base, token),
-		hc:    &http.Client{Timeout: 30 * time.Second},
+		svc:   easylabclient.New(base, token, connect.WithInterceptors(ext.LabTenantInterceptor())),
+		hc:    &http.Client{Timeout: 30 * time.Second, Transport: ext.LabTenantTransport{Next: http.DefaultTransport}},
 	}
 }
 

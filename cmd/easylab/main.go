@@ -286,11 +286,16 @@ func (s *server) router() *http.ServeMux {
 	// Typed Connect contract surface. These are the strong-typed RPC endpoints
 	// consumed by the Flutter client and the ext servers. They mount under
 	// /easylab.v1 and /agent.v1 (Connect/ gRPC-compatible).
-	mux.Handle(easylabv1connect.NewLabServiceHandler(&connLab{s}))
-	mux.Handle(easylabv1connect.NewOpsServiceHandler(&connOps{s}))
-	mux.Handle(easylabv1connect.NewSandboxServiceHandler(&connSandbox{s: s}))
-	mux.Handle(easylabv1connect.NewWorkflowServiceHandler(NewWorkflowService(s)))
-	mux.Handle(easylabv1connect.NewRegistryServiceHandler(&connRegistry{s}))
+	labPath, labHandler := easylabv1connect.NewLabServiceHandler(&connLab{s})
+	opsPath, opsHandler := easylabv1connect.NewOpsServiceHandler(&connOps{s})
+	sbxPath, sbxHandler := easylabv1connect.NewSandboxServiceHandler(&connSandbox{s: s})
+	wfPath, wfHandler := easylabv1connect.NewWorkflowServiceHandler(NewWorkflowService(s))
+	regPath, regHandler := easylabv1connect.NewRegistryServiceHandler(&connRegistry{s})
+	mux.Handle(s.tenantCtx(labPath, labHandler))
+	mux.Handle(s.tenantCtx(opsPath, opsHandler))
+	mux.Handle(s.tenantCtx(sbxPath, sbxHandler))
+	mux.Handle(s.tenantCtx(wfPath, wfHandler))
+	mux.Handle(s.tenantCtx(regPath, regHandler))
 
 	// agent.v1 gateway: forwards to the real agent backend. Web/flutter talk
 	// to easylab (single entry); ext servers connect to the agent directly.
@@ -470,7 +475,7 @@ func repoRef(w http.ResponseWriter, r *http.Request) (*store.Repo, bool) {
 func (s *server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 	ns := r.PathValue("ns")
 	name := r.PathValue("name")
-	_, err := s.cs.Create(s.repoRef(r.Header, ns, name))
+	_, err := s.cs.Create(s.repoRefR(r, ns, name))
 	if err != nil {
 		writeErr(w, http.StatusConflict, err)
 		return
@@ -479,7 +484,7 @@ func (s *server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleListRepos(w http.ResponseWriter, r *http.Request) {
-	repos, err := s.cs.ListForTenant(s.tenantOfHeader(r.Header))
+	repos, err := s.cs.ListForTenant(s.tenantOfRequest(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -490,7 +495,7 @@ func (s *server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 	ns := r.PathValue("ns")
 	name := r.PathValue("name")
-	if err := s.cs.Delete(s.repoRef(r.Header, ns, name)); err != nil {
+	if err := s.cs.Delete(s.repoRefR(r, ns, name)); err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
@@ -498,7 +503,7 @@ func (s *server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) repo(w http.ResponseWriter, r *http.Request) (*store.Repo, bool) {
-	repo, err := s.cs.OpenRepo(s.repoRef(r.Header, r.PathValue("ns"), r.PathValue("name")))
+	repo, err := s.cs.OpenRepo(s.repoRefR(r, r.PathValue("ns"), r.PathValue("name")))
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return nil, false

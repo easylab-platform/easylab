@@ -40,6 +40,14 @@ spec:
               value: {{ printf "nats://%s.%s.svc.cluster.local:4222" .Values.nats.service.name (include "easylab.namespace" .) | quote }}
             - name: EASYLAB_AGENT_URL
               value: {{ printf "http://%s.%s.svc.cluster.local" .Values.agent.serviceName (include "easylab.namespace" .) | quote }}
+            - name: EASYLAB_AGENT_TOKEN
+              value: {{ .Values.agent.forwardToken | quote }}
+            - name: EASYLAB_AGENT_ADMIN_TOKEN
+              value: {{ .Values.agent.adminToken | quote }}
+            # The repo extension's direct agent client authenticates as the
+            # default tenant.
+            - name: AGENT_API_KEY
+              value: {{ .Values.agent.forwardToken | quote }}
             - name: EASYVCS_ENFORCE_H2
               value: {{ .Values.gateway.enforceH2 | quote }}
             - name: EASYVCS_TOKEN

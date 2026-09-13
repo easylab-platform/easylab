@@ -3,6 +3,7 @@ package repoext
 import (
 	"context"
 	"fmt"
+	"github.com/easylab-platform/easylab/internal/ext"
 	"time"
 )
 
@@ -129,7 +130,8 @@ func backfillWorkspaces(ctx context.Context, s *server, sessions map[string]bool
 			continue // non-workspace session (e.g. "hi") — not our contract
 		}
 		log.Info("reconcile: session has no workspace — backfilling", "session", name)
-		if err := s.ensureCreated(ctx, "default", org, repo, bm, name); err != nil {
+		tenant := "default"
+		if err := s.ensureCreated(ext.WithLabTenant(ctx, tenant), tenant, org, repo, bm, name); err != nil {
 			if isPermanent(err) {
 				continue
 			}

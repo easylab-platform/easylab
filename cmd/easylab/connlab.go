@@ -37,7 +37,7 @@ func (c *connLab) Status(ctx context.Context, req *connect.Request[easylabv1.Sta
 }
 
 func (c *connLab) ListRepos(ctx context.Context, req *connect.Request[easylabv1.ListReposRequest]) (*connect.Response[easylabv1.ListReposResponse], error) {
-	repos, err := c.s.cs.ListForTenant(c.s.tenantOfHeader(req.Header()))
+	repos, err := c.s.cs.ListForTenant(tenantFromContext(ctx))
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -58,7 +58,7 @@ func (c *connLab) ListRepos(ctx context.Context, req *connect.Request[easylabv1.
 }
 
 func (c *connLab) CreateRepo(ctx context.Context, req *connect.Request[easylabv1.CreateRepoRequest]) (*connect.Response[easylabv1.CreateRepoResponse], error) {
-	_, err := c.s.cs.Create(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	_, err := c.s.cs.Create(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		if strings.Contains(err.Error(), "exists") {
 			return connect.NewResponse(&easylabv1.CreateRepoResponse{Ok: true}), nil
@@ -70,14 +70,14 @@ func (c *connLab) CreateRepo(ctx context.Context, req *connect.Request[easylabv1
 
 func (c *connLab) DeleteRepo(ctx context.Context, req *connect.Request[easylabv1.DeleteRepoRequest]) (*connect.Response[easylabv1.DeleteRepoResponse], error) {
 	ns, name := req.Msg.Org, req.Msg.Repo
-	if err := c.s.cs.Delete(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: ns, Name: name}); err != nil {
+	if err := c.s.cs.Delete(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: ns, Name: name}); err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
 	return connect.NewResponse(&easylabv1.DeleteRepoResponse{Ok: true, Deleted: ns + "/" + name}), nil
 }
 
 func (c *connLab) EnsureRepo(ctx context.Context, req *connect.Request[easylabv1.EnsureRepoRequest]) (*connect.Response[easylabv1.EnsureRepoResponse], error) {
-	_, err := c.s.cs.Create(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	_, err := c.s.cs.Create(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		if strings.Contains(err.Error(), "exists") {
 			return connect.NewResponse(&easylabv1.EnsureRepoResponse{Ok: true}), nil
@@ -97,7 +97,7 @@ func (c *connLab) EnsureOrg(ctx context.Context, req *connect.Request[easylabv1.
 }
 
 func (c *connLab) ForkRepo(ctx context.Context, req *connect.Request[easylabv1.ForkRepoRequest]) (*connect.Response[easylabv1.ForkRepoResponse], error) {
-	src := store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo}
+	src := store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo}
 	dstNS := req.Msg.Org
 	if req.Msg.To != "" {
 		dstNS = req.Msg.To
@@ -105,7 +105,7 @@ func (c *connLab) ForkRepo(ctx context.Context, req *connect.Request[easylabv1.F
 	if req.Msg.To == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("to required"))
 	}
-	dst, err := c.s.cs.Fork(src, store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: dstNS, Name: req.Msg.To})
+	dst, err := c.s.cs.Fork(src, store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: dstNS, Name: req.Msg.To})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeAlreadyExists, err)
 	}
@@ -118,7 +118,7 @@ func (c *connLab) CloneRepo(ctx context.Context, req *connect.Request[easylabv1.
 }
 
 func (c *connLab) Tree(ctx context.Context, req *connect.Request[easylabv1.TreeRequest]) (*connect.Response[easylabv1.TreeResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -147,7 +147,7 @@ func (c *connLab) Tree(ctx context.Context, req *connect.Request[easylabv1.TreeR
 }
 
 func (c *connLab) ReadBlob(ctx context.Context, req *connect.Request[easylabv1.ReadBlobRequest]) (*connect.Response[easylabv1.ReadBlobResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -175,7 +175,7 @@ func (c *connLab) ReadBlob(ctx context.Context, req *connect.Request[easylabv1.R
 }
 
 func (c *connLab) WriteBlob(ctx context.Context, req *connect.Request[easylabv1.WriteBlobRequest]) (*connect.Response[easylabv1.WriteBlobResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -212,7 +212,7 @@ func (c *connLab) WriteBlob(ctx context.Context, req *connect.Request[easylabv1.
 }
 
 func (c *connLab) Revisions(ctx context.Context, req *connect.Request[easylabv1.RevisionsRequest]) (*connect.Response[easylabv1.RevisionsResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -243,7 +243,7 @@ func (c *connLab) Revisions(ctx context.Context, req *connect.Request[easylabv1.
 }
 
 func (c *connLab) Tags(ctx context.Context, req *connect.Request[easylabv1.TagsRequest]) (*connect.Response[easylabv1.TagsResponse], error) {
-	out, err := c.refs(withTenant(ctx, c.s.tenantOfHeader(req.Header())), req.Msg.Org, req.Msg.Repo, store.RefTag)
+	out, err := c.refs(withTenant(ctx, tenantFromContext(ctx)), req.Msg.Org, req.Msg.Repo, store.RefTag)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +251,7 @@ func (c *connLab) Tags(ctx context.Context, req *connect.Request[easylabv1.TagsR
 }
 
 func (c *connLab) Branches(ctx context.Context, req *connect.Request[easylabv1.BranchesRequest]) (*connect.Response[easylabv1.BranchesResponse], error) {
-	out, err := c.refs(withTenant(ctx, c.s.tenantOfHeader(req.Header())), req.Msg.Org, req.Msg.Repo, store.RefBranch)
+	out, err := c.refs(withTenant(ctx, tenantFromContext(ctx)), req.Msg.Org, req.Msg.Repo, store.RefBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +263,7 @@ func (c *connLab) Branches(ctx context.Context, req *connect.Request[easylabv1.B
 }
 
 func (c *connLab) Diff(ctx context.Context, req *connect.Request[easylabv1.DiffRequest]) (*connect.Response[easylabv1.DiffResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -310,7 +310,7 @@ func (c *connLab) Diff(ctx context.Context, req *connect.Request[easylabv1.DiffR
 }
 
 func (c *connLab) Blame(ctx context.Context, req *connect.Request[easylabv1.BlameRequest]) (*connect.Response[easylabv1.BlameResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -335,7 +335,7 @@ func (c *connLab) Blame(ctx context.Context, req *connect.Request[easylabv1.Blam
 }
 
 func (c *connLab) DeleteBranch(ctx context.Context, req *connect.Request[easylabv1.DeleteBranchRequest]) (*connect.Response[easylabv1.DeleteBranchResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -346,7 +346,7 @@ func (c *connLab) DeleteBranch(ctx context.Context, req *connect.Request[easylab
 }
 
 func (c *connLab) CreateBranch(ctx context.Context, req *connect.Request[easylabv1.CreateBranchRequest]) (*connect.Response[easylabv1.CreateBranchResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -367,7 +367,7 @@ func (c *connLab) CreateBranch(ctx context.Context, req *connect.Request[easylab
 }
 
 func (c *connLab) FileHistory(ctx context.Context, req *connect.Request[easylabv1.FileHistoryRequest]) (*connect.Response[easylabv1.FileHistoryResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -388,7 +388,7 @@ func (c *connLab) FileHistory(ctx context.Context, req *connect.Request[easylabv
 }
 
 func (c *connLab) Log(ctx context.Context, req *connect.Request[easylabv1.LogRequest]) (*connect.Response[easylabv1.LogResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -450,7 +450,7 @@ func (c *connLab) Search(ctx context.Context, req *connect.Request[easylabv1.Sea
 	if req.Msg.Q == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("q required"))
 	}
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -482,7 +482,7 @@ func (c *connLab) Search(ctx context.Context, req *connect.Request[easylabv1.Sea
 }
 
 func (c *connLab) Graph(ctx context.Context, req *connect.Request[easylabv1.GraphRequest]) (*connect.Response[easylabv1.GraphResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -575,7 +575,7 @@ func (c *connLab) Graph(ctx context.Context, req *connect.Request[easylabv1.Grap
 }
 
 func (c *connLab) Compare(ctx context.Context, req *connect.Request[easylabv1.CompareRequest]) (*connect.Response[easylabv1.CompareResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -605,7 +605,7 @@ func (c *connLab) Compare(ctx context.Context, req *connect.Request[easylabv1.Co
 }
 
 func (c *connLab) Rebase(ctx context.Context, req *connect.Request[easylabv1.RebaseRequest]) (*connect.Response[easylabv1.RebaseResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: tenantFromContext(ctx), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}

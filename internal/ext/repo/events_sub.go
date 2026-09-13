@@ -2,6 +2,7 @@ package repoext
 
 import (
 	"context"
+	"github.com/easylab-platform/easylab/internal/ext"
 
 	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
 )
@@ -9,6 +10,7 @@ import (
 // handleLifecycleEvent mirrors one agent lifecycle event into the workspace
 // layer. Every step is idempotent: redeliveries (at-least-once) converge.
 func (s *server) handleLifecycleEvent(ctx context.Context, event string, env abcprotocol.LifecycleEvent, tenant string) error {
+	ctx = ext.WithLabTenant(ctx, tenant)
 	var err error
 	switch event {
 	case "created":

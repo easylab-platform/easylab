@@ -1,6 +1,7 @@
 package repoext
 
 import (
+	"connectrpc.com/connect"
 	"context"
 	_ "embed"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
 
 	easylabclient "github.com/easylab-platform/easylab/internal/easylabclient"
+	"github.com/easylab-platform/easylab/internal/ext"
 )
 
 //go:embed manifest.yaml
@@ -68,7 +70,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	s := &server{base: base, agent: agent}
 	s.lab = newClient(base, token)
-	s.sdk = easylabclient.New(base, token)
+	s.sdk = easylabclient.New(base, token, connect.WithInterceptors(ext.LabTenantInterceptor()))
 	s.ag = newAgentClient(agent)
 	s.cache = newSessCache(5 * time.Second)
 

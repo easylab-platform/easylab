@@ -14,7 +14,7 @@ import (
 
 type sessEntry struct {
 	org, repo, branch string
-	exp                 time.Time
+	exp               time.Time
 }
 
 type sessCache struct {
@@ -229,6 +229,7 @@ func (s *server) listBranches(w http.ResponseWriter, r *http.Request) {
 // orphan branch to a (created) session. Idempotent.
 func (s *server) ensureSession(w http.ResponseWriter, r *http.Request) {
 	org, repo, bm := chi.URLParam(r, "org"), chi.URLParam(r, "repo"), chi.URLParam(r, "bm")
+	_ = r
 	if !validSessionComponent(bm) {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"ok": false, "error": "invalid branch name; cannot derive session"})

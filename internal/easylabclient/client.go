@@ -75,14 +75,16 @@ func trimSlash(s string) string {
 }
 
 // New builds the gateway clients. When token is empty the default "devtoken"
-// is used (matching the rest of the stack).
-func New(baseURL, token string) *Services {
+// is used (matching the rest of the stack). Extra connect options (e.g. a
+// tenancy interceptor deriving X-Agent-Tenant from the request context) are
+// appended after the bearer interceptor.
+func New(baseURL, token string, extra ...connect.ClientOption) *Services {
 	if token == "" {
 		token = "devtoken"
 	}
 	hc := &http.Client{Transport: h2cTransport()}
 	base := trimSlash(baseURL)
-	opts := []connect.ClientOption{connect.WithInterceptors(bearerInterceptor(token))}
+	opts := append([]connect.ClientOption{connect.WithInterceptors(bearerInterceptor(token))}, extra...)
 	return &Services{
 		Lab:      easylabv1connect.NewLabServiceClient(hc, base, opts...),
 		Ops:      easylabv1connect.NewOpsServiceClient(hc, base, opts...),

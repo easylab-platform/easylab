@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/abcp-sdk/abc-protocol-go/extension"
+	"github.com/easylab-platform/easylab/internal/ext"
 	"net/url"
 )
 
@@ -12,6 +13,7 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 
 	m["service-deploy"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			image := strArg(args, "image")
 			name := strArg(args, "name")
 			defaultTag := ""
@@ -101,6 +103,7 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 	}
 	m["service-list"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			all := boolArg(args, "all")
 			org := strArg(args, "org")
 			repo := strArg(args, "repo")

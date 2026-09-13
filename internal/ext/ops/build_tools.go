@@ -3,6 +3,7 @@ package opsext
 import (
 	"context"
 	"fmt"
+	"github.com/easylab-platform/easylab/internal/ext"
 	"net/url"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 
 	m["container-build"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
 			if err != nil {
 				return extension.ToolResultData{}, err
@@ -58,6 +60,7 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 	}
 	m["container-search"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			// Search the OCI image registry. Default: all cached/published
 			// images (incl. library/* base images like go:alpine). Optional
 			// repo=<org/repo> filters to images built from that source repo;
@@ -89,6 +92,7 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 	}
 	m["package-publish"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			protocol := strArg(args, "protocol")
 			org, repo, branch := strArg(args, "org"), strArg(args, "repo"), strArg(args, "branch")
 			if org == "" || repo == "" {
@@ -131,6 +135,7 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 	}
 	m["workflow-run"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			org, repo, branch := strArg(args, "org"), strArg(args, "repo"), strArg(args, "branch")
 			if org == "" || repo == "" || branch == "" {
 				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
@@ -177,6 +182,7 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 	}
 	m["package-search"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			typesRes, err := s.sdk.Registry.ListPackageTypes(ctx, connect.NewRequest(&easylabv1.ListPackageTypesRequest{}))
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "package-search failed: %v", "package-search 失败：%v", err)
@@ -198,6 +204,7 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 	}
 	m["pull-git-repo"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
 			gitURL := strArg(args, "git-url")
 			if gitURL == "" {
 				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "pull-git-repo: missing 'git_url'", "pull-git-repo：缺少 'git_url'")

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/easylab-platform/easylab/internal/ext"
 	"net/url"
 	"strings"
 
@@ -43,6 +44,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 	return map[string]extension.ToolSpec{
 		"read": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, b, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -109,6 +111,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"write": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, b, err := s.sessionBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -145,6 +148,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"delete": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, b, err := s.sessionBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -176,6 +180,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"edit": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, b, err := s.sessionBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -229,6 +234,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"ls": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, b, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -276,6 +282,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"grep": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, b, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -316,6 +323,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"explore": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				tree, err := s.lab.GetRepoTree(ctx)
 				if err != nil {
 					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to browse structure: %v", "浏览结构失败：%v", err)
@@ -355,6 +363,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-graph": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, _, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -387,6 +396,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-diff": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, _, err := s.sessionBaseXO(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -417,6 +427,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-rebase": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, b, err := s.sessionBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -442,6 +453,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-resolve": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, b, err := s.sessionBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -472,6 +484,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-blame": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, _, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -516,6 +529,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-log": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, b, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -547,6 +561,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-show": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+				ctx = ext.WithLabTenant(ctx, tenant)
 				o, r, _, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err

@@ -41,8 +41,8 @@ func TestManifestBinding(t *testing.T) {
 	}
 
 	cfg := m.BuildConfig(manifest.Bindings{Handlers: manifestHandlers(), Variables: map[string]extension.VariableSpec{
-		"org":      {Resolve: func(context.Context, string, string) (string, error) { return "acme", nil }},
-		"repo":     {Resolve: func(context.Context, string, string) (string, error) { return "api", nil }},
+		"org":    {Resolve: func(context.Context, string, string) (string, error) { return "acme", nil }},
+		"repo":   {Resolve: func(context.Context, string, string) (string, error) { return "api", nil }},
 		"branch": {Resolve: func(context.Context, string, string) (string, error) { return "main", nil }},
 	}})
 
