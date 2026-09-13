@@ -10,13 +10,13 @@ require (
 	github.com/easylab-platform/artifact/cargo v0.2.0
 	github.com/easylab-platform/artifact/composer v0.2.0
 	github.com/easylab-platform/artifact/conan v0.2.0
-	github.com/easylab-platform/artifact/core v0.3.1
+	github.com/easylab-platform/artifact/core v0.4.0
 	github.com/easylab-platform/artifact/generic v0.2.0
 	github.com/easylab-platform/artifact/go v0.2.0
 	github.com/easylab-platform/artifact/helm v0.2.0
 	github.com/easylab-platform/artifact/hex v0.2.0
 	github.com/easylab-platform/artifact/maven v0.2.0
-	github.com/easylab-platform/artifact/npm v0.2.0
+	github.com/easylab-platform/artifact/npm v0.3.0
 	github.com/easylab-platform/artifact/nuget v0.2.0
 	github.com/easylab-platform/artifact/oci v0.2.4
 	github.com/easylab-platform/artifact/pub v0.2.0
@@ -25,7 +25,7 @@ require (
 	github.com/easylab-platform/artifact/swiftpm v0.2.0
 	github.com/easylab-platform/artifact/system v0.2.0
 	github.com/easylab-platform/easylab-proto v0.11.0
-	github.com/easylab-platform/easyvcs v0.6.2
+	github.com/easylab-platform/easyvcs v0.7.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-chi/chi/v5 v5.3.2
 	google.golang.org/protobuf v1.36.12

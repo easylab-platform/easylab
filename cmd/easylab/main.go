@@ -133,6 +133,7 @@ func main() {
 	} else {
 		log.Printf("k8s backend disabled: %v", kerr)
 	}
+	reg.Owners = cs
 	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, sbx: sbxReg, k8s: sK8s, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
 
 	// Publish the worker binary to the shared /data mount so build/job pods

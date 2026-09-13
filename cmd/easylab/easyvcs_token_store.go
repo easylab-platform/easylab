@@ -58,6 +58,28 @@ func (s *easyvcsTokenStore) OpenInstance(ctx context.Context) bool {
 	return s.cs.IsOpenInstance()
 }
 
+// TenantOfToken resolves the tenant of a credential (token → user → tenant).
+func (s *easyvcsTokenStore) TenantOfToken(ctx context.Context, token string) int64 {
+	t, err := s.cs.LookupToken(token)
+	if err != nil {
+		return 0
+	}
+	u, err := s.cs.GetUser(t.UserID)
+	if err != nil || u.TenantID == 0 {
+		return 1
+	}
+	return u.TenantID
+}
+
+// TenantOfUsername resolves the tenant of a user by name.
+func (s *easyvcsTokenStore) TenantOfUsername(ctx context.Context, username string) int64 {
+	u, err := s.cs.GetUserByUsername(username)
+	if err != nil || u.TenantID == 0 {
+		return 1
+	}
+	return u.TenantID
+}
+
 func tokenLevel(level string) artifactkit.TokenLevel {
 	if level == "write" || level == "admin" {
 		return artifactkit.LevelWrite
