@@ -69,7 +69,7 @@ spec:
               value: {{ include "easylab.registryHost" . | quote }}
             {{- if .Values.sandboxes.runtimes }}
             - name: EASYLAB_SANDBOX_RUNTIMES
-              value: {{ .Values.sandboxes.runtimes | toJson | quote }}
+              value: {{ include "easylab.sandboxRuntimes" . | quote }}
             {{- end }}
             {{- with .Values.gateway.upstreamProxy }}
             - name: EASYLAB_UPSTREAM_PROXY

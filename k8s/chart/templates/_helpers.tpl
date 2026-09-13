@@ -76,3 +76,20 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "http://easylab.%s.svc.cluster.local:80" (include "easylab.namespace" .) -}}
 {{- end -}}
 {{- end -}}
+
+{{/* Sandbox runtime overrides as JSON for EASYLAB_SANDBOX_RUNTIMES. Each
+   runtime's image defaults to <vmImagePrefix>/easyworker-<runtime>:<vmTag>
+   unless the runtime already sets one (so the VM tag lives in one place). */}}
+{{- define "easylab.sandboxRuntimes" -}}
+{{- $prefix := .Values.sandboxes.vmImagePrefix -}}
+{{- $tag := .Values.sandboxes.vmTag | toString -}}
+{{- $out := dict -}}
+{{- range $name, $cfg := .Values.sandboxes.runtimes -}}
+{{- $c := deepCopy $cfg -}}
+{{- if not $c.image -}}
+{{- $_ := set $c "image" (printf "%s/easyworker-%s:%s" $prefix $name $tag) -}}
+{{- end -}}
+{{- $_ := set $out $name $c -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}

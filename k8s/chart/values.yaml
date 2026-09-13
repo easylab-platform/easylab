@@ -20,7 +20,7 @@ registry:
 gateway:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
-    tag: "20260913152506"
+    tag: "20260913193930"
     pullPolicy: IfNotPresent
   # External base URL advertised to clients (OCI /token realm, git, ...).
   # Empty derives it from the install namespace: the in-cluster Service URL
@@ -60,15 +60,17 @@ backend:
 # worker images served by easylab's registry (mirrored into it). Values here
 # are rendered to EASYLAB_SANDBOX_RUNTIMES (JSON) on the gateway.
 sandboxes:
+  # VM worker images: <vmImagePrefix>/easyworker-<runtime>:<vmTag>. Bump vmTag
+  # to move windows/macos to a new easyworker VM release in one place.
+  vmImagePrefix: easylab/vm-images
+  vmTag: v1.2.2
   runtimes:
     windows:
-      image: easylab/vm-images/easyworker-windows:v1.2.1
       readyTimeout: 15m
       nodeSelector:
         kubernetes.io/hostname: iv-yebxendp8gwh2yokqhjs
       imagePullSecrets: []
     macos:
-      image: easylab/vm-images/easyworker-macos:v1.2.1
       readyTimeout: 15m
       nodeSelector:
         kubernetes.io/hostname: iv-yebxendp8gwh2yokqhjs
