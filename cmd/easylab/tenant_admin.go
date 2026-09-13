@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"time"
 
 	"connectrpc.com/connect"
@@ -58,55 +60,78 @@ func (s *server) handleTenantCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. easyvcs tenant + admin user + credential.
-	tenant, err := s.cs.CreateTenant(req.Slug, req.DisplayName)
+	res, err := s.provisionTenant(req.Slug, req.DisplayName, req.AdminUser, req.AdminDisplay)
 	if err != nil {
-		writeErr(w, http.StatusConflict, err)
+		writeErr(w, statusFor(err), err)
 		return
 	}
-	user, err := s.cs.CreateUserTenant(tenant.ID, req.AdminUser, req.AdminDisplay)
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"tenant":       map[string]any{"id": res["id"], "slug": res["slug"]},
+		"user":         map[string]any{"username": res["username"]},
+		"token":        res["token"],
+		"agent_tenant": res["agent_tenant"],
+	})
+}
+
+// provisionTenant runs the end-to-end tenant setup shared by the REST and
+// Connect surfaces and returns plain values (id/slug/username/token/flags).
+func (s *server) provisionTenant(slug, displayName, adminUser, adminDisplay string) (map[string]any, error) {
+	if !tenantSlugRe.MatchString(slug) {
+		return nil, fmt.Errorf("slug must match %s", tenantSlugRe.String())
+	}
+	if adminUser == "" {
+		return nil, fmt.Errorf("admin_username required")
+	}
+	tenant, err := s.cs.CreateTenant(slug, displayName)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
+		return nil, err
+	}
+	user, err := s.cs.CreateUserTenant(tenant.ID, adminUser, adminDisplay)
+	if err != nil {
+		return nil, err
 	}
 	plaintext, err := generateToken()
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
+		return nil, err
 	}
 	tok, err := s.cs.CreateToken(plaintext, user.ID, "write")
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
+		return nil, err
 	}
-
-	// 2. Agent tenant (protocol v2): mint the tenant's agent credential.
 	agentToken := ""
 	if s.agentAdmin() != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		res, err := s.agentAdmin().CreateTenant(ctx, connect.NewRequest(&agentv1.CreateTenantRequest{
-			Id:   req.Slug,
-			Name: req.DisplayName,
+			Id:   slug,
+			Name: displayName,
 		}))
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, fmt.Errorf("agent tenant create: %v", err))
-			return
+			return nil, fmt.Errorf("agent tenant create: %w", err)
 		}
 		agentToken = res.Msg.GetToken()
 		if err := s.cs.SetAgentToken(tenant.ID, agentToken); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
+			return nil, err
 		}
 	}
-
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"tenant": map[string]any{"id": tenant.ID, "slug": tenant.Slug},
-		"user":   map[string]any{"id": user.ID, "username": user.Username},
-		// The user token is returned exactly once (the store keeps a hash).
+	return map[string]any{
+		"id":           strconv.FormatInt(tenant.ID, 10),
+		"slug":         tenant.Slug,
+		"username":     user.Username,
 		"token":        tok.Token,
-		"agent_tenant": req.Slug != "" && agentToken != "",
-	})
+		"agent_tenant": agentToken != "",
+	}, nil
+}
+
+// statusFor maps store errors to HTTP status codes for the REST surface.
+func statusFor(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
+	if errors.Is(err, store.ErrUsernameTaken) || errors.Is(err, store.ErrRepoExists) {
+		return http.StatusConflict
+	}
+	return http.StatusBadRequest
 }
 
 // agentAdmin lazily builds the AdminService client (static operator token

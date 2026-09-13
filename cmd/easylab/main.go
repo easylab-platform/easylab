@@ -291,11 +291,13 @@ func (s *server) router() *http.ServeMux {
 	sbxPath, sbxHandler := easylabv1connect.NewSandboxServiceHandler(&connSandbox{s: s})
 	wfPath, wfHandler := easylabv1connect.NewWorkflowServiceHandler(NewWorkflowService(s))
 	regPath, regHandler := easylabv1connect.NewRegistryServiceHandler(&connRegistry{s})
+	tenantPath, tenantHandler := easylabv1connect.NewTenantServiceHandler(&connTenant{s: s})
 	mux.Handle(s.tenantCtx(labPath, labHandler))
 	mux.Handle(s.tenantCtx(opsPath, opsHandler))
 	mux.Handle(s.tenantCtx(sbxPath, sbxHandler))
 	mux.Handle(s.tenantCtx(wfPath, wfHandler))
 	mux.Handle(s.tenantCtx(regPath, regHandler))
+	mux.Handle(s.tenantCtx(tenantPath, tenantHandler))
 
 	// agent.v1 gateway: forwards to the real agent backend. Web/flutter talk
 	// to easylab (single entry); ext servers connect to the agent directly.
