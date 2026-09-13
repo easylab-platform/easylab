@@ -56,11 +56,14 @@ func (c *sessCache) evict(sid string) {
 // lifecycle-event model every session has its workspace by the time tools
 // run. A miss means the event has not been processed yet (retry shortly) or
 // the name is not workspace-derived.
-func (s *server) resolveSession(ctx context.Context, sid string) (string, string, string, error) {
-	if o, r, b, ok := s.cache.get(sid); ok {
+func (s *server) resolveSession(ctx context.Context, tenant, sid string) (string, string, string, error) {
+	if tenant == "" {
+		tenant = "default"
+	}
+	if o, r, b, ok := s.cache.get(tenant + "\x00" + sid); ok {
 		return o, r, b, nil
 	}
-	row, err := s.store.GetRowBySession(ctx, sid)
+	row, err := s.store.GetRowBySession(ctx, tenant, sid)
 	if err != nil {
 		return "", "", "", errDownstream("postgres", err)
 	}
@@ -70,28 +73,28 @@ func (s *server) resolveSession(ctx context.Context, sid string) (string, string
 		}
 		return "", "", "", errNotFound("session '%s' workspace is not ready yet (lifecycle event in progress); retry later", sid)
 	}
-	s.cache.put(sid, row.Org, row.Repo, row.Branch)
+	s.cache.put(tenant+"\x00"+sid, row.Org, row.Repo, row.Branch)
 	return row.Org, row.Repo, row.Branch, nil
 }
 
 // bindRow records a mapping; a unique conflict means a concurrent path
 // already won — converged, not an error.
-func (s *server) bindRow(ctx context.Context, org, repo, branch, sid string) error {
-	if err := s.store.InsertRow(ctx, org, repo, branch, sid); err != nil {
+func (s *server) bindRow(ctx context.Context, tenant, org, repo, branch, sid string) error {
+	if err := s.store.InsertRow(ctx, tenant, org, repo, branch, sid); err != nil {
 		if statusOf(err) == 409 {
 			return nil
 		}
 		return err
 	}
-	return s.store.InsertManaged(ctx, org, repo)
+	return s.store.InsertManaged(ctx, tenant, org, repo)
 }
 
 // adoptBranch binds an EXISTING branch to a derived session, creating
 // the session when needed. Returns (sessionName, adopted). Shared by the
 // manual ops surface (completeAdopt) and tool handlers (mr-create target
 // resolution).
-func (s *server) adoptBranch(ctx context.Context, org, repo, branch string) (string, bool, error) {
-	row, err := s.store.GetRow(ctx, org, repo, branch)
+func (s *server) adoptBranch(ctx context.Context, tenant, org, repo, branch string) (string, bool, error) {
+	row, err := s.store.GetRow(ctx, tenant, org, repo, branch)
 	if err != nil {
 		return "", false, errDownstream("postgres", err)
 	}
@@ -112,7 +115,7 @@ func (s *server) adoptBranch(ctx context.Context, org, repo, branch string) (str
 	if err := s.ag.EnsureSession(ctx, name); err != nil {
 		return "", false, err
 	}
-	if err := s.store.InsertRow(ctx, org, repo, branch, name); err != nil {
+	if err := s.store.InsertRow(ctx, tenant, org, repo, branch, name); err != nil {
 		return "", false, err
 	}
 	return name, true, nil
@@ -120,8 +123,8 @@ func (s *server) adoptBranch(ctx context.Context, org, repo, branch string) (str
 
 // completeAdopt binds an EXISTING branch to a derived session (manual ops
 // surface: give an orphan branch a session). Returns (sessionName, adopted).
-func (s *server) completeAdopt(ctx context.Context, org, repo, branch string) (string, bool, error) {
-	return s.adoptBranch(ctx, org, repo, branch)
+func (s *server) completeAdopt(ctx context.Context, tenant, org, repo, branch string) (string, bool, error) {
+	return s.adoptBranch(ctx, tenant, org, repo, branch)
 }
 
 // ---- HTTP handlers (ops surface; workspace writes are event-driven) ----
@@ -202,7 +205,7 @@ func (s *server) listBranches(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errNotFound("repository %s/%s does not exist", org, repo))
 		return
 	}
-	rows, err := s.store.ListRowsForRepo(ctx, org, repo)
+	rows, err := s.store.ListRowsForRepo(ctx, r.Header.Get("X-Tenant"), org, repo)
 	if err != nil {
 		writeErr(w, errDownstream("postgres", err))
 		return
@@ -231,7 +234,7 @@ func (s *server) ensureSession(w http.ResponseWriter, r *http.Request) {
 			"ok": false, "error": "invalid branch name; cannot derive session"})
 		return
 	}
-	name, adopted, err := s.completeAdopt(r.Context(), org, repo, bm)
+	name, adopted, err := s.completeAdopt(r.Context(), r.Header.Get("X-Tenant"), org, repo, bm)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -248,7 +251,7 @@ func (s *server) getSessionMap(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"ok": false, "error": "session is required"})
 		return
 	}
-	row, err := s.store.GetRowBySession(r.Context(), sid)
+	row, err := s.store.GetRowBySession(r.Context(), r.Header.Get("X-Tenant"), sid)
 	if err != nil {
 		writeErr(w, errDownstream("postgres", err))
 		return

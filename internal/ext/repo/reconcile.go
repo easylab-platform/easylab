@@ -63,7 +63,7 @@ func convergeDrift(ctx context.Context, s *server, sessions map[string]bool) err
 	}
 
 	for _, m := range managed {
-		rows, err := s.store.ListRowsForRepo(ctx, m.Org, m.Repo)
+		rows, err := s.store.ListRowsForRepo(ctx, m.Tenant, m.Org, m.Repo)
 		if err != nil {
 			return fmt.Errorf("list rows %s/%s: %w", m.Org, m.Repo, err)
 		}
@@ -80,7 +80,7 @@ func convergeDrift(ctx context.Context, s *server, sessions map[string]bool) err
 			case !bms[row.Branch]:
 				log.Warn("reconcile: branch gone — unmapping session",
 					"org", row.Org, "repo", row.Repo, "branch", row.Branch, "session", row.SessionName)
-				if err := s.store.DeleteRow(ctx, row.Org, row.Repo, row.Branch); err != nil {
+				if err := s.store.DeleteRow(ctx, row.Tenant, row.Org, row.Repo, row.Branch); err != nil {
 					return errDownstream("postgres", err)
 				}
 				s.cache.evict(row.SessionName)
@@ -89,7 +89,7 @@ func convergeDrift(ctx context.Context, s *server, sessions map[string]bool) err
 				// preserved; adoptable by a same-name session later).
 				log.Warn("reconcile: session gone — unmapping (branch becomes orphan)",
 					"session", row.SessionName, "org", row.Org, "repo", row.Repo, "branch", row.Branch)
-				if err := s.store.DeleteRow(ctx, row.Org, row.Repo, row.Branch); err != nil {
+				if err := s.store.DeleteRow(ctx, row.Tenant, row.Org, row.Repo, row.Branch); err != nil {
 					return errDownstream("postgres", err)
 				}
 				s.cache.evict(row.SessionName)
@@ -118,10 +118,10 @@ func backfillWorkspaces(ctx context.Context, s *server, sessions map[string]bool
 	}
 	mapped := map[string]bool{}
 	for _, r := range rows {
-		mapped[r.SessionName] = true
+		mapped[r.Tenant+"\x00"+r.SessionName] = true
 	}
 	for name := range sessions {
-		if mapped[name] {
+		if mapped[name] { // single-tenant listing: rows of other tenants never match
 			continue
 		}
 		org, repo, bm, ok := parseSession(name)
@@ -129,7 +129,7 @@ func backfillWorkspaces(ctx context.Context, s *server, sessions map[string]bool
 			continue // non-workspace session (e.g. "hi") — not our contract
 		}
 		log.Info("reconcile: session has no workspace — backfilling", "session", name)
-		if err := s.ensureCreated(ctx, org, repo, bm, name); err != nil {
+		if err := s.ensureCreated(ctx, "default", org, repo, bm, name); err != nil {
 			if isPermanent(err) {
 				continue
 			}

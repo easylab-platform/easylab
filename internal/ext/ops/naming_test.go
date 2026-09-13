@@ -36,11 +36,11 @@ func TestParseSessionName(t *testing.T) {
 }
 
 func TestSessionKey(t *testing.T) {
-	a, b := sessionKey("acme:repo-a:main"), sessionKey("acme:repo-b:main")
+	a, b := sessionKey("default", "acme:repo-a:main"), sessionKey("default", "acme:repo-b:main")
 	if a == b {
 		t.Fatal("session keys collide for similar sessions")
 	}
-	if a != sessionKey("acme:repo-a:main") {
+	if a != sessionKey("default", "acme:repo-a:main") {
 		t.Fatal("sessionKey not deterministic")
 	}
 	if strings.ContainsAny(a, ":") {

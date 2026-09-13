@@ -69,7 +69,7 @@ func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{},
 	if err != nil {
 		return sandboxCtx{}, err
 	}
-	key := labelKey(sid)
+	key := sessionKey(tenant, sid)
 	info, err := s.workerInfo(ctx, key)
 	if err != nil {
 		return sandboxCtx{}, fmt.Errorf("sandbox not created — call sandbox-create with an image first")
@@ -89,8 +89,8 @@ func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{},
 
 // launchWorkspaceSandbox launches a worker-backed sandbox via easylab
 // SandboxService, associated with this session's workspace (idempotent).
-func (s *server) launchWorkspaceSandbox(ctx context.Context, ws workspace, sid, baseImage, runtime string) (ContainerInfo, error) {
-	key := labelKey(sid)
+func (s *server) launchWorkspaceSandbox(ctx context.Context, tenant string, ws workspace, sid, baseImage, runtime string) (ContainerInfo, error) {
+	key := sessionKey(tenant, sid)
 	res, err := s.sdk.Sandbox.LaunchSandbox(ctx, connect.NewRequest(&easylabv1.LaunchSandboxRequest{
 		Name: key, BaseImage: baseImage, Runtime: runtime,
 		Org: ws.org, Repo: ws.repo, Branch: ws.branchOrDefault(),
@@ -108,6 +108,6 @@ func (s *server) launchWorkspaceSandbox(ctx context.Context, ws workspace, sid, 
 
 // destroyWorker deletes the sandbox through easylab (container + registry).
 func (s *server) destroyWorker(ctx context.Context, id string) error {
-	_, err := s.sdk.Sandbox.DeleteSandbox(ctx, connect.NewRequest(&easylabv1.DeleteSandboxRequest{Name: labelKey(id)}))
+	_, err := s.sdk.Sandbox.DeleteSandbox(ctx, connect.NewRequest(&easylabv1.DeleteSandboxRequest{Name: sessionKey("default", id)}))
 	return err
 }

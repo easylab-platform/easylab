@@ -16,17 +16,17 @@ func (s *server) handleLifecycleEvent(ctx context.Context, event string, env abc
 		if !ok {
 			return errBad("session %q does not match org:repo:branch naming — ignoring", env.SessionName)
 		}
-		err = s.ensureCreated(ctx, org, repo, bm, env.SessionName)
+		err = s.ensureCreated(ctx, tenant, org, repo, bm, env.SessionName)
 	case "forked":
 		org, repo, bm, ok := parseSession(env.SessionName)
 		if !ok {
 			return errBad("session %q does not match org:repo:branch naming — ignoring", env.SessionName)
 		}
-		err = s.ensureForked(ctx, org, repo, bm, env.SessionName, strp(env.Parent))
+		err = s.ensureForked(ctx, tenant, org, repo, bm, env.SessionName, strp(env.Parent))
 	case "renamed":
-		err = s.ensureRenamed(ctx, strp(env.From), strp(env.To))
+		err = s.ensureRenamed(ctx, tenant, strp(env.From), strp(env.To))
 	case "deleted":
-		err = s.ensureDeleted(ctx, env.SessionName)
+		err = s.ensureDeleted(ctx, tenant, env.SessionName)
 	default:
 		return errBad("unknown lifecycle event %q — ignoring", event)
 	}
@@ -51,8 +51,8 @@ func (s *server) handleLifecycleEvent(ctx context.Context, event string, env abc
 }
 
 // ensureCreated: repo + branch from `main` (head fallback) + mapping row.
-func (s *server) ensureCreated(ctx context.Context, org, repo, bm, sid string) error {
-	if row, err := s.store.GetRowBySession(ctx, sid); err != nil {
+func (s *server) ensureCreated(ctx context.Context, tenant, org, repo, bm, sid string) error {
+	if row, err := s.store.GetRowBySession(ctx, tenant, sid); err != nil {
 		return errDownstream("postgres", err)
 	} else if row != nil {
 		return nil // already mirrored
@@ -63,14 +63,14 @@ func (s *server) ensureCreated(ctx context.Context, org, repo, bm, sid string) e
 	if err := s.ensureBranchAnchored(ctx, org, repo, bm); err != nil {
 		return err
 	}
-	return s.bindRow(ctx, org, repo, bm, sid)
+	return s.bindRow(ctx, tenant, org, repo, bm, sid)
 }
 
 // ensureForked: branch from the parent's branch (true workspace
 // inheritance at fork time) + mapping row. The parent is materialized first
 // when its own event was missed (e.g. pre-event sessions).
-func (s *server) ensureForked(ctx context.Context, org, repo, bm, sid, parentSid string) error {
-	if row, err := s.store.GetRowBySession(ctx, sid); err != nil {
+func (s *server) ensureForked(ctx context.Context, tenant, org, repo, bm, sid, parentSid string) error {
+	if row, err := s.store.GetRowBySession(ctx, tenant, sid); err != nil {
 		return errDownstream("postgres", err)
 	} else if row != nil {
 		return nil
@@ -84,10 +84,10 @@ func (s *server) ensureForked(ctx context.Context, org, repo, bm, sid, parentSid
 			return errBad("fork across repositories (%s → %s/%s) — unsupported", parentSid, org, repo)
 		}
 		parentBM = pBM
-		if prow, err := s.store.GetRow(ctx, org, repo, pBM); err != nil {
+		if prow, err := s.store.GetRow(ctx, tenant, org, repo, pBM); err != nil {
 			return errDownstream("postgres", err)
 		} else if prow == nil {
-			if err := s.ensureCreated(ctx, org, repo, pBM, parentSid); err != nil {
+			if err := s.ensureCreated(ctx, tenant, org, repo, pBM, parentSid); err != nil {
 				return err
 			}
 		}
@@ -98,12 +98,12 @@ func (s *server) ensureForked(ctx context.Context, org, repo, bm, sid, parentSid
 	if err := s.lab.EnsureBranch(ctx, org, repo, parentBM, bm); err != nil {
 		return err
 	}
-	return s.bindRow(ctx, org, repo, bm, sid)
+	return s.bindRow(ctx, tenant, org, repo, bm, sid)
 }
 
 // ensureRenamed: dual rename — new branch at the old one's position, row
 // update, old branch removed.
-func (s *server) ensureRenamed(ctx context.Context, fromSid, toSid string) error {
+func (s *server) ensureRenamed(ctx context.Context, tenant, fromSid, toSid string) error {
 	fromOrg, fromRepo, fromBM, ok := parseSession(fromSid)
 	if !ok {
 		return errBad("session %q does not match naming — ignoring rename", fromSid)
@@ -116,18 +116,18 @@ func (s *server) ensureRenamed(ctx context.Context, fromSid, toSid string) error
 		return errBad("rename across repositories (%s → %s) — unsupported", fromSid, toSid)
 	}
 
-	row, err := s.store.GetRow(ctx, fromOrg, fromRepo, fromBM)
+	row, err := s.store.GetRow(ctx, tenant, fromOrg, fromRepo, fromBM)
 	if err != nil {
 		return errDownstream("postgres", err)
 	}
 	if row == nil {
 		// Old name never had a workspace; treat as a plain create.
-		return s.ensureCreated(ctx, toOrg, toRepo, toBM, toSid)
+		return s.ensureCreated(ctx, tenant, toOrg, toRepo, toBM, toSid)
 	}
 	if err := s.lab.EnsureBranch(ctx, fromOrg, fromRepo, fromBM, toBM); err != nil {
 		return err
 	}
-	if err := s.store.RenameRow(ctx, fromOrg, fromRepo, fromBM, toBM, toSid); err != nil {
+	if err := s.store.RenameRow(ctx, tenant, fromOrg, fromRepo, fromBM, toBM, toSid); err != nil {
 		if statusOf(err) == 409 {
 			return nil // concurrent rename already won
 		}
@@ -139,12 +139,12 @@ func (s *server) ensureRenamed(ctx context.Context, fromSid, toSid string) error
 
 // ensureDeleted: branch + mapping row removed (branch-first order: a
 // crash mid-way leaves an adoptable orphan, never a dangling row).
-func (s *server) ensureDeleted(ctx context.Context, sid string) error {
+func (s *server) ensureDeleted(ctx context.Context, tenant, sid string) error {
 	org, repo, bm, ok := parseSession(sid)
 	if !ok {
 		return errBad("session %q does not match naming — ignoring delete", sid)
 	}
-	row, err := s.store.GetRowBySession(ctx, sid)
+	row, err := s.store.GetRowBySession(ctx, tenant, sid)
 	if err != nil {
 		return errDownstream("postgres", err)
 	}
@@ -154,7 +154,7 @@ func (s *server) ensureDeleted(ctx context.Context, sid string) error {
 	if err := s.lab.DeleteBranch(ctx, org, repo, bm); err != nil {
 		return err
 	}
-	if err := s.store.DeleteRow(ctx, org, repo, bm); err != nil {
+	if err := s.store.DeleteRow(ctx, tenant, org, repo, bm); err != nil {
 		return errDownstream("postgres", err)
 	}
 	s.cache.evict(sid)

@@ -124,7 +124,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			info, err := s.launchWorkspaceSandbox(ctx, ws, sid, image, runtime)
+			info, err := s.launchWorkspaceSandbox(ctx, tenant, ws, sid, image, runtime)
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-create failed: %v", "sandbox-create 失败：%v", err)
 			}

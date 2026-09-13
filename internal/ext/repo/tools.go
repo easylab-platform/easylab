@@ -43,7 +43,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 	return map[string]extension.ToolSpec{
 		"read": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, b, err := s.refBase(ctx, args, sessionName)
+				o, r, b, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -109,7 +109,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"write": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, b, err := s.sessionBase(ctx, args, sessionName)
+				o, r, b, err := s.sessionBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -145,7 +145,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"delete": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, b, err := s.sessionBase(ctx, args, sessionName)
+				o, r, b, err := s.sessionBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -176,7 +176,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"edit": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, b, err := s.sessionBase(ctx, args, sessionName)
+				o, r, b, err := s.sessionBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -229,7 +229,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"ls": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, b, err := s.refBase(ctx, args, sessionName)
+				o, r, b, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -276,7 +276,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"grep": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, b, err := s.refBase(ctx, args, sessionName)
+				o, r, b, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -355,7 +355,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-graph": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, _, err := s.refBase(ctx, args, sessionName)
+				o, r, _, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -387,7 +387,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-diff": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, _, err := s.sessionBaseXO(ctx, args, sessionName)
+				o, r, _, err := s.sessionBaseXO(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -417,7 +417,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-rebase": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, b, err := s.sessionBase(ctx, args, sessionName)
+				o, r, b, err := s.sessionBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -442,7 +442,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-resolve": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, b, err := s.sessionBase(ctx, args, sessionName)
+				o, r, b, err := s.sessionBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -472,7 +472,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-blame": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, _, err := s.refBase(ctx, args, sessionName)
+				o, r, _, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -516,7 +516,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-log": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, b, err := s.refBase(ctx, args, sessionName)
+				o, r, b, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -547,7 +547,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"vcs-show": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-				o, r, _, err := s.refBase(ctx, args, sessionName)
+				o, r, _, err := s.refBase(ctx, tenant, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
@@ -573,11 +573,11 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 // the first-class `session_name` envelope field. There is no legacy
 // `_org`/`_repo`/`_branch` fallback: the agent always carries the session
 // name, and the workspace mapping is derived from it.
-func (s *server) sessionBase(ctx context.Context, args map[string]interface{}, sessionName string) (string, string, string, error) {
+func (s *server) sessionBase(ctx context.Context, tenant string, args map[string]interface{}, sessionName string) (string, string, string, error) {
 	if sessionName == "" {
 		return "", "", "", fmt.Errorf("missing session context (session_name)")
 	}
-	return s.resolveSession(ctx, sessionName)
+	return s.resolveSession(ctx, tenant, sessionName)
 }
 
 // refBase resolves a `ref` argument into (org, repo, rev). `ref` is a full
@@ -586,14 +586,14 @@ func (s *server) sessionBase(ctx context.Context, args map[string]interface{}, s
 // branch, commit hash, tag or change-id. Absent/empty `ref` defaults to the
 // current workspace's (org, repo, branch); a `ref` that does not include an
 // org:repo prefix is rejected (a bare `<rev>` cannot locate a repo).
-func (s *server) refBase(ctx context.Context, args map[string]interface{}, sessionName string) (string, string, string, error) {
+func (s *server) refBase(ctx context.Context, tenant string, args map[string]interface{}, sessionName string) (string, string, string, error) {
 	ref := abcprotocol.ArgString(args, "ref")
 	if ref == "" {
 		// Default: current workspace (org:repo:branch) from session_name.
 		if sessionName == "" {
 			return "", "", "", fmt.Errorf("missing session context (session_name)")
 		}
-		return s.resolveSession(ctx, sessionName)
+		return s.resolveSession(ctx, tenant, sessionName)
 	}
 	// Split org:repo:rev — rev may itself contain ':' (change-id, or a path
 	// like feat/x), so split on the FIRST two colons only.
@@ -610,8 +610,8 @@ func (s *server) refBase(ctx context.Context, args map[string]interface{}, sessi
 
 // sessionBaseXO is sessionBase with an explicit `org`/`repo`/`branch` override
 // (read-only cross-repo access); the branch still defaults to the workspace.
-func (s *server) sessionBaseXO(ctx context.Context, args map[string]interface{}, sessionName string) (string, string, string, error) {
-	o, r, b, err := s.sessionBase(ctx, args, sessionName)
+func (s *server) sessionBaseXO(ctx context.Context, tenant string, args map[string]interface{}, sessionName string) (string, string, string, error) {
+	o, r, b, err := s.sessionBase(ctx, tenant, args, sessionName)
 	if err != nil {
 		return "", "", "", err
 	}

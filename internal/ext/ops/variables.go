@@ -20,7 +20,7 @@ func (s *server) publishSandboxVars(ctx context.Context, tenant, sid string, inf
 
 // resolveSandboxStatus is the authoritative lazy resolver for `vars.ops.sandbox-status`.
 func (s *server) resolveSandboxStatus(ctx context.Context, sessionName, tenant string) (string, error) {
-	info, err := s.workerInfo(ctx, labelKey(sessionName))
+	info, err := s.workerInfo(ctx, sessionKey(tenant, sessionName))
 	if err != nil {
 		return "", err
 	}
@@ -34,7 +34,7 @@ func (s *server) resolveSandboxStatus(ctx context.Context, sessionName, tenant s
 // Same k8s source of truth as sandbox-status; the KV projection in
 // publishSandboxVars is just a cache.
 func (s *server) resolveSandboxID(ctx context.Context, sessionName, tenant string) (string, error) {
-	info, err := s.workerInfo(ctx, labelKey(sessionName))
+	info, err := s.workerInfo(ctx, sessionKey(tenant, sessionName))
 	if err != nil {
 		return "", err
 	}

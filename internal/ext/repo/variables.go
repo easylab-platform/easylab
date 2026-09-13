@@ -13,17 +13,17 @@ import (
 // events, and these resolvers serve as the KV-miss fallback.
 
 func (s *server) resolveOrg(ctx context.Context, sessionName, tenant string) (string, error) {
-	o, _, _, err := s.resolveSession(ctx, sessionName)
+	o, _, _, err := s.resolveSession(ctx, tenant, sessionName)
 	return o, err
 }
 
 func (s *server) resolveRepo(ctx context.Context, sessionName, tenant string) (string, error) {
-	_, r, _, err := s.resolveSession(ctx, sessionName)
+	_, r, _, err := s.resolveSession(ctx, tenant, sessionName)
 	return r, err
 }
 
 func (s *server) resolveBranch(ctx context.Context, sessionName, tenant string) (string, error) {
-	_, _, b, err := s.resolveSession(ctx, sessionName)
+	_, _, b, err := s.resolveSession(ctx, tenant, sessionName)
 	return b, err
 }
 
@@ -34,7 +34,7 @@ func (s *server) publishSessionVars(ctx context.Context, ext *extension.Extensio
 	if ext == nil {
 		return
 	}
-	o, r, b, err := s.resolveSession(ctx, sessionName)
+	o, r, b, err := s.resolveSession(ctx, tenant, sessionName)
 	if err != nil {
 		return
 	}

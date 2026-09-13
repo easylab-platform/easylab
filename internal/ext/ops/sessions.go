@@ -207,8 +207,14 @@ func validLabelValue(v string) bool {
 	return true
 }
 
-// sessionKey derives the k8s-safe sandbox key for a session name (delegates to
-// labelKey, which is the canonical derivation).
-func sessionKey(session string) string {
-	return labelKey(session)
+// sessionKey derives the k8s-safe sandbox key for a session name. The
+// default tenant keeps the LEGACY bare-session key (existing sandboxes keep
+// their names across the upgrade); every other tenant derives a composite
+// key from (tenant, session) so identically-named sessions in different
+// tenants never share a sandbox.
+func sessionKey(tenant, session string) string {
+	if tenant == "" || tenant == "default" {
+		return labelKey(session)
+	}
+	return labelKey(tenant + "\x00" + session)
 }

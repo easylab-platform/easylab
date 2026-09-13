@@ -24,11 +24,14 @@ type PgConfig struct {
 
 func (c PgConfig) dsn(_ string) string { return c.DB }
 
-// MapRow is one row of the branch<->session mapping table.
+// MapRow is one row of the branch<->session mapping table. Tenant is the
+// agent tenant the session belongs to (agent protocol v2): session names are
+// only unique within a tenant.
 type MapRow struct {
+	Tenant      string
 	Org         string
 	Repo        string
-	Branch    string
+	Branch      string
 	SessionName string
 }
 
@@ -72,31 +75,72 @@ func (s *Store) Close() {
 func (s *Store) migrate(ctx context.Context) error {
 	const ddl = `
 CREATE TABLE IF NOT EXISTS managed_repos (
+  tenant     TEXT NOT NULL DEFAULT 'default',
   org        TEXT NOT NULL,
   repo       TEXT NOT NULL,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  PRIMARY KEY (org, repo)
+  PRIMARY KEY (tenant, org, repo)
 );
 CREATE TABLE IF NOT EXISTS session_repos (
+  tenant       TEXT NOT NULL DEFAULT 'default',
   org          TEXT NOT NULL,
   repo         TEXT NOT NULL,
-  branch     TEXT NOT NULL,
-  session_name TEXT NOT NULL UNIQUE,
+  branch       TEXT NOT NULL,
+  session_name TEXT NOT NULL,
   created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at   INTEGER NOT NULL DEFAULT (unixepoch()),
-  PRIMARY KEY (org, repo, branch)
+  PRIMARY KEY (tenant, org, repo, branch),
+  UNIQUE (tenant, session_name)
 );
 `
 	_, err := s.db.ExecContext(ctx, ddl)
 	if err != nil {
 		return fmt.Errorf("ddl: %w", err)
 	}
+	// Legacy (tenant-less) rebuild: pre-tenancy databases carry PKs keyed on
+	// bare (org, repo[, branch]) and a globally-unique session_name. Rows are
+	// re-homed under the default tenant; data is preserved verbatim.
+	var legacy int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info('session_repos') WHERE name='tenant'`).Scan(&legacy); err == nil && legacy == 0 {
+		const rebuild = `
+ALTER TABLE session_repos RENAME TO session_repos_v1;
+CREATE TABLE session_repos (
+  tenant       TEXT NOT NULL DEFAULT 'default',
+  org          TEXT NOT NULL,
+  repo         TEXT NOT NULL,
+  branch       TEXT NOT NULL,
+  session_name TEXT NOT NULL,
+  created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+  PRIMARY KEY (tenant, org, repo, branch),
+  UNIQUE (tenant, session_name)
+);
+INSERT INTO session_repos (tenant, org, repo, branch, session_name, created_at, updated_at)
+  SELECT 'default', org, repo, branch, session_name, created_at, updated_at FROM session_repos_v1;
+DROP TABLE session_repos_v1;
+ALTER TABLE managed_repos RENAME TO managed_repos_v1;
+CREATE TABLE managed_repos (
+  tenant     TEXT NOT NULL DEFAULT 'default',
+  org        TEXT NOT NULL,
+  repo       TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  PRIMARY KEY (tenant, org, repo)
+);
+INSERT INTO managed_repos (tenant, org, repo, created_at)
+  SELECT 'default', org, repo, created_at FROM managed_repos_v1;
+DROP TABLE managed_repos_v1;
+`
+		if _, err := s.db.ExecContext(ctx, rebuild); err != nil {
+			return fmt.Errorf("tenant rebuild: %w", err)
+		}
+	}
 	// Legacy schema migration: the session_repos column was renamed
 	// bookmark -> branch. SQLite >= 3.25 supports RENAME COLUMN; probe the
 	// live schema so fresh databases (already on `branch`) are untouched.
-	var legacy int
+	var legacyBM int
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM pragma_table_info('session_repos') WHERE name='bookmark'`).Scan(&legacy); err == nil && legacy > 0 {
+		`SELECT COUNT(*) FROM pragma_table_info('session_repos') WHERE name='bookmark'`).Scan(&legacyBM); err == nil && legacyBM > 0 {
 		if _, err := s.db.ExecContext(ctx,
 			`ALTER TABLE session_repos RENAME COLUMN bookmark TO branch`); err != nil {
 			return fmt.Errorf("migrate bookmark->branch: %w", err)
@@ -107,10 +151,10 @@ CREATE TABLE IF NOT EXISTS session_repos (
 
 // ---- managed repos ----
 
-func (s *Store) IsManaged(ctx context.Context, org, repo string) (bool, error) {
+func (s *Store) IsManaged(ctx context.Context, tenant, org, repo string) (bool, error) {
 	var one int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT 1 FROM managed_repos WHERE org=? AND repo=?`, org, repo).Scan(&one)
+		`SELECT 1 FROM managed_repos WHERE tenant=? AND org=? AND repo=?`, tenant, org, repo).Scan(&one)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -120,19 +164,19 @@ func (s *Store) IsManaged(ctx context.Context, org, repo string) (bool, error) {
 	return true, nil
 }
 
-func (s *Store) InsertManaged(ctx context.Context, org, repo string) error {
+func (s *Store) InsertManaged(ctx context.Context, tenant, org, repo string) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO managed_repos (org, repo) VALUES (?, ?) ON CONFLICT DO NOTHING`, org, repo)
+		`INSERT INTO managed_repos (tenant, org, repo) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`, tenant, org, repo)
 	return err
 }
 
-func (s *Store) DeleteManaged(ctx context.Context, org, repo string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM managed_repos WHERE org=? AND repo=?`, org, repo)
+func (s *Store) DeleteManaged(ctx context.Context, tenant, org, repo string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM managed_repos WHERE tenant=? AND org=? AND repo=?`, tenant, org, repo)
 	return err
 }
 
 func (s *Store) ListManaged(ctx context.Context) ([]MapRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT org, repo FROM managed_repos ORDER BY org, repo`)
+	rows, err := s.db.QueryContext(ctx, `SELECT tenant, org, repo FROM managed_repos ORDER BY tenant, org, repo`)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +184,7 @@ func (s *Store) ListManaged(ctx context.Context) ([]MapRow, error) {
 	var out []MapRow
 	for rows.Next() {
 		var r MapRow
-		if err := rows.Scan(&r.Org, &r.Repo); err != nil {
+		if err := rows.Scan(&r.Tenant, &r.Org, &r.Repo); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -150,11 +194,11 @@ func (s *Store) ListManaged(ctx context.Context) ([]MapRow, error) {
 
 // ---- mapping rows ----
 
-const mapCols = `org, repo, branch, session_name`
+const mapCols = `tenant, org, repo, branch, session_name`
 
 func scanMapRowFrom(row *sql.Row) (*MapRow, error) {
 	var r MapRow
-	err := row.Scan(&r.Org, &r.Repo, &r.Branch, &r.SessionName)
+	err := row.Scan(&r.Tenant, &r.Org, &r.Repo, &r.Branch, &r.SessionName)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -164,23 +208,23 @@ func scanMapRowFrom(row *sql.Row) (*MapRow, error) {
 	return &r, nil
 }
 
-func (s *Store) GetRow(ctx context.Context, org, repo, branch string) (*MapRow, error) {
+func (s *Store) GetRow(ctx context.Context, tenant, org, repo, branch string) (*MapRow, error) {
 	return scanMapRowFrom(s.db.QueryRowContext(ctx,
-		`SELECT `+mapCols+` FROM session_repos WHERE org=? AND repo=? AND branch=?`,
-		org, repo, branch))
+		`SELECT `+mapCols+` FROM session_repos WHERE tenant=? AND org=? AND repo=? AND branch=?`,
+		tenant, org, repo, branch))
 }
 
-func (s *Store) GetRowBySession(ctx context.Context, sessionName string) (*MapRow, error) {
+func (s *Store) GetRowBySession(ctx context.Context, tenant, sessionName string) (*MapRow, error) {
 	return scanMapRowFrom(s.db.QueryRowContext(ctx,
-		`SELECT `+mapCols+` FROM session_repos WHERE session_name=?`, sessionName))
+		`SELECT `+mapCols+` FROM session_repos WHERE tenant=? AND session_name=?`, tenant, sessionName))
 }
 
 // InsertRow records a mapping. A unique violation is returned as errConflict so
 // callers can surface 409.
-func (s *Store) InsertRow(ctx context.Context, org, repo, branch, sessionName string) error {
+func (s *Store) InsertRow(ctx context.Context, tenant, org, repo, branch, sessionName string) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO session_repos (org, repo, branch, session_name) VALUES (?, ?, ?, ?)`,
-		org, repo, branch, sessionName)
+		`INSERT INTO session_repos (tenant, org, repo, branch, session_name) VALUES (?, ?, ?, ?, ?)`,
+		tenant, org, repo, branch, sessionName)
 	if isUniqueViolation(err) {
 		return errConflict("branch or session already bound")
 	}
@@ -188,11 +232,11 @@ func (s *Store) InsertRow(ctx context.Context, org, repo, branch, sessionName st
 }
 
 // RenameRow moves a mapping row to a new branch + session name.
-func (s *Store) RenameRow(ctx context.Context, org, repo, fromBM, toBM, toSession string) error {
+func (s *Store) RenameRow(ctx context.Context, tenant, org, repo, fromBM, toBM, toSession string) error {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE session_repos SET branch=?, session_name=?, updated_at=unixepoch()
-		 WHERE org=? AND repo=? AND branch=?`,
-		toBM, toSession, org, repo, fromBM)
+		 WHERE tenant=? AND org=? AND repo=? AND branch=?`,
+		toBM, toSession, tenant, org, repo, fromBM)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return errConflict("target branch or session already bound")
@@ -205,26 +249,26 @@ func (s *Store) RenameRow(ctx context.Context, org, repo, fromBM, toBM, toSessio
 	return nil
 }
 
-func (s *Store) DeleteRow(ctx context.Context, org, repo, branch string) error {
+func (s *Store) DeleteRow(ctx context.Context, tenant, org, repo, branch string) error {
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM session_repos WHERE org=? AND repo=? AND branch=?`, org, repo, branch)
+		`DELETE FROM session_repos WHERE tenant=? AND org=? AND repo=? AND branch=?`, tenant, org, repo, branch)
 	return err
 }
 
 // DeleteRowsForRepo removes every mapping row of one repo (delete-repo path).
-func (s *Store) DeleteRowsForRepo(ctx context.Context, org, repo string) error {
+func (s *Store) DeleteRowsForRepo(ctx context.Context, tenant, org, repo string) error {
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM session_repos WHERE org=? AND repo=?`, org, repo)
+		`DELETE FROM session_repos WHERE tenant=? AND org=? AND repo=?`, tenant, org, repo)
 	return err
 }
 
-func (s *Store) ListRowsForRepo(ctx context.Context, org, repo string) ([]MapRow, error) {
+func (s *Store) ListRowsForRepo(ctx context.Context, tenant, org, repo string) ([]MapRow, error) {
 	return s.listRows(ctx,
-		`SELECT `+mapCols+` FROM session_repos WHERE org=? AND repo=? ORDER BY branch`, org, repo)
+		`SELECT `+mapCols+` FROM session_repos WHERE tenant=? AND org=? AND repo=? ORDER BY branch`, tenant, org, repo)
 }
 
 func (s *Store) ListRows(ctx context.Context) ([]MapRow, error) {
-	return s.listRows(ctx, `SELECT `+mapCols+` FROM session_repos ORDER BY org, repo, branch`)
+	return s.listRows(ctx, `SELECT `+mapCols+` FROM session_repos ORDER BY tenant, org, repo, branch`)
 }
 
 func (s *Store) listRows(ctx context.Context, q string, args ...interface{}) ([]MapRow, error) {
@@ -236,7 +280,7 @@ func (s *Store) listRows(ctx context.Context, q string, args ...interface{}) ([]
 	var out []MapRow
 	for rows.Next() {
 		var r MapRow
-		if err := rows.Scan(&r.Org, &r.Repo, &r.Branch, &r.SessionName); err != nil {
+		if err := rows.Scan(&r.Tenant, &r.Org, &r.Repo, &r.Branch, &r.SessionName); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -260,4 +304,13 @@ func containsStr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TenantOf extracts the tenant of a mapping row (helper for callers that
+// receive rows without knowing their tenant scope).
+func (r *MapRow) TenantOf() string {
+	if r == nil || r.Tenant == "" {
+		return "default"
+	}
+	return r.Tenant
 }
