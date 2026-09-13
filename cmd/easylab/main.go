@@ -451,7 +451,7 @@ func repoRef(w http.ResponseWriter, r *http.Request) (*store.Repo, bool) {
 func (s *server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 	ns := r.PathValue("ns")
 	name := r.PathValue("name")
-	_, err := s.cs.Create(store.RepoRef{Namespace: ns, Name: name})
+	_, err := s.cs.Create(s.repoRef(r.Header, ns, name))
 	if err != nil {
 		writeErr(w, http.StatusConflict, err)
 		return
@@ -460,7 +460,7 @@ func (s *server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleListRepos(w http.ResponseWriter, r *http.Request) {
-	repos, err := s.cs.List()
+	repos, err := s.cs.ListForTenant(s.tenantOfHeader(r.Header))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -471,7 +471,7 @@ func (s *server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 	ns := r.PathValue("ns")
 	name := r.PathValue("name")
-	if err := s.cs.Delete(store.RepoRef{Namespace: ns, Name: name}); err != nil {
+	if err := s.cs.Delete(s.repoRef(r.Header, ns, name)); err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
@@ -479,7 +479,7 @@ func (s *server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) repo(w http.ResponseWriter, r *http.Request) (*store.Repo, bool) {
-	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: r.PathValue("ns"), Name: r.PathValue("name")})
+	repo, err := s.cs.OpenRepo(s.repoRef(r.Header, r.PathValue("ns"), r.PathValue("name")))
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return nil, false

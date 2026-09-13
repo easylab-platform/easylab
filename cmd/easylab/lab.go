@@ -222,7 +222,7 @@ func (s *server) writeTargetsMirror(r *http.Request) bool {
 	if !strings.HasPrefix(r.URL.Path, "/api/v1/repo/"+ns+"/"+name+"/") {
 		return false
 	}
-	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: ns, Name: name})
+	repo, err := s.cs.OpenRepo(s.repoRef(r.Header, ns, name))
 	if err != nil {
 		return false
 	}
@@ -246,7 +246,7 @@ func (s *server) labRepo(w http.ResponseWriter, r *http.Request) (*store.Repo, *
 		labErr(w, http.StatusNotFound, fmt.Errorf("repo not found"))
 		return nil, nil, false
 	}
-	rr := store.RepoRef{Namespace: ns, Name: name}
+	rr := s.repoRef(r.Header, ns, name)
 	if _, err := s.cs.OpenRepo(rr); err != nil {
 		labErr(w, http.StatusNotFound, err)
 		return nil, nil, false
@@ -545,12 +545,12 @@ func (s *server) labCreateRepo(w http.ResponseWriter, r *http.Request) {
 			labErr(w, http.StatusBadRequest, fmt.Errorf("mirror_url required for mirror repository"))
 			return
 		}
-		_, err := s.cs.Create(store.RepoRef{Namespace: req.Namespace, Name: req.Name})
+		_, err := s.cs.Create(s.repoRef(r.Header, req.Namespace, req.Name))
 		if err != nil {
 			labErr(w, http.StatusConflict, err)
 			return
 		}
-		repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: req.Namespace, Name: req.Name})
+		repo, err := s.cs.OpenRepo(s.repoRef(r.Header, req.Namespace, req.Name))
 		if err != nil {
 			labErr(w, http.StatusInternalServerError, err)
 			return
@@ -649,7 +649,7 @@ func (s *server) labUpdateRepo(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) labDeleteRepo(w http.ResponseWriter, r *http.Request) {
 	s.labRequireWrite(func(w http.ResponseWriter, r *http.Request) {
-		if err := s.cs.Delete(store.RepoRef{Namespace: r.PathValue("namespace"), Name: r.PathValue("repo")}); err != nil {
+		if err := s.cs.Delete(s.repoRef(r.Header, r.PathValue("namespace"), r.PathValue("repo"))); err != nil {
 			labErr(w, http.StatusNotFound, err)
 			return
 		}
@@ -1860,7 +1860,7 @@ func (s *server) labFork(w http.ResponseWriter, r *http.Request) {
 		if dstNS == "" {
 			dstNS = src.Namespace
 		}
-		dst, err := s.cs.Fork(src.RepoRef(), store.RepoRef{Namespace: dstNS, Name: req.Name})
+		dst, err := s.cs.Fork(src.RepoRef(), s.repoRef(r.Header, dstNS, req.Name))
 		if err != nil {
 			labErr(w, http.StatusConflict, err)
 			return

@@ -23,7 +23,7 @@ import (
 // DeleteOrg removes every repository under a namespace/organization.
 func (c *connLab) DeleteOrg(ctx context.Context, req *connect.Request[easylabv1.DeleteOrgRequest]) (*connect.Response[easylabv1.DeleteOrgResponse], error) {
 	ns := req.Msg.Org
-	repos, err := c.s.cs.List()
+	repos, err := c.s.cs.ListForTenant(c.s.tenantOfHeader(req.Header()))
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -42,7 +42,7 @@ func (c *connLab) DeleteOrg(ctx context.Context, req *connect.Request[easylabv1.
 
 // ListReleases returns the generic-artifact releases for a repo.
 func (c *connLab) ListReleases(ctx context.Context, req *connect.Request[easylabv1.ListReleasesRequest]) (*connect.Response[easylabv1.ListReleasesResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -64,7 +64,7 @@ func (c *connLab) ListReleases(ctx context.Context, req *connect.Request[easylab
 
 // DownloadReleaseAsset returns the bytes of one release asset.
 func (c *connLab) DownloadReleaseAsset(ctx context.Context, req *connect.Request[easylabv1.DownloadReleaseAssetRequest]) (*connect.Response[easylabv1.DownloadReleaseAssetResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -101,7 +101,7 @@ func (c *connLab) DownloadReleaseAsset(ctx context.Context, req *connect.Request
 
 // Archive returns a tar.gz of the repository tree at a rev/tag.
 func (c *connLab) Archive(ctx context.Context, req *connect.Request[easylabv1.ArchiveRequest]) (*connect.Response[easylabv1.ArchiveResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -170,7 +170,7 @@ func (c *connLab) Archive(ctx context.Context, req *connect.Request[easylabv1.Ar
 // GetMirror returns the repo's mirror metadata (pull URL for mirror repos;
 // push URL from the single push-mirror).
 func (c *connLab) GetMirror(ctx context.Context, req *connect.Request[easylabv1.GetMirrorRequest]) (*connect.Response[easylabv1.GetMirrorResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -191,7 +191,7 @@ func (c *connLab) GetMirror(ctx context.Context, req *connect.Request[easylabv1.
 
 // SetMirror configures a mirror (pull for mirror repos, push-mirror for normal).
 func (c *connLab) SetMirror(ctx context.Context, req *connect.Request[easylabv1.SetMirrorRequest]) (*connect.Response[easylabv1.SetMirrorResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -218,7 +218,7 @@ func (c *connLab) SetMirror(ctx context.Context, req *connect.Request[easylabv1.
 
 // DeleteMirror removes a repo's mirror configuration.
 func (c *connLab) DeleteMirror(ctx context.Context, req *connect.Request[easylabv1.DeleteMirrorRequest]) (*connect.Response[easylabv1.DeleteMirrorResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -244,7 +244,7 @@ func (c *connLab) DeleteMirror(ctx context.Context, req *connect.Request[easylab
 
 // SyncMirror dispatches by kind: pull (mirror repo) or push (normal repo).
 func (c *connLab) SyncMirror(ctx context.Context, req *connect.Request[easylabv1.SyncMirrorRequest]) (*connect.Response[easylabv1.SyncMirrorResponse], error) {
-	repo, err := c.s.cs.OpenRepo(store.RepoRef{Namespace: req.Msg.Org, Name: req.Msg.Repo})
+	repo, err := c.s.cs.OpenRepo(store.RepoRef{Tenant: c.s.tenantOfHeader(req.Header()), Namespace: req.Msg.Org, Name: req.Msg.Repo})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
