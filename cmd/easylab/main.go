@@ -70,6 +70,14 @@ type server struct {
 	// auth is the artifactkit Auth over the easyvcs credential store
 	// (unified minted-token semantics via StoreAuth; see easyvcs_token_store.go).
 	auth artifactkit.Auth
+
+	// agent tenancy wiring: the operator surface (AdminService, static token)
+	// and the fallback credential for the default tenant's forwarded RPCs.
+	agentAdminOnce   sync.Once
+	agentAdminClient agentv1connect.AdminServiceClient
+	agentAdminURL    string
+	agentAdminToken  string
+	agentFwdToken    string
 }
 
 func main() {
@@ -135,6 +143,9 @@ func main() {
 	}
 	reg.Owners = cs
 	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, sbx: sbxReg, k8s: sK8s, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
+	s.agentAdminURL = os.Getenv("EASYLAB_AGENT_URL")
+	s.agentAdminToken = os.Getenv("EASYLAB_AGENT_ADMIN_TOKEN")
+	s.agentFwdToken = os.Getenv("EASYLAB_AGENT_TOKEN")
 
 	// Publish the worker binary to the shared /data mount so build/job pods
 	// can inject it from a hostPath without a per-job derived image.
@@ -263,6 +274,9 @@ func (s *server) router() *http.ServeMux {
 	// subtree and populates its own PathValue fields from its patterns.
 	mux.Handle("/api/v1/", s.labRouter())
 
+	// Tenant provisioning (default-tenant operators).
+	s.mountTenants(mux)
+
 	// Ops: dev/deploy platform (runs, tasks, builds).
 	s.mountOps(mux)
 
@@ -278,11 +292,15 @@ func (s *server) router() *http.ServeMux {
 	mux.Handle(easylabv1connect.NewWorkflowServiceHandler(NewWorkflowService(s)))
 	mux.Handle(easylabv1connect.NewRegistryServiceHandler(&connRegistry{s}))
 
-	// agent.v1 gateway: forwards to the real agent backend. Web/flutter talk to
-	// easylab (single entry); ext servers connect to the agent directly.
+	// agent.v1 gateway: forwards to the real agent backend. Web/flutter talk
+	// to easylab (single entry); ext servers connect to the agent directly.
+	// The mounting middleware attaches the caller's tenant to the request
+	// context so the outbound interceptor picks the right per-tenant agent
+	// credential without touching every forwarding method.
 	if agentURL := os.Getenv("EASYLAB_AGENT_URL"); agentURL != "" {
-		ca := newConnAgent(agentURL, os.Getenv("EASYLAB_AGENT_TOKEN"))
-		mux.Handle(agentv1connect.NewAgentServiceHandler(ca))
+		ca := newConnAgent(s, agentURL)
+		path, handler := agentv1connect.NewAgentServiceHandler(ca)
+		mux.Handle(path, s.agentTenantMiddleware(handler))
 	}
 
 	return mux

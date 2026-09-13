@@ -9,7 +9,6 @@ import (
 	agentv1 "github.com/abcp-sdk/agent-proto/agent/v1"
 
 	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
-	"github.com/easylab-platform/easylab/internal/connectauth"
 )
 
 // connAgent is the easylab-side gateway implementation of the agent.v1
@@ -34,14 +33,45 @@ func h2cClient() *http.Client {
 	}
 }
 
-func newConnAgent(baseURL, token string) *connAgent {
+func newConnAgent(s *server, baseURL string) *connAgent {
 	return &connAgent{
 		client: agentv1connect.NewAgentServiceClient(
 			h2cClient(),
 			baseURL,
-			connect.WithInterceptors(connectauth.Bearer(token)),
+			connect.WithInterceptors(&tenantAgentBearer{s: s}),
 		),
 	}
+}
+
+// tenantAgentBearer picks the agent credential per REQUEST: the caller's
+// tenant was attached to the request context by the agent.v1 mounting
+// middleware (agentTenantMiddleware), and each tenant forwards with its own
+// bootstrap token. The default tenant uses the deployment-wide
+// EASYLAB_AGENT_TOKEN (phase-2 compatibility); a tenant without a stored
+// credential sends none and the agent rejects the call — fail closed.
+type tenantAgentBearer struct{ s *server }
+
+func (b *tenantAgentBearer) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		if tok := b.s.agentTokenForTenant(agentTenantOf(ctx)); tok != "" {
+			req.Header().Set("Authorization", "Bearer "+tok)
+		}
+		return next(ctx, req)
+	}
+}
+
+func (b *tenantAgentBearer) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		conn := next(ctx, spec)
+		if tok := b.s.agentTokenForTenant(agentTenantOf(ctx)); tok != "" {
+			conn.RequestHeader().Set("Authorization", "Bearer "+tok)
+		}
+		return conn
+	}
+}
+
+func (b *tenantAgentBearer) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return next
 }
 
 var _ agentv1connect.AgentServiceHandler = (*connAgent)(nil)

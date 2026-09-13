@@ -69,3 +69,12 @@ func tenantFromContext(ctx context.Context) int64 {
 
 // refsTenantOf is the refs() helper's accessor for the context tenant.
 func refsTenantOf(ctx context.Context) int64 { return tenantFromContext(ctx) }
+
+// agentTenantMiddleware attaches the caller's tenant to the request context
+// for the agent.v1 forwarding surface.
+func (s *server) agentTenantMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tid := s.tenantOfHeader(r.Header)
+		next.ServeHTTP(w, r.WithContext(withAgentTenant(r.Context(), tid)))
+	})
+}
