@@ -33,7 +33,7 @@ spec:
 
         # ---- abcp agent (session/model/turn engine; h2c on 8000) ----
         - name: agent
-          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260911151044
+          image: forgejo.develop.10.199.64.20.nip.io/easylab/agent:20260913102527
           imagePullPolicy: IfNotPresent
           env:
             - name: NATS_URL
@@ -53,6 +53,16 @@ spec:
             # web app's origin (or "*" for dev).
             - name: AGENT_CORS_ORIGIN
               value: "*"
+            # Multi-tenant auth: bearer tokens resolve to tenants. The admin
+            # token manages tenants; the bootstrap pair seeds the first tenant.
+            - name: AGENT_AUTH_MODE
+              value: "required"
+            - name: AGENT_ADMIN_TOKEN
+              value: "dev-admin-token"
+            - name: AGENT_BOOTSTRAP_TENANT
+              value: "default"
+            - name: AGENT_BOOTSTRAP_TOKEN
+              value: "devtenanttoken"
           ports:
             - { containerPort: 8080, protocol: TCP }
           resources:

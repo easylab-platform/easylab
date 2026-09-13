@@ -58,7 +58,7 @@ func (s *server) runViaGateway(ctx context.Context, cid, command string, timeout
 
 // backgroundWatch polls a job to completion and notifies via the session
 // mailbox — replaces the legacy SSE background watcher.
-func (s *server) backgroundWatch(ctx context.Context, cid, jobID, sid string) {
+func (s *server) backgroundWatch(ctx context.Context, tenant, cid, jobID, sid string) {
 	bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer bgCancel()
 	// Poll JobWait in 5s slices; when done, fetch output and mail it.
@@ -84,7 +84,7 @@ func (s *server) backgroundWatch(ctx context.Context, cid, jobID, sid string) {
 				msg += "\n" + s
 			}
 			if s.ext != nil {
-				_ = s.ext.PublishMailboxEvent(context.Background(), sid, "event",
+				_ = s.ext.PublishMailboxEvent(context.Background(), tenant, sid, "event",
 					map[string]interface{}{"content": msg})
 			}
 			return
@@ -98,7 +98,7 @@ func (s *server) backgroundWatch(ctx context.Context, cid, jobID, sid string) {
 	}
 	// Never report a fabricated "finished (exit 0)" when the wait broke.
 	if s.ext != nil && lastErr != nil {
-		_ = s.ext.PublishMailboxEvent(context.Background(), sid, "event",
+		_ = s.ext.PublishMailboxEvent(context.Background(), tenant, sid, "event",
 			map[string]interface{}{"content": fmt.Sprintf(
 				"Background command wait failed (job %s): %v. The job itself may still be running; inspect it with sandbox-job-output or stop it with sandbox-job-kill.",
 				jobID, lastErr)})
@@ -109,7 +109,7 @@ func (s *server) backgroundWatch(ctx context.Context, cid, jobID, sid string) {
 func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 
 	m["sandbox-create"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			image := strArg(args, "image")
 			runtime := strArg(args, "runtime")
 			if runtime == "" {
@@ -118,7 +118,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			// VM runtimes (windows/macos) carry their own image; only the linux
 			// (derived) path needs a base image.
 			if image == "" && runtime == "linux" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-create: missing 'image' (base image easylab can pull)", "sandbox-create：缺少 'image'（easylab 可拉取的基础镜像）")
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-create: missing 'image' (base image easylab can pull)", "sandbox-create：缺少 'image'（easylab 可拉取的基础镜像）")
 			}
 			ws, sid, err := s.resolveWorkspace(ctx, args, sessionName)
 			if err != nil {
@@ -126,33 +126,33 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			}
 			info, err := s.launchWorkspaceSandbox(ctx, ws, sid, image, runtime)
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-create failed: %v", "sandbox-create 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-create failed: %v", "sandbox-create 失败：%v", err)
 			}
-			s.publishSandboxVars(ctx, sid, info)
+			s.publishSandboxVars(ctx, tenant, sid, info)
 			label := image
 			if label == "" {
 				label = runtime
 			}
-			return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName,
+			return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName,
 				fmt.Sprintf("Created %s sandbox from %s (container %s, status %s).", runtime, label, info.ContainerID, info.Status),
 				fmt.Sprintf("已从 %s 创建 %s 沙箱（容器 %s，状态 %s）。", label, runtime, info.ContainerID, info.Status))}, nil
 		},
 	}
 
 	m["sandbox-run"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			command := strArg(args, "command")
 			if command == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run: missing 'command'", "sandbox-run：缺少 'command'")
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-run: missing 'command'", "sandbox-run：缺少 'command'")
 			}
-			sc, err := s.ensureSandbox(ctx, args, sessionName, true)
+			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, true)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
 			// Rev coherence is owned by easylab (SyncWorkspace). Always
 			// ensure synced first; failure surfaces a clear error.
 			if err := s.ensureSynced(ctx, sc.cid, sc.session, sc.ws); err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run sync failed: %v", "sandbox-run 同步失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-run sync failed: %v", "sandbox-run 同步失败：%v", err)
 			}
 
 			timeoutMs := int(abcprotocol.ArgInt(args, "timeout-ms", 10000))
@@ -161,7 +161,7 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 			}
 			jobID, done, err := s.runViaGateway(ctx, sc.cid, command, timeoutMs)
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run failed: %v", "sandbox-run 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-run failed: %v", "sandbox-run 失败：%v", err)
 			}
 			content := fmt.Sprintf("Command completed (job %s, exit %d)", jobID, done.ExitCode)
 			if done.Bg {
@@ -179,83 +179,83 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 	}
 
 	m["sandbox-read"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			path := strArg(args, "path")
-			sc, err := s.ensureSandbox(ctx, args, sessionName, true)
+			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, true)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
 			data, err := s.sandboxFileRead(ctx, sc.cid, path)
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-read failed: %v", "sandbox-read 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-read failed: %v", "sandbox-read 失败：%v", err)
 			}
 			return extension.ToolResultData{Content: string(data)}, nil
 		},
 	}
 	m["sandbox-download"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			code := strArg(args, "code")
 			path := strArg(args, "path")
 			if code == "" || path == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-download: 'code' and 'path' are required", "sandbox-download：'code' 与 'path' 均为必填")
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-download: 'code' and 'path' are required", "sandbox-download：'code' 与 'path' 均为必填")
 			}
-			sc, err := s.ensureSandbox(ctx, args, sessionName, false)
+			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
 			data, err := s.fetchAgentFile(ctx, code)
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-download: download %s: %v", "sandbox-download：下载 %s：%v", code, err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-download: download %s: %v", "sandbox-download：下载 %s：%v", code, err)
 			}
 			if err := s.sandboxFileWrite(ctx, sc.cid, path, data); err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-download failed: %v", "sandbox-download 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-download failed: %v", "sandbox-download 失败：%v", err)
 			}
-			return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("Downloaded file %s → sandbox path '%s' (%d bytes).", code, path, len(data)), fmt.Sprintf("已将文件 %s 下载到沙箱路径 '%s'（%d 字节）。", code, path, len(data)))}, nil
+			return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("Downloaded file %s → sandbox path '%s' (%d bytes).", code, path, len(data)), fmt.Sprintf("已将文件 %s 下载到沙箱路径 '%s'（%d 字节）。", code, path, len(data)))}, nil
 		},
 	}
 	m["sandbox-write"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			path := strArg(args, "path")
-			sc, err := s.ensureSandbox(ctx, args, sessionName, false)
+			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
 			if err := s.sandboxFileWrite(ctx, sc.cid, path, []byte(strArg(args, "content"))); err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-write failed: %v", "sandbox-write 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-write failed: %v", "sandbox-write 失败：%v", err)
 			}
-			return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("Wrote sandbox file '%s'.", path), fmt.Sprintf("已写入沙箱文件 '%s'。", path))}, nil
+			return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("Wrote sandbox file '%s'.", path), fmt.Sprintf("已写入沙箱文件 '%s'。", path))}, nil
 		},
 	}
 	m["sandbox-edit"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			path := strArg(args, "path")
 			startLine := intArg64(args, "start-line", 0)
 			endLine := intArg64(args, "end-line", 0)
 			content := strArg(args, "content")
-			sc, err := s.ensureSandbox(ctx, args, sessionName, true)
+			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, true)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			v, err := s.sandboxEdit(ctx, sessionName, sc.cid, path, startLine, endLine, content)
+			v, err := s.sandboxEdit(ctx, tenant, sessionName, sc.cid, path, startLine, endLine, content)
 			return extension.ToolResultData{Content: v}, err
 		},
 	}
 	m["sandbox-job-list"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-			sc, err := s.ensureSandbox(ctx, args, sessionName, false)
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
 			jobs, err := s.sdk.Sandbox.ListJobs(ctx, connect.NewRequest(&easylabv1.ListJobsRequest{Sandbox: sc.cid}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-list failed: %v", "sandbox-job-list 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-job-list failed: %v", "sandbox-job-list 失败：%v", err)
 			}
 			return extension.ToolResultData{Content: toJSON(jobs.Msg.Jobs)}, nil
 		},
 	}
 	m["sandbox-job-output"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-			sc, err := s.ensureSandbox(ctx, args, sessionName, false)
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
@@ -269,14 +269,14 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 				},
 			}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-output failed: %v", "sandbox-job-output 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-job-output failed: %v", "sandbox-job-output 失败：%v", err)
 			}
 			return extension.ToolResultData{Content: toJSON(res.Msg)}, nil
 		},
 	}
 	m["sandbox-job-wait"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-			sc, err := s.ensureSandbox(ctx, args, sessionName, false)
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
@@ -288,14 +288,14 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 				},
 			}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-wait failed: %v", "sandbox-job-wait 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-job-wait failed: %v", "sandbox-job-wait 失败：%v", err)
 			}
 			return extension.ToolResultData{Content: toJSON(res.Msg)}, nil
 		},
 	}
 	m["sandbox-job-stdin"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-			sc, err := s.ensureSandbox(ctx, args, sessionName, false)
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
@@ -308,14 +308,14 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 				},
 			}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-stdin failed: %v", "sandbox-job-stdin 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-job-stdin failed: %v", "sandbox-job-stdin 失败：%v", err)
 			}
 			return extension.ToolResultData{Content: `{"ok":true}`}, nil
 		},
 	}
 	m["sandbox-job-kill"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-			sc, err := s.ensureSandbox(ctx, args, sessionName, false)
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
@@ -323,18 +323,18 @@ func (s *server) registerSandboxTools(m map[string]extension.ToolSpec) {
 				Sandbox: sc.cid, Req: &workerv1.JobKillRequest{JobId: strArg(args, "job-id")},
 			}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-kill failed: %v", "sandbox-job-kill 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "sandbox-job-kill failed: %v", "sandbox-job-kill 失败：%v", err)
 			}
 			return extension.ToolResultData{Content: `{"ok":true}`}, nil
 		},
 	}
 	m["sandbox-port"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-			sc, err := s.ensureSandbox(ctx, args, sessionName, false)
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
+			sc, err := s.ensureSandbox(ctx, args, sessionName, tenant, false)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
-			v, err := s.portFile(ctx, sessionName, sc, args)
+			v, err := s.portFile(ctx, tenant, sessionName, sc, args)
 			if err == nil {
 				s.invalidateWorkspace(sc.session)
 			}

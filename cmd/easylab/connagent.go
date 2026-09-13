@@ -89,6 +89,19 @@ func (c *connAgent) WatchSession(ctx context.Context, req *connect.Request[agent
 	return stream.Err()
 }
 
+func (c *connAgent) WatchSessions(ctx context.Context, req *connect.Request[agentv1.WatchSessionsRequest], srv *connect.ServerStream[agentv1.WatchSessionsResponse]) error {
+	stream, err := c.client.WatchSessions(ctx, req)
+	if err != nil {
+		return err
+	}
+	for stream.Receive() {
+		if err := srv.Send(stream.Msg()); err != nil {
+			return err
+		}
+	}
+	return stream.Err()
+}
+
 func (c *connAgent) Fork(ctx context.Context, req *connect.Request[agentv1.ForkRequest]) (*connect.Response[agentv1.ForkResponse], error) {
 	return c.client.Fork(ctx, req)
 }
@@ -178,4 +191,7 @@ func (c *connAgent) GetFileMeta(ctx context.Context, req *connect.Request[agentv
 }
 func (c *connAgent) GetAgentConfig(ctx context.Context, req *connect.Request[agentv1.GetAgentConfigRequest]) (*connect.Response[agentv1.GetAgentConfigResponse], error) {
 	return c.client.GetAgentConfig(ctx, req)
+}
+func (c *connAgent) DiscoverGatewayModels(ctx context.Context, req *connect.Request[agentv1.DiscoverGatewayModelsRequest]) (*connect.Response[agentv1.DiscoverGatewayModelsResponse], error) {
+	return c.client.DiscoverGatewayModels(ctx, req)
 }

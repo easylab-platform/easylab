@@ -12,17 +12,17 @@ import (
 // single source of truth); the KV copy is a projection written on lifecycle
 // events, and these resolvers serve as the KV-miss fallback.
 
-func (s *server) resolveOrg(ctx context.Context, sessionName string) (string, error) {
+func (s *server) resolveOrg(ctx context.Context, sessionName, tenant string) (string, error) {
 	o, _, _, err := s.resolveSession(ctx, sessionName)
 	return o, err
 }
 
-func (s *server) resolveRepo(ctx context.Context, sessionName string) (string, error) {
+func (s *server) resolveRepo(ctx context.Context, sessionName, tenant string) (string, error) {
 	_, r, _, err := s.resolveSession(ctx, sessionName)
 	return r, err
 }
 
-func (s *server) resolveBranch(ctx context.Context, sessionName string) (string, error) {
+func (s *server) resolveBranch(ctx context.Context, sessionName, tenant string) (string, error) {
 	_, _, b, err := s.resolveSession(ctx, sessionName)
 	return b, err
 }
@@ -30,7 +30,7 @@ func (s *server) resolveBranch(ctx context.Context, sessionName string) (string,
 // publishSessionVars projects the session's org/repo/branch into the shared
 // KV (vars.repo.{token}.*) after the authoritative mapping changed. Called by
 // the lifecycle handler; the reconciler additionally rebuilds projections.
-func (s *server) publishSessionVars(ctx context.Context, ext *extension.Extension, sessionName string) {
+func (s *server) publishSessionVars(ctx context.Context, ext *extension.Extension, tenant, sessionName string) {
 	if ext == nil {
 		return
 	}
@@ -38,15 +38,15 @@ func (s *server) publishSessionVars(ctx context.Context, ext *extension.Extensio
 	if err != nil {
 		return
 	}
-	_ = ext.SetSessionVariable(ctx, sessionName, "org", o)
-	_ = ext.SetSessionVariable(ctx, sessionName, "repo", r)
-	_ = ext.SetSessionVariable(ctx, sessionName, "branch", b)
+	_ = ext.SetSessionVariable(ctx, tenant, sessionName, "org", o)
+	_ = ext.SetSessionVariable(ctx, tenant, sessionName, "repo", r)
+	_ = ext.SetSessionVariable(ctx, tenant, sessionName, "branch", b)
 }
 
 // clearSessionVars removes a session's projected variables on deletion.
-func (s *server) clearSessionVars(ctx context.Context, ext *extension.Extension, sessionName string) {
+func (s *server) clearSessionVars(ctx context.Context, ext *extension.Extension, tenant, sessionName string) {
 	if ext == nil {
 		return
 	}
-	_ = ext.DeleteSessionVariables(ctx, sessionName)
+	_ = ext.DeleteSessionVariables(ctx, tenant, sessionName)
 }

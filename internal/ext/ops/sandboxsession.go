@@ -64,7 +64,7 @@ func (s *server) ensureSynced(ctx context.Context, cid, session string, ws works
 // ensureSandbox resolves the workspace and requires the session's worker
 // sandbox to already exist. It does NOT create it. When present and needSync,
 // the workspace branch head is synced (idempotent, easylab-owned).
-func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{}, sessionName string, needSync bool) (sandboxCtx, error) {
+func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{}, sessionName, tenant string, needSync bool) (sandboxCtx, error) {
 	ws, sid, err := s.resolveWorkspace(ctx, args, sessionName)
 	if err != nil {
 		return sandboxCtx{}, err
@@ -77,7 +77,7 @@ func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{},
 	if !strings.EqualFold(info.Status, "running") {
 		return sandboxCtx{}, fmt.Errorf("sandbox %s is %s (not running)", key, info.Status)
 	}
-	s.publishSandboxVars(ctx, sid, info)
+	s.publishSandboxVars(ctx, tenant, sid, info)
 	sc := sandboxCtx{session: sid, cid: info.ContainerID, ws: ws}
 	if needSync {
 		if err := s.ensureSynced(ctx, sc.cid, sc.session, ws); err != nil {

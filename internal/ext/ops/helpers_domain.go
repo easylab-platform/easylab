@@ -199,10 +199,10 @@ func envMapFromArgs(args map[string]interface{}) map[string]string {
 	return nil
 }
 
-func (s *server) sandboxEdit(ctx context.Context, sessionName, cid, path string, startLine, endLine int64, content string) (string, error) {
+func (s *server) sandboxEdit(ctx context.Context, tenant, sessionName, cid, path string, startLine, endLine int64, content string) (string, error) {
 	data, err := s.sandboxFileRead(ctx, cid, path)
 	if err != nil {
-		return "", ef(ctx, s.ext, sessionName, "sandbox edit read failed: %v", "sandbox 编辑读取失败：%v", err)
+		return "", ef(ctx, s.ext, tenant, sessionName, "sandbox edit read failed: %v", "sandbox 编辑读取失败：%v", err)
 	}
 	current := string(data)
 	lines := strings.Split(current, "\n")
@@ -237,12 +237,12 @@ func (s *server) sandboxEdit(ctx context.Context, sessionName, cid, path string,
 	}
 	newContent := strings.Join(lines, "\n")
 	if err := s.sandboxFileWrite(ctx, cid, path, []byte(newContent)); err != nil {
-		return "", ef(ctx, s.ext, sessionName, "sandbox edit write failed: %v", "sandbox 编辑写入失败：%v", err)
+		return "", ef(ctx, s.ext, tenant, sessionName, "sandbox edit write failed: %v", "sandbox 编辑写入失败：%v", err)
 	}
 	return fmt.Sprintf("Edited sandbox file '%s'.", path), nil
 }
 
-func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx, args map[string]interface{}) (string, error) {
+func (s *server) portFile(ctx context.Context, tenant, sessionName string, sc sandboxCtx, args map[string]interface{}) (string, error) {
 	sandboxPath := strArg(args, "sandbox-path")
 	repoPath := strArg(args, "repo-path")
 	message := strArg(args, "message")
@@ -256,14 +256,14 @@ func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx
 	// Determine whether sandbox_path is a directory.
 	info, err := s.sandboxFileStat(ctx, sc.cid, sandboxPath)
 	if err != nil {
-		return "", ef(ctx, s.ext, sessionName, "port sandbox stat failed: %v", "沙箱 stat 失败：%v", err)
+		return "", ef(ctx, s.ext, tenant, sessionName, "port sandbox stat failed: %v", "沙箱 stat 失败：%v", err)
 	}
 
 	if !info.IsDir() {
 		// Single file: read + optimistic-lock commit (one action).
 		data, err := s.sandboxFileRead(ctx, sc.cid, sandboxPath)
 		if err != nil {
-			return "", ef(ctx, s.ext, sessionName, "port sandbox read failed: %v", "沙箱读取失败：%v", err)
+			return "", ef(ctx, s.ext, tenant, sessionName, "port sandbox read failed: %v", "沙箱读取失败：%v", err)
 		}
 		commitBody := func(changes []map[string]interface{}) map[string]interface{} {
 			return map[string]interface{}{
@@ -277,7 +277,7 @@ func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx
 		if err := s.httpPostJSONMap(ctx, commitsPath, commitBody([]map[string]interface{}{
 			{"path": repoPath, "content": string(data)},
 		}), &resp); err != nil {
-			return "", ef(ctx, s.ext, sessionName, "port write failed: %v", "沙箱写入失败：%v", err)
+			return "", ef(ctx, s.ext, tenant, sessionName, "port write failed: %v", "沙箱写入失败：%v", err)
 		}
 		changeID := strField(resp, "change_id")
 		if changeID == "" {
@@ -289,10 +289,10 @@ func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx
 	// Directory: expand via worker file_list, then one atomic commit (multi-action).
 	files, err := s.sandboxFileList(ctx, sc.cid, sandboxPath)
 	if err != nil {
-		return "", ef(ctx, s.ext, sessionName, "port sandbox list failed: %v", "沙箱列表失败：%v", err)
+		return "", ef(ctx, s.ext, tenant, sessionName, "port sandbox list failed: %v", "沙箱列表失败：%v", err)
 	}
 	if len(files) == 0 {
-		return "", ef(ctx, s.ext, sessionName, "port sandbox directory '%s' is empty", "沙箱目录 '%s' 为空", sandboxPath)
+		return "", ef(ctx, s.ext, tenant, sessionName, "port sandbox directory '%s' is empty", "沙箱目录 '%s' 为空", sandboxPath)
 	}
 	changes := make([]map[string]interface{}, 0, len(files))
 	for _, f := range files {
@@ -316,7 +316,7 @@ func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx
 		"new_commit":  true,
 		"changes":     changes,
 	}, &resp); err != nil {
-		return "", ef(ctx, s.ext, sessionName, "port commit write failed: %v", "提交写入失败：%v", err)
+		return "", ef(ctx, s.ext, tenant, sessionName, "port commit write failed: %v", "提交写入失败：%v", err)
 	}
 	changeID := strField(resp, "change_id")
 	if changeID == "" {

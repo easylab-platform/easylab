@@ -107,8 +107,8 @@ func Run(ctx context.Context, opts Options) error {
 			"repo":   {Resolve: s.resolveRepo},
 			"branch": {Resolve: s.resolveBranch},
 		},
-		OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent) error {
-			return s.handleLifecycleEvent(ctx, string(ev.Kind), ev)
+		OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent, tenant string) error {
+			return s.handleLifecycleEvent(ctx, string(ev.Kind), ev, tenant)
 		},
 	}))
 

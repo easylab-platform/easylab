@@ -8,7 +8,7 @@ import (
 
 // handleLifecycleEvent mirrors one agent lifecycle event into the workspace
 // layer. Every step is idempotent: redeliveries (at-least-once) converge.
-func (s *server) handleLifecycleEvent(ctx context.Context, event string, env abcprotocol.LifecycleEvent) error {
+func (s *server) handleLifecycleEvent(ctx context.Context, event string, env abcprotocol.LifecycleEvent, tenant string) error {
 	var err error
 	switch event {
 	case "created":
@@ -37,7 +37,7 @@ func (s *server) handleLifecycleEvent(ctx context.Context, event string, env abc
 	// Project the workspace mapping into the shared var KV (single-source-of-
 	// truth = our PG; KV = recomputable projection). `deleted` clears instead.
 	if event == "deleted" {
-		s.clearSessionVars(ctx, s.ext, env.SessionName)
+		s.clearSessionVars(ctx, s.ext, tenant, env.SessionName)
 		return nil
 	}
 	sid := env.SessionName
@@ -46,7 +46,7 @@ func (s *server) handleLifecycleEvent(ctx context.Context, event string, env abc
 			sid = t
 		}
 	}
-	s.publishSessionVars(ctx, s.ext, sid)
+	s.publishSessionVars(ctx, s.ext, tenant, sid)
 	return nil
 }
 

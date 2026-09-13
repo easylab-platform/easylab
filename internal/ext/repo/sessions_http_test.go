@@ -273,7 +273,7 @@ func doReq(t *testing.T, h http.Handler, method, path string, body interface{}) 
 
 func (s *server) emit(t *testing.T, ctx context.Context, event string, env abcprotocol.LifecycleEvent) error {
 	t.Helper()
-	return s.handleLifecycleEvent(ctx, event, env)
+	return s.handleLifecycleEvent(ctx, event, env, "")
 }
 
 // ---- lifecycle event tests ----

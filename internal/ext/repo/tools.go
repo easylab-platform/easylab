@@ -42,21 +42,21 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 
 	return map[string]extension.ToolSpec{
 		"read": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, b, err := s.refBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
 				path := abcprotocol.ArgString(args, "path")
 				if path == "" {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'path' argument", "缺少 'path' 参数")
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'path' argument", "缺少 'path' 参数")
 				}
 				text, sha, size, err := readFileRaw(ctx, o, r, b, path)
 				if err != nil {
 					if errors.Is(err, errNotFoundForHTTP) {
-						return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("failed to read file '%s': not found or inaccessible", path), fmt.Sprintf("读取文件 '%s' 失败：未找到或不可访问", path))}, nil
+						return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("failed to read file '%s': not found or inaccessible", path), fmt.Sprintf("读取文件 '%s' 失败：未找到或不可访问", path))}, nil
 					}
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "read '%s': %v", "读取 '%s'：%v", path, err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "read '%s': %v", "读取 '%s'：%v", path, err)
 				}
 				offset := abcprotocol.ArgInt(args, "offset", 1)
 				limit := abcprotocol.ArgInt(args, "limit", 0)
@@ -72,7 +72,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 
 				startIdx := offset - 1
 				if startIdx > int64(len(lines)) {
-					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("file '%s' has %d lines; offset=%d is past the end.", path, totalLines, offset), fmt.Sprintf("文件 '%s' 共 %d 行；offset=%d 已超出末尾。", path, totalLines, offset)), Data: map[string]interface{}{
+					return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("file '%s' has %d lines; offset=%d is past the end.", path, totalLines, offset), fmt.Sprintf("文件 '%s' 共 %d 行；offset=%d 已超出末尾。", path, totalLines, offset)), Data: map[string]interface{}{
 						"path": path, "sha": sha, "size": size, "total_lines": totalLines, "truncated": false,
 					}}, nil
 				}
@@ -108,14 +108,14 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			},
 		},
 		"write": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, b, err := s.sessionBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
 				path := abcprotocol.ArgString(args, "path")
 				if path == "" {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'path' argument", "缺少 'path' 参数")
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'path' argument", "缺少 'path' 参数")
 				}
 				content := abcprotocol.ArgString(args, "content")
 				message := abcprotocol.ArgString(args, "message")
@@ -135,23 +135,23 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					{"action": "update", "path": path, "content_base64": base64.StdEncoding.EncodeToString([]byte(content)), "sha": baseSha},
 				})
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to write file: %v", "写入文件失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to write file: %v", "写入文件失败：%v", err)
 				}
 				changeID := strVal(v, "change_id")
-				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("wrote file '%s' (change %s)", path, shortID(changeID)), fmt.Sprintf("已写入文件 '%s'（变更 %s）", path, shortID(changeID))), Data: map[string]interface{}{
+				return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("wrote file '%s' (change %s)", path, shortID(changeID)), fmt.Sprintf("已写入文件 '%s'（变更 %s）", path, shortID(changeID))), Data: map[string]interface{}{
 					"path": path, "change_id": changeID, "base_sha": baseSha,
 				}}, nil
 			},
 		},
 		"delete": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, b, err := s.sessionBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
 				path := abcprotocol.ArgString(args, "path")
 				if path == "" {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'path' argument", "缺少 'path' 参数")
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'path' argument", "缺少 'path' 参数")
 				}
 				message := abcprotocol.ArgString(args, "message")
 				if message == "" {
@@ -166,23 +166,23 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				body := map[string]interface{}{"action": "delete", "path": path, "sha": baseSha}
 				v, err := s.lab.commit(ctx, o, r, b, message, []map[string]interface{}{body})
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to delete file: %v", "删除文件失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to delete file: %v", "删除文件失败：%v", err)
 				}
 				changeID := strVal(v, "change_id")
-				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("deleted file '%s' (change %s)", path, shortID(changeID)), fmt.Sprintf("已删除文件 '%s'（变更 %s）", path, shortID(changeID))), Data: map[string]interface{}{
+				return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("deleted file '%s' (change %s)", path, shortID(changeID)), fmt.Sprintf("已删除文件 '%s'（变更 %s）", path, shortID(changeID))), Data: map[string]interface{}{
 					"path": path, "change_id": changeID, "base_sha": baseSha,
 				}}, nil
 			},
 		},
 		"edit": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, b, err := s.sessionBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
 				path := abcprotocol.ArgString(args, "path")
 				if path == "" {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'path' argument", "缺少 'path' 参数")
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'path' argument", "缺少 'path' 参数")
 				}
 				startLine := abcprotocol.ArgInt(args, "start-line", 0)
 				endLine := abcprotocol.ArgInt(args, "end-line", 0)
@@ -195,9 +195,9 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				text, sha, _, err := readFileRaw(ctx, o, r, b, path)
 				if err != nil {
 					if errors.Is(err, errNotFoundForHTTP) {
-						return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to read file '%s': not found or inaccessible", "读取文件 '%s' 失败：未找到或不可访问", path)
+						return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to read file '%s': not found or inaccessible", "读取文件 '%s' 失败：未找到或不可访问", path)
 					}
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "read '%s' before edit: %v", "编辑前读取 '%s'：%v", path, err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "read '%s' before edit: %v", "编辑前读取 '%s'：%v", path, err)
 				}
 
 				newContent, err := applyLineEdit(text, startLine, endLine, content)
@@ -211,7 +211,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					{"action": "update", "path": path, "content_base64": base64.StdEncoding.EncodeToString([]byte(newContent)), "sha": sha},
 				})
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to write edited result: %v", "写入编辑结果失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to write edited result: %v", "写入编辑结果失败：%v", err)
 				}
 				changeID := strVal(v, "change_id")
 
@@ -221,14 +221,14 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				} else {
 					desc = fmt.Sprintf("replaced lines %d-%d", startLine, endLine)
 				}
-				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("edited file '%s': %s (change %s)", path, desc, shortID(changeID)), fmt.Sprintf("已编辑文件 '%s'：%s（变更 %s）", path, desc, shortID(changeID))), Data: map[string]interface{}{
+				return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("edited file '%s': %s (change %s)", path, desc, shortID(changeID)), fmt.Sprintf("已编辑文件 '%s'：%s（变更 %s）", path, desc, shortID(changeID))), Data: map[string]interface{}{
 					"path": path, "start-line": startLine, "end-line": endLine,
 					"old_sha": sha, "change_id": changeID, "diff": diffLines(text, newContent),
 				}}, nil
 			},
 		},
 		"ls": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, b, err := s.refBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -238,7 +238,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					Org: o, Repo: r, Ref: b, Path: path,
 				}))
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to list directory: %v", "列出目录失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to list directory: %v", "列出目录失败：%v", err)
 				}
 				entries := treeEntries(treeRes.Msg.GetEntries())
 				dirs, nfiles := 0, 0
@@ -275,22 +275,22 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			},
 		},
 		"grep": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, b, err := s.refBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
 				pattern := abcprotocol.ArgString(args, "pattern")
 				if pattern == "" {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'pattern' argument", "缺少 'pattern' 参数")
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'pattern' argument", "缺少 'pattern' 参数")
 				}
 				searchRes, err := s.sdk.Lab.Search(ctx, connect.NewRequest(&easylabv1.SearchRequest{Org: o, Repo: r, Ref: b, Q: pattern}))
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "search failed: %v", "搜索失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "search failed: %v", "搜索失败：%v", err)
 				}
 				matches := searchRes.Msg.GetMatches()
 				if len(matches) == 0 {
-					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("no matches for '%s' in rev '%s'.", pattern, b), fmt.Sprintf("在版本 '%s' 中未找到 '%s' 的匹配。", b, pattern)), Data: map[string]interface{}{"matches": []interface{}{}, "count": 0}}, nil
+					return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("no matches for '%s' in rev '%s'.", pattern, b), fmt.Sprintf("在版本 '%s' 中未找到 '%s' 的匹配。", b, pattern)), Data: map[string]interface{}{"matches": []interface{}{}, "count": 0}}, nil
 				}
 				max := abcprotocol.ArgInt(args, "max", 0)
 				truncated := false
@@ -315,10 +315,10 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			},
 		},
 		"explore": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				tree, err := s.lab.GetRepoTree(ctx)
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to browse structure: %v", "浏览结构失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to browse structure: %v", "浏览结构失败：%v", err)
 				}
 				orgArg := abcprotocol.ArgString(args, "org")
 				repoArg := abcprotocol.ArgString(args, "repo")
@@ -348,13 +348,13 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					meta = append(meta, map[string]interface{}{"org": org, "repos": rmeta})
 				}
 				if len(meta) == 0 {
-					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, "no organizations or repositories.", "没有组织或仓库。"), Data: map[string]interface{}{"orgs": []interface{}{}}}, nil
+					return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, "no organizations or repositories.", "没有组织或仓库。"), Data: map[string]interface{}{"orgs": []interface{}{}}}, nil
 				}
 				return extension.ToolResultData{Content: sb.String(), Data: map[string]interface{}{"orgs": meta}}, nil
 			},
 		},
 		"vcs-graph": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, _, err := s.refBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -362,11 +362,11 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				limit := abcprotocol.ArgInt(args, "limit", 0)
 				graphRes, err := s.sdk.Lab.Graph(ctx, connect.NewRequest(&easylabv1.GraphRequest{Org: o, Repo: r, Limit: int32(limit)}))
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get graph: %v", "获取图失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to get graph: %v", "获取图失败：%v", err)
 				}
 				arr := graphNodeMaps(graphRes.Msg.GetNodes())
 				if len(arr) == 0 {
-					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, "no commits in graph.", "图中无提交。"), Data: map[string]interface{}{"graph": []interface{}{}}}, nil
+					return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, "no commits in graph.", "图中无提交。"), Data: map[string]interface{}{"graph": []interface{}{}}}, nil
 				}
 				var sb strings.Builder
 				fmt.Fprintf(&sb, "commit graph (%d nodes):\n", len(arr))
@@ -386,7 +386,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			},
 		},
 		"vcs-diff": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, _, err := s.sessionBaseXO(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -394,14 +394,14 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				revA := abcprotocol.ArgString(args, "rev-a")
 				revB := abcprotocol.ArgString(args, "rev-b")
 				if revA == "" || revB == "" {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "rev_a and rev_b are required", "rev_a 与 rev_b 均为必填")
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "rev_a and rev_b are required", "rev_a 与 rev_b 均为必填")
 				}
 				path := abcprotocol.ArgString(args, "path")
 				cmpRes, err := s.sdk.Lab.Compare(ctx, connect.NewRequest(&easylabv1.CompareRequest{
 					Org: o, Repo: r, From: revA, To: revB,
 				}))
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get diff: %v", "获取差异失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to get diff: %v", "获取差异失败：%v", err)
 				}
 				diff := compareDiffText(cmpRes.Msg.GetFiles())
 				scope := "tree"
@@ -410,45 +410,45 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					scope = fmt.Sprintf("file '%s'", path)
 				}
 				if strings.TrimSpace(diff) == "" {
-					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("no diff between '%s' and '%s' (%s).", revA, revB, scope), fmt.Sprintf("'%s' 与 '%s' 之间无差异（%s）。", revA, revB, scope)), Data: map[string]interface{}{"path": path, "rev-a": revA, "rev-b": revB}}, nil
+					return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("no diff between '%s' and '%s' (%s).", revA, revB, scope), fmt.Sprintf("'%s' 与 '%s' 之间无差异（%s）。", revA, revB, scope)), Data: map[string]interface{}{"path": path, "rev-a": revA, "rev-b": revB}}, nil
 				}
-				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("diff (%s) between '%s'..'%s':\n%s", scope, revA, revB, diff), fmt.Sprintf("差异（%s）介于 '%s'..'%s'：\n%s", scope, revA, revB, diff)), Data: map[string]interface{}{"path": path, "rev-a": revA, "rev-b": revB}}, nil
+				return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("diff (%s) between '%s'..'%s':\n%s", scope, revA, revB, diff), fmt.Sprintf("差异（%s）介于 '%s'..'%s'：\n%s", scope, revA, revB, diff)), Data: map[string]interface{}{"path": path, "rev-a": revA, "rev-b": revB}}, nil
 			},
 		},
 		"vcs-rebase": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, b, err := s.sessionBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
 				source := abcprotocol.ArgString(args, "source")
 				if source == "" {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'source' argument", "缺少 'source' 参数")
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'source' argument", "缺少 'source' 参数")
 				}
 				destSha, derr := s.lab.GetBranchHead(ctx, o, r, b)
 				if derr != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "rebase failed: %v", "变基失败：%v", derr)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "rebase failed: %v", "变基失败：%v", derr)
 				}
 				changeID, commitID, err := s.lab.Rebase(ctx, o, r, source, []string{destSha})
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "rebase failed: %v", "变基失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "rebase failed: %v", "变基失败：%v", err)
 				}
 				conflicts := []string{}
 				if len(conflicts) > 0 {
-					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("rebased '%s' onto '%s' with %d conflict(s): %s", source, b, len(conflicts), strings.Join(conflicts, ", ")), fmt.Sprintf("已将 '%s' 变基到 '%s' 上，共 %d 个冲突：%s", source, b, len(conflicts), strings.Join(conflicts, ", "))), Data: map[string]interface{}{"commit_id": commitID, "change_id": changeID, "conflicts": conflicts}}, nil
+					return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("rebased '%s' onto '%s' with %d conflict(s): %s", source, b, len(conflicts), strings.Join(conflicts, ", ")), fmt.Sprintf("已将 '%s' 变基到 '%s' 上，共 %d 个冲突：%s", source, b, len(conflicts), strings.Join(conflicts, ", "))), Data: map[string]interface{}{"commit_id": commitID, "change_id": changeID, "conflicts": conflicts}}, nil
 				}
-				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("rebased '%s' onto '%s' (tip %s, change %s).", source, b, shortID(commitID), shortID(changeID)), fmt.Sprintf("已将 '%s' 变基到 '%s'（尖端 %s，变更 %s）。", source, b, shortID(commitID), shortID(changeID))), Data: map[string]interface{}{"commit_id": commitID, "change_id": changeID, "conflicts": []interface{}{}}}, nil
+				return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("rebased '%s' onto '%s' (tip %s, change %s).", source, b, shortID(commitID), shortID(changeID)), fmt.Sprintf("已将 '%s' 变基到 '%s'（尖端 %s，变更 %s）。", source, b, shortID(commitID), shortID(changeID))), Data: map[string]interface{}{"commit_id": commitID, "change_id": changeID, "conflicts": []interface{}{}}}, nil
 			},
 		},
 		"vcs-resolve": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, b, err := s.sessionBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
 				path := abcprotocol.ArgString(args, "path")
 				if path == "" {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'path' argument", "缺少 'path' 参数")
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'path' argument", "缺少 'path' 参数")
 				}
 				content := abcprotocol.ArgString(args, "content")
 				message := "resolve " + path
@@ -463,15 +463,15 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					{"action": "update", "path": path, "content_base64": base64.StdEncoding.EncodeToString([]byte(content)), "sha": baseSha},
 				})
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "resolve failed: %v", "解析失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "resolve failed: %v", "解析失败：%v", err)
 				}
 				commitID := strVal(v, "sha")
 				changeID := strVal(v, "change_id")
-				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("resolved '%s' (tip %s, change %s).", path, shortID(commitID), shortID(changeID)), fmt.Sprintf("已解析 '%s'（尖端 %s，变更 %s）。", path, shortID(commitID), shortID(changeID))), Data: map[string]interface{}{"commit_id": commitID, "change_id": changeID, "conflicts": []interface{}{}}}, nil
+				return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("resolved '%s' (tip %s, change %s).", path, shortID(commitID), shortID(changeID)), fmt.Sprintf("已解析 '%s'（尖端 %s，变更 %s）。", path, shortID(commitID), shortID(changeID))), Data: map[string]interface{}{"commit_id": commitID, "change_id": changeID, "conflicts": []interface{}{}}}, nil
 			},
 		},
 		"vcs-blame": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, _, err := s.refBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -482,11 +482,11 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					rev = "main"
 				}
 				if path == "" {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'path' argument", "缺少 'path' 参数")
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'path' argument", "缺少 'path' 参数")
 				}
 				v, err := s.lab.Blame(ctx, o, r, path, rev)
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get blame: %v", "获取 blame 失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to get blame: %v", "获取 blame 失败：%v", err)
 				}
 				anns := mapBlameLines(v)
 				var sb strings.Builder
@@ -515,7 +515,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			},
 		},
 		"vcs-log": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, b, err := s.refBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
@@ -525,12 +525,12 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					Org: o, Repo: r, Ref: b, Limit: int32(limit),
 				}))
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to get commit history: %v", "获取提交历史失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to get commit history: %v", "获取提交历史失败：%v", err)
 				}
 				commits := revisionCommits(revsRes.Msg.GetRevisions())
 				var sb strings.Builder
 				if len(commits) == 0 {
-					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, "no commits.", "无提交。"), Data: map[string]interface{}{"commits": []interface{}{}}}, nil
+					return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, "no commits.", "无提交。"), Data: map[string]interface{}{"commits": []interface{}{}}}, nil
 				}
 				fmt.Fprintf(&sb, "latest %d commit(s):\n", len(commits))
 				meta := make([]interface{}, 0, len(commits))
@@ -546,24 +546,24 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			},
 		},
 		"vcs-show": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				o, r, _, err := s.refBase(ctx, args, sessionName)
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
 				rev := abcprotocol.ArgString(args, "rev")
 				if rev == "" {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "missing 'rev' argument", "缺少 'rev' 参数")
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'rev' argument", "缺少 'rev' 参数")
 				}
 				files, err := s.lab.Diff(ctx, o, r, rev, "")
 				if err != nil {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "failed to view change: %v", "查看变更失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "failed to view change: %v", "查看变更失败：%v", err)
 				}
 				patch := diffFilesText(files)
 				if strings.TrimSpace(patch) == "" {
-					return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("change '%s' has no content diff.", rev), fmt.Sprintf("变更 '%s' 没有内容差异。", rev)), Data: map[string]interface{}{"rev": rev}}, nil
+					return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("change '%s' has no content diff.", rev), fmt.Sprintf("变更 '%s' 没有内容差异。", rev)), Data: map[string]interface{}{"rev": rev}}, nil
 				}
-				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("changes of '%s':\n%s", rev, patch), fmt.Sprintf("'%s' 的变更：\n%s", rev, patch)), Data: map[string]interface{}{"rev": rev, "patch": patch}}, nil
+				return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName, fmt.Sprintf("changes of '%s':\n%s", rev, patch), fmt.Sprintf("'%s' 的变更：\n%s", rev, patch)), Data: map[string]interface{}{"rev": rev, "patch": patch}}, nil
 			},
 		},
 	}

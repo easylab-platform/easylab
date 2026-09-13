@@ -41,9 +41,9 @@ func TestManifestBinding(t *testing.T) {
 	}
 
 	cfg := m.BuildConfig(manifest.Bindings{Handlers: manifestHandlers(), Variables: map[string]extension.VariableSpec{
-		"org":      {Resolve: func(context.Context, string) (string, error) { return "acme", nil }},
-		"repo":     {Resolve: func(context.Context, string) (string, error) { return "api", nil }},
-		"branch": {Resolve: func(context.Context, string) (string, error) { return "main", nil }},
+		"org":      {Resolve: func(context.Context, string, string) (string, error) { return "acme", nil }},
+		"repo":     {Resolve: func(context.Context, string, string) (string, error) { return "api", nil }},
+		"branch": {Resolve: func(context.Context, string, string) (string, error) { return "main", nil }},
 	}})
 
 	declared := map[string]bool{}
@@ -154,8 +154,8 @@ func TestExploreWire(t *testing.T) {
 	defer ext.Close()
 	defer agent.Close()
 
-	res, err := agent.CallTool(context.Background(), "", "repo", "explore", "x1",
-		map[string]interface{}{})
+	res, err := agent.CallTool(context.Background(), "", "t1", "repo", "explore", "x1",
+		map[string]any{})
 	if err != nil {
 		t.Fatalf("explore wire: %v", err)
 	}

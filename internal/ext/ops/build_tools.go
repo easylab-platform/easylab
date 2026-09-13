@@ -15,14 +15,14 @@ import (
 func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 
 	m["container-build"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
 			if err != nil {
 				return extension.ToolResultData{}, err
 			}
 			image := strArg(args, "tag")
 			if image == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "container-build: missing 'tag' (image name)", "container-build：缺少 'tag'（镜像名）")
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "container-build: missing 'tag' (image name)", "container-build：缺少 'tag'（镜像名）")
 			}
 			// Tag defaults to the session branch (matching container-build's
 			// historical {tag}:{branch}); an explicit image_tag overrides it.
@@ -45,19 +45,19 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 				}},
 			}}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "container-build workflow failed: %v", "container-build 工作流失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "container-build workflow failed: %v", "container-build 工作流失败：%v", err)
 			}
 			wid := wfRes.Msg.GetWorkflow().GetId()
 			runRes, err := s.sdk.Workflow.TriggerRun(ctx, connect.NewRequest(&easylabv1.TriggerRunRequest{WorkflowId: wid}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "container-build trigger failed: %v", "container-build 触发失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "container-build trigger failed: %v", "container-build 触发失败：%v", err)
 			}
 			out := fmt.Sprintf("Build launched (run %s, image %s).", runRes.Msg.GetRun().GetId(), fullImage)
 			return extension.ToolResultData{Content: out}, nil
 		},
 	}
 	m["container-search"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			// Search the OCI image registry. Default: all cached/published
 			// images (incl. library/* base images like go:alpine). Optional
 			// repo=<org/repo> filters to images built from that source repo;
@@ -82,13 +82,13 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 			}
 			v, err := s.httpGetJSONArtifact(ctx, u)
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "container-search failed: %v", "container-search 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "container-search failed: %v", "container-search 失败：%v", err)
 			}
 			return extension.ToolResultData{Content: v}, nil
 		},
 	}
 	m["package-publish"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			protocol := strArg(args, "protocol")
 			org, repo, branch := strArg(args, "org"), strArg(args, "repo"), strArg(args, "branch")
 			if org == "" || repo == "" {
@@ -117,12 +117,12 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 				}},
 			}}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "package-publish workflow failed: %v", "package-publish 工作流失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "package-publish workflow failed: %v", "package-publish 工作流失败：%v", err)
 			}
 			wid := wfRes.Msg.GetWorkflow().GetId()
 			_, err = s.sdk.Workflow.TriggerRun(ctx, connect.NewRequest(&easylabv1.TriggerRunRequest{WorkflowId: wid}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "package-publish trigger failed: %v", "package-publish 触发失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "package-publish trigger failed: %v", "package-publish 触发失败：%v", err)
 			}
 			ref := fmt.Sprintf("%s/%s@%s", org, repo, branchOrDefault(branch))
 			content := fmt.Sprintf("Publish launched (%s, context %s).", protocol, ref)
@@ -130,7 +130,7 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 		},
 	}
 	m["workflow-run"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			org, repo, branch := strArg(args, "org"), strArg(args, "repo"), strArg(args, "branch")
 			if org == "" || repo == "" || branch == "" {
 				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
@@ -159,10 +159,10 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 				Name: strArg(args, "name"), Args: presetArgs,
 			}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "workflow-run failed: %v", "workflow-run 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "workflow-run failed: %v", "workflow-run 失败：%v", err)
 			}
 			if e := res.Msg.GetError(); e != "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "workflow-run: %s", "workflow-run：%s", e)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "workflow-run: %s", "workflow-run：%s", e)
 			}
 			var ids []string
 			for _, r := range res.Msg.GetRuns() {
@@ -176,10 +176,10 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 		},
 	}
 	m["package-search"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			typesRes, err := s.sdk.Registry.ListPackageTypes(ctx, connect.NewRequest(&easylabv1.ListPackageTypesRequest{}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "package-search failed: %v", "package-search 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "package-search failed: %v", "package-search 失败：%v", err)
 			}
 			proto := strArg(args, "protocol")
 			var lines []string
@@ -197,14 +197,14 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 		},
 	}
 	m["pull-git-repo"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			gitURL := strArg(args, "git-url")
 			if gitURL == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "pull-git-repo: missing 'git_url'", "pull-git-repo：缺少 'git_url'")
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "pull-git-repo: missing 'git_url'", "pull-git-repo：缺少 'git_url'")
 			}
 			repo := inferRepoFromGitURL(gitURL)
 			if repo == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "cannot infer repo name from %s", "无法从 %s 推导仓库名", gitURL)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "cannot infer repo name from %s", "无法从 %s 推导仓库名", gitURL)
 			}
 			org := strArg(args, "org")
 			if org == "" {
@@ -215,13 +215,13 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 			// fetches on schedule (EASYVCS_MIRROR_TICK, default 5s).
 			if _, err := s.sdk.Lab.EnsureRepo(ctx, connect.NewRequest(&easylabv1.EnsureRepoRequest{Org: org, Repo: repo})); err != nil {
 				if connect.CodeOf(err) != connect.CodeAlreadyExists && connect.CodeOf(err) != connect.CodeInvalidArgument {
-					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "create repo failed: %v", "创建仓库失败：%v", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "create repo failed: %v", "创建仓库失败：%v", err)
 				}
 			}
 			if _, err := s.sdk.Lab.SetMirror(ctx, connect.NewRequest(&easylabv1.SetMirrorRequest{
 				Org: org, Repo: repo, PullUrl: gitURL,
 			})); err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "set mirror failed: %v", "设置镜像失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "set mirror failed: %v", "设置镜像失败：%v", err)
 			}
 			return extension.ToolResultData{Content: fmt.Sprintf("mirroring %s/%s from %s (pull scheduled)", org, repo, gitURL)}, nil
 		},

@@ -110,9 +110,9 @@ func Run(ctx context.Context, opts Options) error {
 			"sandbox-id":     {Resolve: s.resolveSandboxID},
 			"sandbox-status": {Resolve: s.resolveSandboxStatus},
 		},
-		OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent) error {
+		OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent, tenant string) error {
 			if ev.Kind == "deleted" {
-				s.clearSandboxVars(ctx, ev.SessionName)
+				s.clearSandboxVars(ctx, tenant, ev.SessionName)
 			}
 			return nil
 		},

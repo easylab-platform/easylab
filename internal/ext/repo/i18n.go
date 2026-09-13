@@ -10,11 +10,11 @@ import (
 // localeOf resolves the session's effective locale for a tool call. It reads
 // the agent-projected `vars.agent.locale` (provider "agent") and falls back to
 // the env default.
-func localeOf(ctx context.Context, ext *extension.Extension, sessionName, fallback string) string {
+func localeOf(ctx context.Context, ext *extension.Extension, tenant, sessionName, fallback string) string {
 	if ext == nil || sessionName == "" {
 		return fallback
 	}
-	v := ext.GetSessionVariable(ctx, "agent", sessionName, "locale", "")
+	v := ext.GetSessionVariable(ctx, tenant, "agent", sessionName, "locale", "")
 	if v == "" {
 		return fallback
 	}
@@ -36,15 +36,15 @@ func t(locale, en, zh string) string {
 
 // lc returns the localized Content for a tool result given the session locale,
 // the English string `en` and its Chinese equivalent `zh`.
-func lc(ctx context.Context, ext *extension.Extension, sessionName, en, zh string) string {
-	return t(localeOf(ctx, ext, sessionName, envOr("LOCALE", "en")), en, zh)
+func lc(ctx context.Context, ext *extension.Extension, tenant, sessionName, en, zh string) string {
+	return t(localeOf(ctx, ext, tenant, sessionName, envOr("LOCALE", "en")), en, zh)
 }
 
 // ef builds a localized error with the given en/zh format and arguments, so
 // the fmt.Errorf/fmt.Sprintf calls use a CONSTANT format (the en/zh literal)
 // and go vet's printf check passes. Placeholders (%s/%v/%w) are preserved.
-func ef(ctx context.Context, ext *extension.Extension, sessionName, en, zh string, args ...interface{}) error {
-	f := lc(ctx, ext, sessionName, en, zh)
+func ef(ctx context.Context, ext *extension.Extension, tenant, sessionName, en, zh string, args ...interface{}) error {
+	f := lc(ctx, ext, tenant, sessionName, en, zh)
 	return fmt.Errorf("%s", sprintf(f, args...))
 }
 
