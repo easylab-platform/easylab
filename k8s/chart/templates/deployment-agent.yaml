@@ -40,6 +40,9 @@ spec:
               value: build
             - name: AGENT_CORS_ORIGIN
               value: {{ .Values.agent.corsOrigin | quote }}
+            {{- with .Values.agent.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             - containerPort: {{ .Values.agent.port }}
               protocol: TCP

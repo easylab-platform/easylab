@@ -20,7 +20,7 @@ registry:
 gateway:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
-    tag: "20260912173605"
+    tag: "20260913135857"
     pullPolicy: IfNotPresent
   # External base URL advertised to clients (OCI /token realm, git, ...).
   # Empty derives it from the install namespace: the in-cluster Service URL
@@ -92,12 +92,20 @@ nats:
 agent:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/agent
-    tag: "20260910060820"
+    # v2 (multi-tenant protocol). Phase 1 rollout: auth disabled, every
+    # request pinned to the default tenant; flip to required (+ admin/bootstrap
+    # tokens) in phase 2.
+    tag: "20260913102527"
     pullPolicy: IfNotPresent
   # Service name published for the agent (repo extension defaults to this).
   serviceName: abcp-agent
   port: 8000
   corsOrigin: "*"
+  extraEnv:
+    - name: AGENT_AUTH_MODE
+      value: "none"
+    - name: AGENT_DEFAULT_TENANT
+      value: "default"
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: "1", memory: 1Gi }
