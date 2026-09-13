@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -33,7 +34,7 @@ func (c *connTenant) CreateTenant(ctx context.Context, req *connect.Request[easy
 		return nil, statusErr(err)
 	}
 	return connect.NewResponse(&easylabv1.CreateTenantResponse{
-		Tenant:      &easylabv1.Tenant{Id: res["tenant"].(string), Slug: res["slug"].(string), DisplayName: req.Msg.DisplayName},
+		Tenant:      &easylabv1.Tenant{Id: res["id"].(string), Slug: res["slug"].(string), DisplayName: req.Msg.DisplayName},
 		Member:      &easylabv1.TenantMember{Username: res["username"].(string), Role: store.RoleOwner},
 		Token:       res["token"].(string),
 		AgentTenant: res["agent_tenant"].(bool),
@@ -167,6 +168,8 @@ func statusErr(err error) error {
 	case errors.Is(err, store.ErrNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
 	case errors.Is(err, store.ErrUsernameTaken):
+		return connect.NewError(connect.CodeAlreadyExists, err)
+	case strings.Contains(err.Error(), "UNIQUE constraint failed"):
 		return connect.NewError(connect.CodeAlreadyExists, err)
 	default:
 		return connect.NewError(connect.CodeInternal, err)
