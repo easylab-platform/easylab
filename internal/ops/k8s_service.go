@@ -109,7 +109,7 @@ func (r *K8sServiceRunner) toStatus(st k8s.SandboxStatus, req ServiceRequest) Se
 		Name: req.Name, Kind: "deployment", Replicas: reps, Ready: ready,
 		Phase: phase, PodIP: st.PodIP, ServiceURL: st.Service,
 		WorkerURL: "http://" + st.Service,
-		Owner:     st.Owner, Org: st.Org, Repo: st.Repo,
+		Owner:     st.Owner, Org: st.Org, Repo: st.Repo, Session: st.Session,
 	}
 }
 

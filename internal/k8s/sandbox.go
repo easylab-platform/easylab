@@ -55,6 +55,8 @@ type SandboxStatus struct {
 	// Org/Repo are the workspace association labels (services).
 	Org  string
 	Repo string
+	// Session is the deploying session label (services), sanitized.
+	Session string
 }
 
 func (c *Client) port(s SandboxSpec) int32 {

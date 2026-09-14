@@ -98,6 +98,7 @@ func (c *Client) ServiceStatus(ctx context.Context, name string) (SandboxStatus,
 	st := SandboxStatus{
 		Name: name, Phase: "Running", Service: c.ServiceDNS(name),
 		Owner: d.Labels["easylab/owner"], Org: d.Labels["easylab/org"], Repo: d.Labels["easylab/repo"],
+		Session: d.Labels["easylab/session"],
 	}
 	if d.Status.ReadyReplicas > 0 {
 		st.Ready = true
@@ -146,6 +147,7 @@ func (c *Client) ListServices(ctx context.Context) ([]SandboxStatus, error) {
 		out = append(out, SandboxStatus{
 			Name: d.Name, Phase: "Running", Ready: d.Status.ReadyReplicas > 0, Service: c.ServiceDNS(d.Name),
 			Owner: d.Labels["easylab/owner"], Org: d.Labels["easylab/org"], Repo: d.Labels["easylab/repo"],
+			Session: d.Labels["easylab/session"],
 		})
 	}
 	return out, nil

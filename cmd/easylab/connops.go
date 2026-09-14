@@ -109,19 +109,22 @@ func (c *connOps) LaunchService(ctx context.Context, req *connect.Request[easyla
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
+	// k8s label VALUES must be RFC-1123 (no ':'), so the session id
+	// (org:repo:branch) is sanitized for storage; filtering compares against
+	// the sanitized form.
 	if req.Msg.Session != "" {
-		annotations["easylab/session"] = req.Msg.Session
+		annotations["easylab/session"] = k8s.LabelKey(req.Msg.Session)
 	}
 	if req.Msg.Org != "" {
-		annotations["easylab/org"] = req.Msg.Org
+		annotations["easylab/org"] = k8s.LabelKey(req.Msg.Org)
 	}
 	if req.Msg.Repo != "" {
-		annotations["easylab/repo"] = req.Msg.Repo
+		annotations["easylab/repo"] = k8s.LabelKey(req.Msg.Repo)
 	}
 	// Ownership label: the deploying user (used to filter list/get/delete).
 	annotations["easylab/owner"] = fmt.Sprintf("%d", principalOf(ctx).UserID)
 	if req.Msg.Kind != "" {
-		annotations["easylab/kind"] = req.Msg.Kind
+		annotations["easylab/kind"] = k8s.LabelKey(req.Msg.Kind)
 	}
 	svc := ops.ServiceRequest{
 		Name:        req.Msg.Name,
@@ -255,6 +258,7 @@ func serviceInfo(s ops.ServiceStatus) *easylabv1.ServiceInfo {
 		Owner:     s.Owner,
 		Org:       s.Org,
 		Repo:      s.Repo,
+		Session:   s.Session,
 	}
 }
 

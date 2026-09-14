@@ -93,6 +93,9 @@ type ServiceStatus struct {
 	// service was deployed standalone.
 	Org  string `json:"org,omitempty"`
 	Repo string `json:"repo,omitempty"`
+	// Session is the deploying session id (k8s label easylab/session, sanitized
+	// to a k8s-safe value), used for per-session service-list filtering.
+	Session string `json:"session,omitempty"`
 }
 
 // ServiceRunner is the service launch seam. The only backend is the internal

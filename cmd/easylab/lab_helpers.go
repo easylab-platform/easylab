@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/easylab-platform/easyvcs/object"
@@ -46,89 +47,74 @@ func resolveSnapshotOf(ws *revision.Workspace, repo *store.Repo, ref string) (*s
 // resolveRefAny resolves a rev expression (branch / tag / sha / revision id /
 // "@") to a snapshot hash (object id). It mirrors the resolve semantics the
 // removed REST handler used.
+
 func resolveRefAny(ws *revision.Workspace, repo *store.Repo, ref string) (object.ID, error) {
 	if ref == "" || ref == "@" {
-		ref = ""
-	}
-	// A branch/tag ref name resolves to its stored target (a snapshot hash).
-	if refs, err := ws.ListRefs(); err == nil {
-		for _, r := range refs {
-			if r.Name != ref {
-				continue
-			}
-			if id, herr := object.HexToID(r.Target); herr == nil {
-				return id, nil
-			}
-			// The ref target may be a revision id; resolve it to its hash.
-			if rev, rerr := repo.GetRevision(r.Target); rerr == nil {
-				return rev.Hash, nil
-			}
+		revs, err := ws.Log()
+		if err != nil || len(revs) == 0 {
+			return object.ID{}, fmt.Errorf("no revisions")
 		}
+		return revs[0].Hash, nil
 	}
-	// A snapshot hash directly.
+	if ref == "@-" {
+		revs, err := ws.Log()
+		if err != nil || len(revs) == 0 {
+			return object.ID{}, fmt.Errorf("no revisions")
+		}
+		snap, err := repo.GetSnapshot(revs[0].Hash)
+		if err != nil {
+			return object.ID{}, err
+		}
+		if len(snap.Parents) == 0 {
+			return object.ID{}, fmt.Errorf("no parent")
+		}
+		return snap.Parents[0], nil
+	}
+	// Try a ref (branch/tag).
+	if rf, err := ws.GetRef(ref); err == nil && rf != nil {
+		return resolveRefAny(ws, repo, rf.Target)
+	}
+	// Try a snapshot hash directly.
 	if id, err := object.HexToID(ref); err == nil {
-		if _, serr := repo.GetSnapshot(id); serr == nil {
+		if _, err := repo.GetSnapshot(id); err == nil {
 			return id, nil
 		}
 	}
-	// A revision id -> its snapshot hash.
-	if rev, err := repo.GetRevision(ref); err == nil {
-		return rev.Hash, nil
+	// Revisions: exact id or prefix.
+	revs, err := ws.Log()
+	if err != nil {
+		return object.ID{}, err
 	}
-	// Repo HEAD fallback.
-	if ref == "" {
-		revs, err := repo.ListRevisions()
-		if err == nil && len(revs) > 0 {
-			return revs[len(revs)-1].Hash, nil
+	for _, rv := range revs {
+		if rv.ID == ref {
+			return rv.Hash, nil
 		}
 	}
-	return object.ID{}, fmt.Errorf("cannot resolve %q", ref)
+	for _, rv := range revs {
+		if strings.HasPrefix(rv.ID, ref) {
+			return rv.Hash, nil
+		}
+	}
+	return object.ID{}, fmt.Errorf("unknown ref %q", ref)
 }
 
 // resolveRevID resolves a rev expression to its stable revision id.
+
 func resolveRevID(ws *revision.Workspace, repo *store.Repo, ref string) (string, error) {
-	if ref == "" || ref == "@" {
-		// Latest revision.
-		revs, err := repo.ListRevisions()
-		if err != nil {
-			return "", err
-		}
-		if len(revs) == 0 {
-			return "", fmt.Errorf("no revisions")
-		}
-		return revs[len(revs)-1].ID, nil
+	hash, err := resolveRefAny(ws, repo, ref)
+	if err != nil {
+		return "", err
 	}
-	if refs, err := ws.ListRefs(); err == nil {
-		for _, r := range refs {
-			if r.Name != ref {
-				continue
-			}
-			// Target may be a revision id or a snapshot hash.
-			if _, rerr := repo.GetRevision(r.Target); rerr == nil {
-				return r.Target, nil
-			}
-			if id, herr := object.HexToID(r.Target); herr == nil {
-				if revs, rerr := repo.ListRevisions(); rerr == nil {
-					for _, rev := range revs {
-						if rev.Hash == id {
-							return rev.ID, nil
-						}
-					}
-				}
-			}
+	revs, err := ws.Log()
+	if err != nil {
+		return "", err
+	}
+	for _, rv := range revs {
+		if rv.Hash == hash {
+			return rv.ID, nil
 		}
 	}
-	if _, err := repo.GetRevision(ref); err == nil {
-		return ref, nil
-	}
-	if id, err := object.HexToID(ref); err == nil {
-		if revs, rerr := repo.ListRevisions(); rerr == nil {
-			for _, rev := range revs {
-				if rev.Hash == id {
-					return rev.ID, nil
-				}
-			}
-		}
-	}
-	return "", fmt.Errorf("cannot resolve revision %q", ref)
+	// Ref pointed at a raw snapshot hash not owned by a listed revision (rare);
+	// best effort: return the hash as a revision id lookup will fail.
+	return hash.String(), nil
 }

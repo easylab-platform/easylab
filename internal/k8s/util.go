@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -180,4 +181,30 @@ func RewriteImageRef(ref, host string) string {
 	// A registry host (docker.io, ghcr.io, quay.io, host:port, ...): prefix it
 	// so the pull goes through easylab's pull-through proxy.
 	return host + "/" + ref
+}
+
+// LabelKey sanitizes an arbitrary string into a deterministic k8s-safe label
+// value (alphanumerics, '-', '_', '.', <=63 chars). Values that are already
+// valid are used as-is; others are hashed to a stable 16-hex key. Session
+// names contain ':' which is illegal in label values, so every label carrying
+// a session/org/repo must go through here.
+func LabelKey(label string) string {
+	if validLabelValue(label) {
+		return label
+	}
+	sum := sha256.Sum256([]byte(label))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// validLabelValue follows the k8s label value grammar.
+func validLabelValue(v string) bool {
+	if len(v) == 0 || len(v) > 63 {
+		return false
+	}
+	for _, r := range v {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
 }

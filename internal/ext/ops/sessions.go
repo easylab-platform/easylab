@@ -133,8 +133,14 @@ func filterServicesBySession(body, session string) string {
 	}
 	var out []map[string]interface{}
 	for _, svc := range in.Services {
+		if l, _ := svc["session"].(string); l != "" {
+			if l == session || l == k8sLabelKey(session) {
+				out = append(out, svc)
+			}
+			continue
+		}
 		ann, _ := svc["annotations"].(map[string]interface{})
-		if s, _ := ann["easylab/session"].(string); s == session {
+		if v, _ := ann["easylab/session"].(string); v == session || v == k8sLabelKey(session) {
 			out = append(out, svc)
 		}
 	}
@@ -161,16 +167,20 @@ func filterServicesByExtra(body, org, repo, kind string) string {
 			}
 		}
 		if org != "" || repo != "" {
+			gOrg, _ := svc["org"].(string)
+			gRepo, _ := svc["repo"].(string)
 			ann, _ := svc["annotations"].(map[string]interface{})
-			if org != "" {
-				if o, _ := ann["easylab/org"].(string); o != org {
-					continue
-				}
+			if gOrg == "" {
+				gOrg, _ = ann["easylab/org"].(string)
 			}
-			if repo != "" {
-				if r, _ := ann["easylab/repo"].(string); r != repo {
-					continue
-				}
+			if gRepo == "" {
+				gRepo, _ = ann["easylab/repo"].(string)
+			}
+			if org != "" && gOrg != org && gOrg != k8sLabelKey(org) {
+				continue
+			}
+			if repo != "" && gRepo != repo && gRepo != k8sLabelKey(repo) {
+				continue
 			}
 		}
 		out = append(out, svc)
@@ -217,4 +227,13 @@ func sessionKey(tenant, session string) string {
 		return labelKey(session)
 	}
 	return labelKey(tenant + "\x00" + session)
+}
+
+// k8sLabelKey mirrors k8s.LabelKey (avoids importing k8s here).
+func k8sLabelKey(label string) string {
+	if validLabelValue(label) {
+		return label
+	}
+	sum := sha256.Sum256([]byte(label))
+	return hex.EncodeToString(sum[:])[:16]
 }
