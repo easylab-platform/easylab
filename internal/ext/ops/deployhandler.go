@@ -61,6 +61,12 @@ func (s *server) deploymentRequest(b struct {
 	}
 	if b.Session != "" {
 		req.Annotations = map[string]string{"easylab/session": b.Session}
+		// Derive the owning repo from the derived session name (org:repo:branch)
+		// so the gateway can authorize the deploy against the repo's roles and
+		// attribute the service to that repo.
+		if org, repo, _, ok := tryParseSession(b.Session); ok {
+			req.Org, req.Repo = org, repo
+		}
 	}
 	if b.Resources != nil {
 		if b.Resources.Requests != nil {

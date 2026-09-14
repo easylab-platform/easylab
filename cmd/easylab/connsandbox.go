@@ -19,6 +19,7 @@ import (
 	"github.com/easylab-platform/easylab/internal/connectauth"
 	"github.com/easylab-platform/easylab/internal/k8s"
 	"github.com/easylab-platform/easylab/internal/sbxreg"
+	"github.com/easylab-platform/easyvcs/store"
 )
 
 // sandboxWorkerPort is the fixed easyworker port inside sandbox containers.
@@ -35,6 +36,36 @@ type connSandbox struct {
 var _ easylabv1connect.SandboxServiceHandler = (*connSandbox)(nil)
 
 // ---- worker dialing ----
+
+// requireSandboxAccess resolves a sandbox row and enforces owner-only access
+// (plus admin). It returns the row for further use.
+func (c *connSandbox) requireSandboxAccess(ctx context.Context, name string) (sbxreg.Sandbox, error) {
+	row, ok, err := c.s.sbx.Get(name)
+	if err != nil {
+		return sbxreg.Sandbox{}, connect.NewError(connect.CodeInternal, err)
+	}
+	if !ok {
+		return sbxreg.Sandbox{}, connect.NewError(connect.CodeNotFound, fmt.Errorf("sandbox %q not found", name))
+	}
+	p := principalOf(ctx)
+	if p.Admin {
+		return row, nil
+	}
+	if row.OwnerUserID != 0 {
+		if p.UserID != row.OwnerUserID {
+			return sbxreg.Sandbox{}, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sandbox %q belongs to another user", name))
+		}
+		return row, nil
+	}
+	// Legacy row with no owner: grant to any authenticated caller only when the
+	// sandbox is repository-bound and the caller can read that repo.
+	if row.Org != "" || row.Repo != "" {
+		if role, rerr := c.s.repoRole(ctx, row.Org, row.Repo); rerr == nil && role.CanRead() {
+			return row, nil
+		}
+	}
+	return sbxreg.Sandbox{}, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sandbox %q is owner-only", name))
+}
 
 var workerTransport = &http.Transport{
 	MaxIdleConns: 32, MaxIdleConnsPerHost: 4,
@@ -108,6 +139,20 @@ func (c *connSandbox) LaunchSandbox(ctx context.Context, req *connect.Request[ea
 	if m.Name == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name required"))
 	}
+	if err := requireAuthenticated(ctx, "launching a sandbox"); err != nil {
+		return nil, err
+	}
+	// A repo-bound sandbox may only be launched by the repo OWNER; a standalone
+	// sandbox is owned by the caller.
+	owner := userIDOf(ctx)
+	if m.Org != "" || m.Repo != "" {
+		if err := c.s.requireRepoAction(ctx, m.Org, m.Repo, repoCanPush, "launching a repository sandbox"); err != nil {
+			return nil, err
+		}
+		if repo, rerr := c.s.cs.OpenRepo(store.RepoRef{Namespace: m.Org, Name: m.Repo}); rerr == nil {
+			owner = repo.OwnerUserID
+		}
+	}
 	if c.s.k8s == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("k8s backend unavailable"))
 	}
@@ -157,7 +202,7 @@ func (c *connSandbox) LaunchSandbox(ctx context.Context, req *connect.Request[ea
 	if err := c.s.sbx.Upsert(sbxreg.Sandbox{
 		Name: m.Name, Org: m.Org, Repo: m.Repo, Branch: m.Branch,
 		BaseImage: m.BaseImage, DerivedImage: tag, Workspace: workspace,
-		Runtime: profile.Name, Token: token, Mode: "managed",
+		Runtime: profile.Name, Token: token, Mode: "managed", OwnerUserID: owner,
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("registry: %w", err))
 	}
@@ -180,6 +225,9 @@ func (c *connSandbox) SyncWorkspace(ctx context.Context, req *connect.Request[ea
 	if m.Sandbox == "" || m.Org == "" || m.Repo == "" || m.Rev == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("sandbox/org/repo/rev required"))
 	}
+	if _, err := c.requireSandboxAccess(ctx, m.Sandbox); err != nil {
+		return nil, err
+	}
 	if err := c.s.syncSandboxWorkspace(ctx, m.Sandbox, m.Org, m.Repo, m.Branch); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -188,6 +236,9 @@ func (c *connSandbox) SyncWorkspace(ctx context.Context, req *connect.Request[ea
 }
 
 func (c *connSandbox) DeleteSandbox(ctx context.Context, req *connect.Request[easylabv1.DeleteSandboxRequest]) (*connect.Response[easylabv1.DeleteSandboxResponse], error) {
+	if _, err := c.requireSandboxAccess(ctx, req.Msg.Name); err != nil {
+		return nil, err
+	}
 	if c.s.k8s != nil {
 		if err := c.s.k8s.DeleteSandbox(ctx, req.Msg.Name); err != nil {
 			return connect.NewResponse(&easylabv1.DeleteSandboxResponse{Error: err.Error()}), nil
@@ -202,28 +253,60 @@ func (c *connSandbox) DeleteSandbox(ctx context.Context, req *connect.Request[ea
 // sandboxCacheTTL bounds the ListSandboxes fanout.
 const sandboxCacheTTL = 5 * time.Second
 
+// sandboxCache caches the per-user sandbox list for sandboxCacheTTL. The key is
+// the caller's user id (plus admin flag), so one user's view never leaks into
+// another's.
+type sandboxCacheEntry struct {
+	at   time.Time
+	list []*easylabv1.SandboxInfo
+}
+
 var (
-	sbxCacheMu   sync.Mutex
-	sbxCacheAt   time.Time
-	sbxCacheList []*easylabv1.SandboxInfo
+	sbxCacheMu sync.Mutex
+	sbxCache   = map[string]sandboxCacheEntry{}
 )
 
 func (c *connSandbox) ListSandboxes(ctx context.Context, req *connect.Request[easylabv1.ListSandboxesRequest]) (*connect.Response[easylabv1.ListSandboxesResponse], error) {
+	p := principalOf(ctx)
+	cacheKey := fmt.Sprintf("%d:%t", p.UserID, p.Admin)
+
 	sbxCacheMu.Lock()
-	if time.Since(sbxCacheAt) < sandboxCacheTTL && sbxCacheList != nil {
-		out := sbxCacheList
+	if e, ok := sbxCache[cacheKey]; ok && time.Since(e.at) < sandboxCacheTTL && e.list != nil {
+		out := e.list
 		sbxCacheMu.Unlock()
 		return connect.NewResponse(&easylabv1.ListSandboxesResponse{Sandboxes: out}), nil
 	}
 	sbxCacheMu.Unlock()
 
-	rows, err := c.s.sbx.List()
+	var rows []sbxreg.Sandbox
+	var err error
+	if p.Admin {
+		rows, err = c.s.sbx.List()
+	} else {
+		// Owned rows plus legacy unowned rows (filtered by repo read below).
+		rows, err = c.s.sbx.ListByOwner(p.UserID, true)
+	}
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	// Filter: owner/admin see their rows; legacy unowned repo-bound rows are
+	// visible to callers who can read the repo.
+	visible := make([]sbxreg.Sandbox, 0, len(rows))
+	for _, row := range rows {
+		if row.OwnerUserID == 0 && !p.Admin {
+			if row.Org == "" && row.Repo == "" {
+				continue
+			}
+			if role, rerr := c.s.repoRole(ctx, row.Org, row.Repo); rerr != nil || !role.CanRead() {
+				continue
+			}
+		}
+		visible = append(visible, row)
+	}
+
 	var wg sync.WaitGroup
-	infos := make([]*easylabv1.SandboxInfo, len(rows))
-	for i, row := range rows {
+	infos := make([]*easylabv1.SandboxInfo, len(visible))
+	for i, row := range visible {
 		infos[i] = rowToInfo(row)
 		wg.Add(1)
 		go func(i int, name string) {
@@ -240,12 +323,15 @@ func (c *connSandbox) ListSandboxes(ctx context.Context, req *connect.Request[ea
 	wg.Wait()
 
 	sbxCacheMu.Lock()
-	sbxCacheAt, sbxCacheList = time.Now(), infos
+	sbxCache[cacheKey] = sandboxCacheEntry{at: time.Now(), list: infos}
 	sbxCacheMu.Unlock()
 	return connect.NewResponse(&easylabv1.ListSandboxesResponse{Sandboxes: infos}), nil
 }
 
 func (c *connSandbox) GetSandbox(ctx context.Context, req *connect.Request[easylabv1.GetSandboxRequest]) (*connect.Response[easylabv1.GetSandboxResponse], error) {
+	if _, err := c.requireSandboxAccess(ctx, req.Msg.Name); err != nil {
+		return nil, err
+	}
 	info, err := c.sandboxInfo(ctx, req.Msg.Name)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
@@ -297,6 +383,9 @@ func (c *connSandbox) sandboxInfo(ctx context.Context, name string) (*easylabv1.
 // ---- worker.v1 passthroughs ----
 
 func (c *connSandbox) Execute(ctx context.Context, req *connect.Request[easylabv1.ExecuteRequest]) (*connect.Response[workerv1.ExecuteResponse], error) {
+	if _, aerr := c.requireSandboxAccess(ctx, req.Msg.Sandbox); aerr != nil {
+		return nil, aerr
+	}
 	w, err := c.wc(ctx, req.Msg.Sandbox)
 	if err != nil {
 		return nil, err
@@ -305,6 +394,9 @@ func (c *connSandbox) Execute(ctx context.Context, req *connect.Request[easylabv
 }
 
 func (c *connSandbox) ListJobs(ctx context.Context, req *connect.Request[easylabv1.ListJobsRequest]) (*connect.Response[workerv1.ListJobsResponse], error) {
+	if _, aerr := c.requireSandboxAccess(ctx, req.Msg.Sandbox); aerr != nil {
+		return nil, aerr
+	}
 	w, err := c.wc(ctx, req.Msg.Sandbox)
 	if err != nil {
 		return nil, err
@@ -320,6 +412,9 @@ func (c *connSandbox) ListJobs(ctx context.Context, req *connect.Request[easylab
 }
 
 func (c *connSandbox) JobOutput(ctx context.Context, req *connect.Request[easylabv1.JobOutputRequest]) (*connect.Response[workerv1.JobOutputResponse], error) {
+	if _, aerr := c.requireSandboxAccess(ctx, req.Msg.Sandbox); aerr != nil {
+		return nil, aerr
+	}
 	w, err := c.wc(ctx, req.Msg.Sandbox)
 	if err != nil {
 		return nil, err
@@ -330,6 +425,9 @@ func (c *connSandbox) JobOutput(ctx context.Context, req *connect.Request[easyla
 // WatchJob streams worker output through the gateway: history replay, live
 // updates and the terminal Done event (same shape as the agent proxy).
 func (c *connSandbox) WatchJob(ctx context.Context, req *connect.Request[easylabv1.WatchJobRequest], srv *connect.ServerStream[workerv1.WatchJobResponse]) error {
+	if _, aerr := c.requireSandboxAccess(ctx, req.Msg.Sandbox); aerr != nil {
+		return aerr
+	}
 	w, err := c.wc(ctx, req.Msg.Sandbox)
 	if err != nil {
 		return err
@@ -347,6 +445,9 @@ func (c *connSandbox) WatchJob(ctx context.Context, req *connect.Request[easylab
 }
 
 func (c *connSandbox) JobWait(ctx context.Context, req *connect.Request[easylabv1.JobWaitRequest]) (*connect.Response[workerv1.JobWaitResponse], error) {
+	if _, aerr := c.requireSandboxAccess(ctx, req.Msg.Sandbox); aerr != nil {
+		return nil, aerr
+	}
 	w, err := c.wc(ctx, req.Msg.Sandbox)
 	if err != nil {
 		return nil, err
@@ -355,6 +456,9 @@ func (c *connSandbox) JobWait(ctx context.Context, req *connect.Request[easylabv
 }
 
 func (c *connSandbox) JobStdin(ctx context.Context, req *connect.Request[easylabv1.JobStdinRequest]) (*connect.Response[workerv1.JobStdinResponse], error) {
+	if _, aerr := c.requireSandboxAccess(ctx, req.Msg.Sandbox); aerr != nil {
+		return nil, aerr
+	}
 	w, err := c.wc(ctx, req.Msg.Sandbox)
 	if err != nil {
 		return nil, err
@@ -363,6 +467,9 @@ func (c *connSandbox) JobStdin(ctx context.Context, req *connect.Request[easylab
 }
 
 func (c *connSandbox) JobKill(ctx context.Context, req *connect.Request[easylabv1.JobKillRequest]) (*connect.Response[workerv1.JobKillResponse], error) {
+	if _, aerr := c.requireSandboxAccess(ctx, req.Msg.Sandbox); aerr != nil {
+		return nil, aerr
+	}
 	w, err := c.wc(ctx, req.Msg.Sandbox)
 	if err != nil {
 		return nil, err
@@ -371,6 +478,9 @@ func (c *connSandbox) JobKill(ctx context.Context, req *connect.Request[easylabv
 }
 
 func (c *connSandbox) FileRead(ctx context.Context, req *connect.Request[easylabv1.FileReadRequest]) (*connect.Response[workerv1.FileReadResponse], error) {
+	if _, aerr := c.requireSandboxAccess(ctx, req.Msg.Sandbox); aerr != nil {
+		return nil, aerr
+	}
 	w, err := c.wc(ctx, req.Msg.Sandbox)
 	if err != nil {
 		return nil, err
@@ -379,6 +489,9 @@ func (c *connSandbox) FileRead(ctx context.Context, req *connect.Request[easylab
 }
 
 func (c *connSandbox) FileWrite(ctx context.Context, req *connect.Request[easylabv1.FileWriteRequest]) (*connect.Response[workerv1.FileWriteResponse], error) {
+	if _, aerr := c.requireSandboxAccess(ctx, req.Msg.Sandbox); aerr != nil {
+		return nil, aerr
+	}
 	w, err := c.wc(ctx, req.Msg.Sandbox)
 	if err != nil {
 		return nil, err
@@ -387,6 +500,9 @@ func (c *connSandbox) FileWrite(ctx context.Context, req *connect.Request[easyla
 }
 
 func (c *connSandbox) FileList(ctx context.Context, req *connect.Request[easylabv1.FileListRequest]) (*connect.Response[workerv1.FileListResponse], error) {
+	if _, aerr := c.requireSandboxAccess(ctx, req.Msg.Sandbox); aerr != nil {
+		return nil, aerr
+	}
 	w, err := c.wc(ctx, req.Msg.Sandbox)
 	if err != nil {
 		return nil, err
@@ -396,11 +512,16 @@ func (c *connSandbox) FileList(ctx context.Context, req *connect.Request[easylab
 
 // rowToInfo renders a registry row as the API shape.
 func rowToInfo(row sbxreg.Sandbox) *easylabv1.SandboxInfo {
+	owner := ""
+	if row.OwnerUserID != 0 {
+		owner = fmt.Sprintf("%d", row.OwnerUserID)
+	}
 	return &easylabv1.SandboxInfo{
 		Name: row.Name, Org: row.Org, Repo: row.Repo, Branch: row.Branch,
 		BaseImage: row.BaseImage, DerivedImage: row.DerivedImage,
 		Workspace: row.Workspace, Runtime: row.Runtime,
 		SyncedRev: row.SyncedRev, SyncedBootId: row.SyncedBootID,
+		Owner: owner,
 	}
 }
 
@@ -455,9 +576,13 @@ func (c *connSandbox) RegisterExternalSandbox(ctx context.Context, req *connect.
 		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("verify %s: %w", m.Name, err))
 	}
 
+	if err := requireAuthenticated(ctx, "registering an external sandbox"); err != nil {
+		return nil, err
+	}
 	if err := c.s.sbx.Upsert(sbxreg.Sandbox{
 		Name: m.Name, Org: m.Org, Repo: m.Repo, Branch: m.Branch,
 		Token: token, Mode: "external", Addr: base, OwnerID: m.Owner,
+		OwnerUserID:  userIDOf(ctx),
 		SyncedBootID: info.Msg.GetBootId(),
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("registry: %w", err))
@@ -470,7 +595,14 @@ func (c *connSandbox) RegisterExternalSandbox(ctx context.Context, req *connect.
 // ListExternalSandboxes returns the externally-registered workers (mode =
 // external) with a live reachability probe. Managed sandboxes are excluded.
 func (c *connSandbox) ListExternalSandboxes(ctx context.Context, req *connect.Request[easylabv1.ListExternalSandboxesRequest]) (*connect.Response[easylabv1.ListExternalSandboxesResponse], error) {
-	rows, err := c.s.sbx.List()
+	p := principalOf(ctx)
+	var rows []sbxreg.Sandbox
+	var err error
+	if p.Admin {
+		rows, err = c.s.sbx.List()
+	} else {
+		rows, err = c.s.sbx.ListByOwner(p.UserID, false)
+	}
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

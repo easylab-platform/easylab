@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
@@ -41,23 +42,44 @@ func (c *connRegistry) ListPackages(ctx context.Context, req *connect.Request[ea
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	uid := userIDOf(ctx)
 	var out []*easylabv1.PackageInfo
 	for _, r := range repos {
 		format, name := splitRepo(r)
 		if req.Msg.Type != "" && format != req.Msg.Type {
 			continue
 		}
+		if !c.s.cs.CanRead(ctx, format, name, uid) {
+			continue
+		}
 		versions, verr := idx.ListVersions(ctx, format, name)
 		if verr != nil {
 			continue
 		}
-		private := &easylabv1.PackageInfo{Type: format, Name: name}
-		for _, v := range versions {
-			private.Versions = append(private.Versions, &easylabv1.PackageVersion{Version: v})
+		pi := &easylabv1.PackageInfo{Type: format, Name: name, Visibility: "public"}
+		if own, oerr := c.s.cs.GetPackageOwner(format, name); oerr == nil {
+			pi.Visibility = own.Visibility
+			if own.OwnerUserID != 0 {
+				pi.Owner = strconv.FormatInt(own.OwnerUserID, 10)
+			}
 		}
-		out = append(out, private)
+		for _, v := range versions {
+			pi.Versions = append(pi.Versions, &easylabv1.PackageVersion{Version: v})
+		}
+		out = append(out, pi)
 	}
 	return connect.NewResponse(&easylabv1.ListPackagesResponse{Packages: out}), nil
+}
+
+// SetPackageVisibility flips a package's visibility (maintainer+ on its scope).
+func (c *connRegistry) SetPackageVisibility(ctx context.Context, req *connect.Request[easylabv1.SetPackageVisibilityRequest]) (*connect.Response[easylabv1.SetPackageVisibilityResponse], error) {
+	if err := requireAuthenticated(ctx, "changing package visibility"); err != nil {
+		return nil, err
+	}
+	if err := c.s.cs.SetPackageVisibilityAuthorized(req.Msg.Type, req.Msg.Name, userIDOf(ctx), req.Msg.Visibility); err != nil {
+		return nil, connect.NewError(connect.CodePermissionDenied, err)
+	}
+	return connect.NewResponse(&easylabv1.SetPackageVisibilityResponse{Ok: true}), nil
 }
 
 func (c *connRegistry) PackageVersions(ctx context.Context, req *connect.Request[easylabv1.PackageVersionsRequest]) (*connect.Response[easylabv1.PackageVersionsResponse], error) {

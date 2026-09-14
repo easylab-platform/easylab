@@ -87,6 +87,12 @@ type ServiceStatus struct {
 	ServiceURL string `json:"service_url,omitempty"`
 	// Network is the podman network the service is attached to.
 	Network string `json:"network,omitempty"`
+	// Owner is the owning user id (k8s label easylab/owner), "" when unlabeled.
+	Owner string `json:"owner,omitempty"`
+	// Org/Repo are the owning repository coordinates (k8s labels), "" when the
+	// service was deployed standalone.
+	Org  string `json:"org,omitempty"`
+	Repo string `json:"repo,omitempty"`
 }
 
 // ServiceRunner is the service launch seam. The only backend is the internal

@@ -55,6 +55,9 @@ func (c *connOps) ListServices(ctx context.Context, req *connect.Request[easylab
 	}
 	out := make([]*easylabv1.ServiceInfo, 0, len(st))
 	for _, s := range st {
+		if !c.s.canSeeService(ctx, s.Owner, s.Org, s.Repo) {
+			continue
+		}
 		out = append(out, serviceInfo(s))
 	}
 	return connect.NewResponse(&easylabv1.ListServicesResponse{Services: out}), nil
@@ -68,12 +71,25 @@ func (c *connOps) GetService(ctx context.Context, req *connect.Request[easylabv1
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
+	if !c.s.canSeeService(ctx, st.Owner, st.Org, st.Repo) {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("service not found"))
+	}
 	return connect.NewResponse(&easylabv1.GetServiceResponse{Service: serviceInfo(st)}), nil
 }
 
 func (c *connOps) LaunchService(ctx context.Context, req *connect.Request[easylabv1.LaunchServiceRequest]) (*connect.Response[easylabv1.LaunchServiceResponse], error) {
 	if c.s.ops.services == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("services backend unavailable"))
+	}
+	// Authorization: a service bound to a repository requires maintainer+ on
+	// that repo (deploying is a shared, externally-visible side effect, on par
+	// with merging). A standalone service (no org/repo) is owned by the caller.
+	if req.Msg.Org != "" || req.Msg.Repo != "" {
+		if err := c.s.requireRepoAction(ctx, req.Msg.Org, req.Msg.Repo, repoCanMerge, "deploying a service"); err != nil {
+			return nil, err
+		}
+	} else if err := requireAuthenticated(ctx, "deploying a service"); err != nil {
+		return nil, err
 	}
 	ports := map[int]int{}
 	for _, p := range req.Msg.Ports {
@@ -102,6 +118,8 @@ func (c *connOps) LaunchService(ctx context.Context, req *connect.Request[easyla
 	if req.Msg.Repo != "" {
 		annotations["easylab/repo"] = req.Msg.Repo
 	}
+	// Ownership label: the deploying user (used to filter list/get/delete).
+	annotations["easylab/owner"] = fmt.Sprintf("%d", principalOf(ctx).UserID)
 	if req.Msg.Kind != "" {
 		annotations["easylab/kind"] = req.Msg.Kind
 	}
@@ -129,6 +147,13 @@ func (c *connOps) DeleteService(ctx context.Context, req *connect.Request[easyla
 	if c.s.ops.services == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("services backend unavailable"))
 	}
+	st, err := c.s.ops.services.Status(ctx, req.Msg.Name)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	if !c.s.canOperateService(ctx, st.Owner, st.Org, st.Repo) {
+		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("deleting a service requires maintainer"))
+	}
 	if err := c.s.ops.services.Delete(ctx, req.Msg.Name); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -138,6 +163,13 @@ func (c *connOps) DeleteService(ctx context.Context, req *connect.Request[easyla
 func (c *connOps) ScaleService(ctx context.Context, req *connect.Request[easylabv1.ScaleServiceRequest]) (*connect.Response[easylabv1.ScaleServiceResponse], error) {
 	if c.s.ops.services == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("services backend unavailable"))
+	}
+	st0, err := c.s.ops.services.Status(ctx, req.Msg.Name)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	if !c.s.canOperateService(ctx, st0.Owner, st0.Org, st0.Repo) {
+		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("scaling a service requires maintainer"))
 	}
 	st, err := c.s.ops.services.Scale(ctx, req.Msg.Name, int(req.Msg.Replicas))
 	if err != nil {
@@ -220,6 +252,9 @@ func serviceInfo(s ops.ServiceStatus) *easylabv1.ServiceInfo {
 		Age:       strings.TrimSpace(time.Since(time.Now()).String()),
 		Url:       s.ServiceURL,
 		Kind:      s.Kind,
+		Owner:     s.Owner,
+		Org:       s.Org,
+		Repo:      s.Repo,
 	}
 }
 

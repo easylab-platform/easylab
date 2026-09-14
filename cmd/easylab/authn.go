@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -242,6 +243,57 @@ func (s *server) authorizeSession(ctx context.Context, sessionID string) error {
 	}
 	org, repo := parts[0], parts[1]
 	return s.requireRepoAction(ctx, org, repo, repoCanPush, "accessing a repository session")
+}
+
+// canSeeRepo reports whether the caller may read a repo's resources. A
+// standalone resource (no org/repo) is visible to authenticated callers.
+func (s *server) canSeeRepo(ctx context.Context, org, repo string) bool {
+	if principalOf(ctx).Admin {
+		return true
+	}
+	if org == "" && repo == "" {
+		return !principalOf(ctx).Anonymous
+	}
+	role, err := s.repoRole(ctx, org, repo)
+	return err == nil && role.CanRead()
+}
+
+// ---- service (service-deploy) authorization ----
+
+// canSeeService reports whether the caller may see/observe a deployed service:
+// any role on its owning repository, or its recorded owner, or an admin.
+func (s *server) canSeeService(ctx context.Context, owner, org, repo string) bool {
+	if principalOf(ctx).Admin {
+		return true
+	}
+	if org != "" || repo != "" {
+		if role, err := s.repoRole(ctx, org, repo); err == nil && role.CanRead() {
+			return true
+		}
+	}
+	return owner != "" && owner == userIDStr(ctx)
+}
+
+// canOperateService reports whether the caller may change a deployed service
+// (delete/scale): maintainer+ on the owning repo, or (standalone) its owner.
+func (s *server) canOperateService(ctx context.Context, owner, org, repo string) bool {
+	if principalOf(ctx).Admin {
+		return true
+	}
+	if org != "" || repo != "" {
+		if role, err := s.repoRole(ctx, org, repo); err == nil && role.CanMerge() {
+			return true
+		}
+	}
+	return owner != "" && owner == userIDStr(ctx)
+}
+
+// userIDStr renders the caller's user id ("" for anonymous).
+func userIDStr(ctx context.Context) string {
+	if id := userIDOf(ctx); id != 0 {
+		return strconv.FormatInt(id, 10)
+	}
+	return ""
 }
 
 // ---- REST authorization (legacy /api/v1 + git-smart surface) ----

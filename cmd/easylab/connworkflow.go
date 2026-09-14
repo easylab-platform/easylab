@@ -109,6 +109,14 @@ func protoProduce(p ci.Produce) *easylabv1.Produce {
 
 func (c *connWorkflow) CreateWorkflow(ctx context.Context, req *connect.Request[easylabv1.CreateWorkflowRequest]) (*connect.Response[easylabv1.CreateWorkflowResponse], error) {
 	w := fromProtoWorkflow(req.Msg.GetWorkflow())
+	// Defining automation is a repository-level change: maintainer+ on the repo.
+	if w.Org != "" || w.Repo != "" {
+		if err := c.s.requireRepoAction(ctx, w.Org, w.Repo, repoCanMerge, "defining a workflow"); err != nil {
+			return nil, err
+		}
+	} else if err := requireAuthenticated(ctx, "defining a workflow"); err != nil {
+		return nil, err
+	}
 	if w.ID == "" {
 		w.ID = "wf-" + newID()
 	}
@@ -119,9 +127,13 @@ func (c *connWorkflow) CreateWorkflow(ctx context.Context, req *connect.Request[
 func (c *connWorkflow) GetWorkflow(ctx context.Context, req *connect.Request[easylabv1.GetWorkflowRequest]) (*connect.Response[easylabv1.GetWorkflowResponse], error) {
 	v, ok := c.s.workflows.Load(req.Msg.Id)
 	if !ok {
-		return nil, connect.NewError(connect.CodeNotFound, connect.NewError(connect.CodeNotFound, errWorkflowNotFound()))
+		return nil, connect.NewError(connect.CodeNotFound, errWorkflowNotFound())
 	}
-	return connect.NewResponse(&easylabv1.GetWorkflowResponse{Workflow: protoWorkflow(v.(*ci.Workflow))}), nil
+	w := v.(*ci.Workflow)
+	if !c.s.canSeeRepo(ctx, w.Org, w.Repo) {
+		return nil, connect.NewError(connect.CodeNotFound, errWorkflowNotFound())
+	}
+	return connect.NewResponse(&easylabv1.GetWorkflowResponse{Workflow: protoWorkflow(w)}), nil
 }
 
 func (c *connWorkflow) ListWorkflows(ctx context.Context, req *connect.Request[easylabv1.ListWorkflowsRequest]) (*connect.Response[easylabv1.ListWorkflowsResponse], error) {
@@ -129,7 +141,9 @@ func (c *connWorkflow) ListWorkflows(ctx context.Context, req *connect.Request[e
 	c.s.workflows.Range(func(_, v interface{}) bool {
 		w := v.(*ci.Workflow)
 		if (req.Msg.Org == "" || w.Org == req.Msg.Org) && (req.Msg.Repo == "" || w.Repo == req.Msg.Repo) {
-			ws = append(ws, protoWorkflow(w))
+			if c.s.canSeeRepo(ctx, w.Org, w.Repo) {
+				ws = append(ws, protoWorkflow(w))
+			}
 		}
 		return true
 	})
@@ -139,9 +153,19 @@ func (c *connWorkflow) ListWorkflows(ctx context.Context, req *connect.Request[e
 func (c *connWorkflow) TriggerRun(ctx context.Context, req *connect.Request[easylabv1.TriggerRunRequest]) (*connect.Response[easylabv1.TriggerRunResponse], error) {
 	v, ok := c.s.workflows.Load(req.Msg.WorkflowId)
 	if !ok {
-		return nil, connect.NewError(connect.CodeNotFound, connect.NewError(connect.CodeNotFound, errWorkflowNotFound()))
+		return nil, connect.NewError(connect.CodeNotFound, errWorkflowNotFound())
 	}
 	w := v.(*ci.Workflow)
+	// Running a workflow on a repository executes that branch's code with the
+	// repository's credentials: maintainer+ only (a developer iterates in their
+	// own fork, where they are the owner).
+	if w.Org != "" || w.Repo != "" {
+		if err := c.s.requireRepoAction(ctx, w.Org, w.Repo, repoCanMerge, "running a workflow"); err != nil {
+			return nil, err
+		}
+	} else if err := requireAuthenticated(ctx, "running a workflow"); err != nil {
+		return nil, err
+	}
 	// Asynchronous: return the pending run immediately; poll GetRun(id) and
 	// stream RunJobLog for progress.
 	run := c.runAsync(w)
@@ -151,7 +175,7 @@ func (c *connWorkflow) TriggerRun(ctx context.Context, req *connect.Request[easy
 func (c *connWorkflow) GetRun(ctx context.Context, req *connect.Request[easylabv1.GetRunRequest]) (*connect.Response[easylabv1.GetRunResponse], error) {
 	v, ok := c.s.runs.Load(req.Msg.Id)
 	if !ok {
-		return nil, connect.NewError(connect.CodeNotFound, connect.NewError(connect.CodeNotFound, errRunNotFound()))
+		return nil, connect.NewError(connect.CodeNotFound, errRunNotFound())
 	}
 	return connect.NewResponse(&easylabv1.GetRunResponse{Run: protoRun(v.(*ci.Run).Snapshot())}), nil
 }
@@ -290,6 +314,11 @@ func (c *connWorkflow) RunWorkflowFile(ctx context.Context, req *connect.Request
 	m := req.Msg
 	if m.Org == "" || m.Repo == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("org and repo required"))
+	}
+	// Running the repo's CI executes branch code with the repo credentials:
+	// maintainer+ (developers iterate in their own fork, where they are owner).
+	if err := c.s.requireRepoAction(ctx, m.Org, m.Repo, repoCanMerge, "running a workflow file"); err != nil {
+		return nil, err
 	}
 	data, err := readRepoFile(c.s, m.Org, m.Repo, m.Branch, ".easylab/workflows.yaml")
 	if err != nil {

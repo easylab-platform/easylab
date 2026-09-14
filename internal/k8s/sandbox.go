@@ -49,6 +49,12 @@ type SandboxStatus struct {
 	PodIP   string
 	Ready   bool
 	Service string
+	// Owner is the owning user id from the easylab/owner label ("" when the
+	// object predates ownership labeling).
+	Owner string
+	// Org/Repo are the workspace association labels (services).
+	Org  string
+	Repo string
 }
 
 func (c *Client) port(s SandboxSpec) int32 {

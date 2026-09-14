@@ -37,7 +37,11 @@ type Sandbox struct {
 	// resolve their loopback address from the podman-published port instead).
 	Addr string
 	// OwnerID is the caller identity that claimed an external sandbox (audit).
-	OwnerID     string
+	OwnerID string
+	// OwnerUserID is the owning user: a repository-bound sandbox belongs to
+	// that repo's owner; a standalone sandbox belongs to its creator. Sandboxes
+	// are owner-only (plus admin).
+	OwnerUserID int64
 	CreatedAtMs int64 `gorm:"autoCreateTime:milli"`
 	UpdatedAtMs int64 `gorm:"autoUpdateTime:milli"`
 }
@@ -91,12 +95,16 @@ func (r *Registry) Upsert(s Sandbox) error {
 			if s.OwnerID == "" {
 				s.OwnerID = old.OwnerID
 			}
+			if s.OwnerUserID == 0 {
+				s.OwnerUserID = old.OwnerUserID
+			}
 			return tx.Model(&Sandbox{}).Where("name = ?", s.Name).Updates(map[string]interface{}{
 				"org": s.Org, "repo": s.Repo, "branch": s.Branch,
 				"base_image": s.BaseImage, "derived_image": s.DerivedImage,
 				"workspace": s.Workspace, "runtime": s.Runtime, "synced_rev": s.SyncedRev,
 				"synced_boot_id": s.SyncedBootID, "token": s.Token,
 				"mode": s.Mode, "addr": s.Addr, "owner_id": s.OwnerID,
+				"owner_user_id": s.OwnerUserID,
 				"updated_at_ms": time.Now().UnixMilli(),
 			}).Error
 		}
@@ -121,6 +129,20 @@ func (r *Registry) Get(name string) (Sandbox, bool, error) {
 func (r *Registry) List() ([]Sandbox, error) {
 	var out []Sandbox
 	err := r.db.Order("updated_at_ms DESC").Find(&out).Error
+	return out, err
+}
+
+// ListByOwner returns the registrations owned by one user (plus legacy rows
+// with no owner when includeUnowned is set). Standalone sandboxes are visible
+// only to their owner; repository-bound sandboxes are filtered by the caller's
+// repo role in the gateway.
+func (r *Registry) ListByOwner(ownerUserID int64, includeUnowned bool) ([]Sandbox, error) {
+	q := r.db.Where("owner_user_id = ?", ownerUserID)
+	if includeUnowned {
+		q = r.db.Where("owner_user_id = ? OR owner_user_id = 0", ownerUserID)
+	}
+	var out []Sandbox
+	err := q.Order("updated_at_ms DESC").Find(&out).Error
 	return out, err
 }
 
