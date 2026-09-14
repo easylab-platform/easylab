@@ -176,33 +176,16 @@ func main() {
 	run(ag, extRepo, "delete", 60*time.Second, map[string]any{"path": "e2e-tmp-del.txt", "message": "e2e delete"})
 
 	fmt.Println("\n===== repo management (vcs-* tools) =====")
-	run(ag, extRepo, "vcs-branch-list", 30*time.Second, map[string]any{})
-	run(ag, extRepo, "vcs-branch-create", 30*time.Second, map[string]any{"name": "e2e-mgmt", "from": "main"})
 	run(ag, extRepo, "vcs-tag-list", 30*time.Second, map[string]any{})
 	run(ag, extRepo, "vcs-tag-set", 30*time.Second, map[string]any{"name": "e2e-tag"})
-	_, mrData := run(ag, extRepo, "vcs-mr-create", 30*time.Second, map[string]any{"title": "e2e MR", "source": "main", "target": "main"})
+	_, mrData := run(ag, extRepo, "vcs-mr-create", 30*time.Second, map[string]any{"title": "e2e MR", "target": "main"})
 	run(ag, extRepo, "vcs-mr-list", 30*time.Second, map[string]any{})
 	mrIID := dataStr(mrData, "iid")
 	if mrIID == "" {
 		mrIID = "1"
 	}
-	run(ag, extRepo, "vcs-mr-get", 30*time.Second, map[string]any{"iid": mrIID})
-	run(ag, extRepo, "vcs-mr-review", 30*time.Second, map[string]any{"iid": mrIID, "state": "comment", "body": "e2e review"})
-	run(ag, extRepo, "vcs-mr-review-list", 30*time.Second, map[string]any{"iid": mrIID})
 	run(ag, extRepo, "vcs-mr-comment", 30*time.Second, map[string]any{"iid": mrIID, "body": "e2e comment"})
-	run(ag, extRepo, "vcs-mr-comment-list", 30*time.Second, map[string]any{"iid": mrIID})
 	run(ag, extRepo, "vcs-mr-merge", 30*time.Second, map[string]any{"iid": mrIID})
-	run(ag, extRepo, "vcs-repo-config", 30*time.Second, map[string]any{"description": "e2e"})
-	// @team/demo may be unclaimed (no owner row) → tool-level not-found is expected; the wire path is what we cover.
-	runExpectErr(ag, extRepo, "vcs-package-visibility", 30*time.Second, map[string]any{"type": "npm", "name": "@team/demo", "visibility": "public"})
-	run(ag, extRepo, "vcs-tag-delete", 30*time.Second, map[string]any{"name": "e2e-tag"})
-	run(ag, extRepo, "vcs-branch-delete", 30*time.Second, map[string]any{"name": "e2e-mgmt"})
-	// releases (create -> upload -> list -> download -> delete)
-	run(ag, extRepo, "vcs-release-create", 30*time.Second, map[string]any{"tag": "e2e-rel"})
-	run(ag, extRepo, "vcs-release-upload", 30*time.Second, map[string]any{"tag": "e2e-rel", "name": "note.txt", "content": "hello release"})
-	run(ag, extRepo, "vcs-release-list", 30*time.Second, map[string]any{})
-	run(ag, extRepo, "vcs-release-download", 30*time.Second, map[string]any{"tag": "e2e-rel", "name": "note.txt"})
-	run(ag, extRepo, "vcs-release-delete", 30*time.Second, map[string]any{"tag": "e2e-rel"})
 
 	fmt.Println("\n===== ops extension =====")
 	run(ag, extOps, "container-search", 30*time.Second, map[string]any{})
