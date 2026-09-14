@@ -14,9 +14,10 @@ rules:
     resources: ["services", "pods"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # The egress-proxy sidecar is configured per workload via a ConfigMap the
-  # gateway creates/updates (k8s.CreateProxyConfigMap).
+  # gateway creates/updates (k8s.CreateProxyConfigMap), and trusts the
+  # per-deployment MITM CA stored in a Secret (k8s.EnsureEgressCA).
   - apiGroups: [""]
-    resources: ["configmaps"]
+    resources: ["configmaps", "secrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
