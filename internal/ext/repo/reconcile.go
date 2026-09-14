@@ -45,7 +45,35 @@ func reconcileOnce(ctx context.Context, s *server) error {
 	if err := convergeDrift(ctx, s, sessions); err != nil {
 		return err
 	}
+	backfillGroups(ctx, s)
 	return backfillWorkspaces(ctx, s, sessions)
+}
+
+// backfillGroups tags every existing repository session with its generic
+// `group` (= "org/repo") when it is still unset. Sessions created before the
+// gateway began injecting group (or via a direct agent call) would otherwise
+// stay ungrouped. Idempotent: sessions that already carry the value are
+// skipped; non-repo session names are ignored.
+func backfillGroups(ctx context.Context, s *server) {
+	rows, err := s.store.ListRows(ctx)
+	if err != nil {
+		log.Warn("backfill group: list rows failed", "err", err)
+		return
+	}
+	for _, r := range rows {
+		group := r.Org + "/" + r.Repo
+		if g, err := s.ag.GetSession(ctx, r.SessionName); err != nil {
+			continue
+		} else if g != nil {
+			if cur, _ := g["group"].(string); cur == group {
+				continue
+			}
+		}
+		if err := s.ag.SetGroup(ctx, r.SessionName, group); err != nil {
+			log.Warn("backfill group: set failed",
+				"session", r.SessionName, "group", group, "err", err)
+		}
+	}
 }
 
 // convergeDrift enforces row-level consistency for managed repos. It only

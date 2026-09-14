@@ -71,6 +71,16 @@ func (c *agentClient) CreateRepoSession(ctx context.Context, org, repo, branch, 
 	return err
 }
 
+// SetGroup sets a session's generic `group` key (used by the backfill to tag
+// existing repository sessions with "org/repo"). Idempotent.
+func (c *agentClient) SetGroup(ctx context.Context, sessionName, group string) error {
+	g := group
+	_, err := c.svc.UpdateSettings(ctx, connect.NewRequest(&agentv1.UpdateSettingsRequest{
+		Id: sessionName, Group: &g,
+	}))
+	return err
+}
+
 // Prompt delivers a user prompt to a session and returns its message id. The
 // prompt is asynchronous: the call returns as soon as the turn is accepted.
 // Used to wake a freshly-created subsession with its task.
@@ -123,6 +133,7 @@ func (c *agentClient) GetSession(ctx context.Context, name string) (map[string]i
 	return map[string]interface{}{
 		"name": s.GetName(), "model": s.GetModel(), "preset": s.GetPreset(),
 		"tip_id": s.GetTipId(), "org": s.GetOrg(), "repo": s.GetRepo(), "branch": s.GetBranch(),
+		"group": s.GetGroup(),
 	}, nil
 }
 
