@@ -52,7 +52,6 @@ type egressPolicy struct {
 	gateway       string
 	caCert        string
 	caKey         string
-	mode          string
 	spoofDNS      string
 	upstreamProxy string
 	clusterDomain string
@@ -151,7 +150,6 @@ func newClient(cs kubernetes.Interface, cfg Config) *Client {
 			gateway:       gateway,
 			caCert:        cfg.EgressPolicyCACert,
 			caKey:         cfg.EgressPolicyCAKey,
-			mode:          cfg.EgressPolicyMode,
 			spoofDNS:      cfg.EgressPolicySpoofDNS,
 			upstreamProxy: cfg.EgressPolicyUpstreamProxy,
 			clusterDomain: cfg.ClusterDomain,
@@ -173,28 +171,15 @@ func (c *Client) egressSpecFor(isService bool) *ProxySpec {
 	if !c.egress.enabled {
 		return nil
 	}
-	mode := c.egress.mode
-	if mode == "" {
-		if isService || c.egress.spoofDNS == "" {
-			mode = ProxyModeRedirect
-		} else {
-			mode = ProxyModeSpoof
-		}
-	}
-	spec := &ProxySpec{
+	return &ProxySpec{
 		Rules:            DefaultRulesYAML(c.egress.gateway),
 		Image:            c.egress.image,
 		CACertPEM:        c.egress.caCert,
 		CAKeyPEM:         c.egress.caKey,
-		Mode:             mode,
 		SpoofUpstreamDNS: c.egress.spoofDNS,
 		UpstreamProxy:    c.egress.upstreamProxy,
 		ClusterDomain:    c.egress.clusterDomain,
 	}
-	if mode != ProxyModeSpoof {
-		spec.ClusterCIDRs = c.egressClusterCIDRs()
-	}
-	return spec
 }
 
 // EgressPolicySpecService is the service-workload variant (redirect by

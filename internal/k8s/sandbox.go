@@ -152,6 +152,12 @@ func (c *Client) LaunchSandbox(ctx context.Context, s SandboxSpec) (SandboxStatu
 	if proxy == nil && !s.NoProxy {
 		proxy = c.EgressPolicySpec()
 	}
+	// VM runtimes (windows/macos): the guest OS has its own network stack,
+	// so pod-level dnsConfig/sidecar never see its traffic. Skip injection —
+	// the golden image needs its own CA bake (see egress docs).
+	if proxy != nil && s.NeedsTun {
+		proxy = nil
+	}
 	if proxy != nil {
 		if err := c.CreateProxyConfigMap(ctx, s.Name, proxy.Rules); err != nil {
 			return SandboxStatus{}, fmt.Errorf("proxy configmap: %w", err)

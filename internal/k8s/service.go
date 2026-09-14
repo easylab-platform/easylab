@@ -67,6 +67,15 @@ func (c *Client) LaunchService(ctx context.Context, s ServiceSpec) (SandboxStatu
 		proxy = c.EgressPolicySpecService()
 	}
 	if proxy != nil {
+		// Spoof mode binds :443/:80 in the Pod netns; a service container
+		// using those ports would conflict at bind time and crash-loop the
+		// sidecar. Fail at launch with a clear message instead.
+		for cp := range s.Ports {
+			if cp == 80 || cp == 443 {
+				return SandboxStatus{}, fmt.Errorf(
+					"service %s: container port %d cannot be exposed in spoof egress mode; use 8080/8443 and map at the Service layer, or deploy with egress disabled", s.Name, cp)
+			}
+		}
 		if err := c.CreateProxyConfigMap(ctx, s.Name, proxy.Rules); err != nil {
 			return SandboxStatus{}, fmt.Errorf("proxy configmap: %w", err)
 		}

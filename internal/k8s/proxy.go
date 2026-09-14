@@ -37,13 +37,10 @@ type ProxySpec struct {
 	// internal registry, NATS. Required in redirect mode.
 	ClusterCIDRs []string
 
-	// Mode selects the interception mechanism:
-	//   ""|"redirect" -> iptables REDIRECT (init container, NET_ADMIN)
-	//   "spoof"       -> DNS-spoof (no netfilter/tun/NET_ADMIN); the Pod
-	//                    gets dnsConfig pointing at the sidecar and the
-	//                    sidecar listens on :53/:443/:80 directly.
-	// Service workloads (which may bind 80/443) must NOT use spoof.
-	Mode string
+	// Mode is always dns-spoof (the field is kept for future extension and
+	// must be "" or "spoof"). The Pod gets dnsConfig pointing at the sidecar
+	// and the sidecar listens on :53/:443/:80 directly — no netfilter, no
+	// NET_ADMIN, no init container.
 	// SpoofUpstreamDNS is the cluster resolver (CoreDNS service IP) real
 	// queries are forwarded to in spoof mode.
 	SpoofUpstreamDNS string
@@ -58,11 +55,8 @@ type ProxySpec struct {
 	ClusterDomain string
 }
 
-// Proxy mode values.
-const (
-	ProxyModeRedirect = "redirect"
-	ProxyModeSpoof    = "spoof"
-)
+// The interception mode. DNS-spoof is the only mechanism.
+const ProxyModeSpoof = "spoof"
 
 // proxyConstants are the well-known ports easyproxy listens on inside the Pod.
 const (
@@ -85,18 +79,14 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 	if strings.TrimSpace(proxy.Rules) == "" {
 		return fmt.Errorf("proxy: rules required")
 	}
+	if strings.TrimSpace(proxy.SpoofUpstreamDNS) == "" {
+		return fmt.Errorf("proxy: SpoofUpstreamDNS required (cluster resolver)")
+	}
 	rewriteRules := strings.Contains(proxy.Rules, "action: rewrite")
 	if rewriteRules && proxy.CACertPEM == "" {
 		return fmt.Errorf("proxy: rewrite rules require a CA certificate")
 	}
-	spoof := proxy.Mode == ProxyModeSpoof
-	if spoof {
-		if proxy.SpoofUpstreamDNS == "" {
-			return fmt.Errorf("proxy: spoof mode requires SpoofUpstreamDNS (cluster resolver)")
-		}
-	} else if len(proxy.ClusterCIDRs) == 0 {
-		return fmt.Errorf("proxy: cluster CIDRs required (bypass ranges)")
-	}
+	spoof := true
 
 	// The rule set rides in a ConfigMap built by the caller; here we mount
 	// it by name (deterministic per pod) — the caller creates the ConfigMap
@@ -247,18 +237,12 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 	}
 
 	// The workload container must trust the MITM CA and prefer the explicit
-	// proxy (same engine, better diagnostics than silent REDIRECT).
+	// same engine, better diagnostics than silent REDIRECT.
 	for i := range pod.Containers {
 		c := &pod.Containers[i]
 		if c.Name == "easyproxy" {
 			continue
 		}
-		c.Env = append(c.Env,
-			corev1.EnvVar{Name: "HTTP_PROXY", Value: "http://" + proxyConnectStr},
-			corev1.EnvVar{Name: "HTTPS_PROXY", Value: "http://" + proxyConnectStr},
-			corev1.EnvVar{Name: "NO_PROXY", Value: "localhost,127.0.0.1,.svc,.svc.cluster.local," +
-				strings.Join(proxy.ClusterCIDRs, ",")},
-		)
 		if proxy.CACertPEM != "" {
 			c.Env = append(c.Env,
 				corev1.EnvVar{Name: "SSL_CERT_FILE", Value: proxyCAPath},
