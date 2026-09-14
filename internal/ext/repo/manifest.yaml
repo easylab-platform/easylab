@@ -2,7 +2,7 @@
 # extension's wire protocol (tools + session variables + lifecycle). Handler
 # and resolver bindings stay in code (tools.go / variables.go).
 id: repo
-version: 0.5.0
+version: 0.6.0
 lifecycle: [created, forked, renamed, deleted]
 variables:
   - name: org
@@ -331,6 +331,38 @@ tools:
           descriptions:
             zh: 目标修订（默认：当前分支头）。
       required: [name]
+
+  - name: subsession-create
+    description: >-
+      Start a subsession that works on a NEW branch in the background. Creates
+      the branch `branch` (from this session's branch, which must be the
+      repository's default branch) and an independent session bound to it with
+      the full 'build' preset. Give it a complete, self-contained task — it
+      does not see this conversation. When it finishes it opens a change
+      request (MR) from its branch into the default branch; that MR is how it
+      hands the result back (this session is notified). IMPORTANT: after
+      calling this tool, END YOUR TURN immediately and wait for the change
+      request — do NOT poll, sleep, or duplicate its work.
+    descriptions:
+      zh: >-
+        启动一个在新分支上后台工作的子会话。创建分支 `branch`（从本会话分支创建，本会话必须处于该仓库的默认分支）
+        并绑定一个独立会话，使用完整的 'build' 预设。给它一个完整、自包含的任务——它看不到本次对话。
+        完成后它会从自己的分支向默认分支开一个合并请求（MR），这就是它回传结果的方式（本会话会收到通知）。
+        重要：调用本工具后请立即结束本轮并等待合并请求——不要轮询、不要 sleep、不要重复它的工作。
+    input_schema:
+      type: object
+      properties:
+        branch:
+          type: string
+          description: New branch name to create (you choose it; e.g. feat/x or session/x). Required.
+          descriptions:
+            zh: 要创建的新分支名（由你决定，如 feat/x 或 session/x）。必填。
+        prompt:
+          type: string
+          description: The complete, self-contained task for the subsession.
+          descriptions:
+            zh: 给子会话的完整、自包含任务描述。
+      required: [branch, prompt]
 
   - name: vcs-mr-create
     description: Open a change request (merge request) in the current repository. `source` defaults to this session's branch. Own repo only.

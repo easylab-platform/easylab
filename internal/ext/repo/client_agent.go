@@ -54,6 +54,43 @@ func (c *agentClient) EnsureSession(ctx context.Context, name string) error {
 	return err
 }
 
+// CreateRepoSession creates a repository-bound session (name "org:repo:branch")
+// with an explicit preset. `group` is left empty here — the easylab gateway
+// derives it ("org/repo") from the repo coordinates. already-exists is success.
+func (c *agentClient) CreateRepoSession(ctx context.Context, org, repo, branch, preset string) error {
+	name := namingSession(org, repo, branch)
+	_, err := c.svc.CreateSession(ctx, connect.NewRequest(&agentv1.CreateSessionRequest{
+		Name: name, Org: org, Repo: repo, Branch: branch, Preset: preset,
+	}))
+	if err == nil {
+		return nil
+	}
+	if connect.CodeOf(err) == connect.CodeAlreadyExists || connect.CodeOf(err) == connect.CodeInvalidArgument {
+		return nil
+	}
+	return err
+}
+
+// Prompt delivers a user prompt to a session and returns its message id. The
+// prompt is asynchronous: the call returns as soon as the turn is accepted.
+// Used to wake a freshly-created subsession with its task.
+func (c *agentClient) Prompt(ctx context.Context, sessionName, prompt string) (string, error) {
+	stream, err := c.svc.Prompt(ctx, connect.NewRequest(&agentv1.PromptRequest{Id: sessionName, Prompt: prompt}))
+	if err != nil {
+		return "", err
+	}
+	defer stream.Close()
+	for stream.Receive() {
+		if stream.Msg().GetEvent() == "accepted" {
+			return stream.Msg().GetParams()["message_id"], nil
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
 // ListSessions returns every session name.
 func (c *agentClient) ListSessions(ctx context.Context) (map[string]bool, error) {
 	res, err := c.svc.ListSessions(ctx, connect.NewRequest(&agentv1.ListSessionsRequest{}))

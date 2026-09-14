@@ -108,6 +108,11 @@ func (c *connAgent) CreateSession(ctx context.Context, req *connect.Request[agen
 		if err := c.s.requireRepoAction(ctx, req.Msg.Org, req.Msg.Repo, repoCanPush, "creating a repository session"); err != nil {
 			return nil, err
 		}
+		// easylab uses the generic `group` field as the repository key
+		// ("org/repo"): it groups every session that works on the same repo
+		// (across branches) without implying any parent/child relationship.
+		// The gateway owns this value so a client cannot forge it.
+		req.Msg.Group = req.Msg.Org + "/" + req.Msg.Repo
 	}
 	return c.client.CreateSession(ctx, fwdReq(req))
 }

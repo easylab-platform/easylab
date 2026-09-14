@@ -186,6 +186,9 @@ func main() {
 	}
 	run(ag, extRepo, "vcs-mr-comment", 30*time.Second, map[string]any{"iid": mrIID, "body": "e2e comment"})
 	run(ag, extRepo, "vcs-mr-merge", 30*time.Second, map[string]any{"iid": mrIID})
+	// subsession-create: missing 'prompt' is a deterministic tool error (the
+	// happy path spawns a real LLM turn + a branch, verified out of band).
+	runExpectErr(ag, extRepo, "subsession-create", 30*time.Second, map[string]any{"branch": "e2e-sub"})
 
 	fmt.Println("\n===== ops extension =====")
 	run(ag, extOps, "container-search", 30*time.Second, map[string]any{})

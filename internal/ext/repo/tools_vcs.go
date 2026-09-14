@@ -95,6 +95,11 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 				return extension.ToolResultData{}, errDownstream("easylab", err)
 			}
 			iid := res.Msg.GetMergeRequest().GetIid()
+			// Wake the session that owns the TARGET branch so the work does not
+			// stall until someone polls: a subsession on its own branch opens the
+			// MR and this notifies the default-branch session that created it.
+			// Best-effort — a wake failure never fails the MR creation.
+			s.notifyTargetSession(ctx, tenant, o, r, target, sessionName, iid, source)
 			return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName,
 				fmt.Sprintf("opened change request #%s (%s → %s).", iid, source, target),
 				fmt.Sprintf("已创建合并请求 #%s（%s → %s）。", iid, source, target)),
@@ -141,6 +146,87 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 			}
 			return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName,
 				fmt.Sprintf("commented on #%s.", iid), fmt.Sprintf("已在 #%s 评论。", iid))}, nil
+		},
+	}
+
+	m["subsession-create"] = extension.ToolSpec{
+		Execute: func(ctx context.Context, args map[string]interface{}, callID, sessionName, tenant string) (extension.ToolResultData, error) {
+			ctx = ext.WithLabTenant(ctx, tenant)
+			o, r, b, err := ownRepo(ctx, tenant, sessionName)
+			if err != nil {
+				return extension.ToolResultData{}, err
+			}
+			branch := abcprotocol.ArgString(args, "branch")
+			prompt := abcprotocol.ArgString(args, "prompt")
+			if branch == "" {
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'branch' (the new branch name, chosen by you)", "缺少 'branch'（由你决定的新分支名）")
+			}
+			if prompt == "" {
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'prompt' (the self-contained task)", "缺少 'prompt'（自包含任务）")
+			}
+			if !validSessionComponent(branch) {
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName,
+					"invalid branch name %q (letters/digits/._/- only, no ':' or '..')", "非法分支名 %q（仅字母/数字/._/-，不含 ':' 或 '..'）", branch)
+			}
+			// Only the repository's DEFAULT-branch session may branch off —
+			// this keeps the new branch anchored at the integration branch and
+			// mirrors the merge rule (only the default-branch session merges).
+			def, derr := s.repoDefaultBranch(ctx, o, r)
+			if derr != nil {
+				return extension.ToolResultData{}, errDownstream("easylab", derr)
+			}
+			if def == "" {
+				def = "main"
+			}
+			if b != def {
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName,
+					"subsessions may only be started from the '%s' (default-branch) session (this session is on '%s')", "仅允许从 '%s'（默认分支）会话创建子会话（当前会话在 '%s'）", def, b)
+			}
+			// The new branch must not already exist, and no session may already
+			// own it (the branch and its session are 1:1).
+			tree, terr := s.lab.GetRepoTree(ctx)
+			if terr != nil {
+				return extension.ToolResultData{}, errDownstream("easylab", terr)
+			}
+			if tree.branchExists(o, r, branch) {
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName,
+					"branch '%s' already exists", "分支 '%s' 已存在", branch)
+			}
+			child := namingSession(o, r, branch)
+			if sessions, lerr := s.ag.ListSessions(ctx); lerr == nil && sessions[child] {
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName,
+					"a session for branch '%s' already exists", "分支 '%s' 已有会话", branch)
+			}
+			// Create the branch off the current (default) branch, then the
+			// child session bound to it with the host's fixed 'build' preset.
+			// The gateway derives the generic `group` (= org/repo) from the
+			// coordinates, so the new session is grouped with its siblings —
+			// there is no parent/child relation.
+			if err := s.lab.EnsureBranch(ctx, o, r, b, branch); err != nil {
+				return extension.ToolResultData{}, err
+			}
+			if err := s.ag.CreateRepoSession(ctx, o, r, branch, "build"); err != nil {
+				return extension.ToolResultData{}, errDownstream("agent", err)
+			}
+			// Materialize the session↔branch mapping immediately so the
+			// child's first tool call never races the created-event.
+			if err := s.bindRow(ctx, tenant, o, r, branch, child); err != nil {
+				return extension.ToolResultData{}, errDownstream("postgres", err)
+			}
+			handoff := prompt + "\n\n" +
+				"[subsession] When the work is done, open a change request (MR) from " +
+				"this branch into '" + def + "' with the 'vcs-mr-create' tool " +
+				"(source='" + branch + "', target='" + def + "'), then stop. That MR is " +
+				"how the result is delivered."
+			if _, perr := s.ag.Prompt(ctx, child, handoff); perr != nil {
+				return extension.ToolResultData{}, errDownstream("agent", perr)
+			}
+			return extension.ToolResultData{
+				Content: lc(ctx, s.ext, tenant, sessionName,
+					fmt.Sprintf("Started branch '%s' with subsession '%s'. It is working in the background and will open a change request into '%s' when done. END YOUR TURN NOW and wait for the change-request notification — do not poll.", branch, child, def),
+					fmt.Sprintf("已创建分支 '%s' 及其子会话 '%s'。它在后台工作，完成后会向 '%s' 开一个合并请求。请立即结束本轮并等待合并请求通知——不要轮询。", branch, child, def)),
+				Data: map[string]interface{}{"branch": branch, "session": child},
+			}, nil
 		},
 	}
 
@@ -194,4 +280,22 @@ func (s *server) repoDefaultBranch(ctx context.Context, org, repo string) (strin
 		}
 	}
 	return "", nil
+}
+
+// notifyTargetSession wakes the session that owns a merge request's TARGET
+// branch with a user_prompt, so the work continues without polling. The target
+// session is named "org:repo:<target>". Best-effort: any failure is logged and
+// swallowed (the MR itself is already created).
+func (s *server) notifyTargetSession(ctx context.Context, tenant, org, repo, target, source, iid, sourceBranch string) {
+	if target == "" || target == sourceBranch {
+		return
+	}
+	owner := namingSession(org, repo, target)
+	text := fmt.Sprintf(
+		"Subsession '%s' opened change request #%s (%s → %s). Review and merge it with the 'vcs-mr-merge' tool.",
+		sourceBranch, iid, sourceBranch, target)
+	if _, err := s.ag.Prompt(ctx, owner, text); err != nil {
+		log.Warn("mr-create: notify target session failed",
+			"target", owner, "iid", iid, "err", err)
+	}
 }
