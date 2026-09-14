@@ -17,6 +17,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -24,8 +25,8 @@ import (
 	_ "github.com/easylab-platform/artifact/apk"
 	_ "github.com/easylab-platform/artifact/cargo"
 	_ "github.com/easylab-platform/artifact/composer"
-	_ "github.com/easylab-platform/artifact/conda"
 	_ "github.com/easylab-platform/artifact/conan"
+	_ "github.com/easylab-platform/artifact/conda"
 	"github.com/easylab-platform/artifact/core"
 	_ "github.com/easylab-platform/artifact/debian"
 	_ "github.com/easylab-platform/artifact/generic"
@@ -35,13 +36,12 @@ import (
 	_ "github.com/easylab-platform/artifact/hex"
 	_ "github.com/easylab-platform/artifact/huggingface"
 	_ "github.com/easylab-platform/artifact/maven"
-	_ "github.com/easylab-platform/artifact/maven"
 	_ "github.com/easylab-platform/artifact/nix"
 	_ "github.com/easylab-platform/artifact/npm"
 	_ "github.com/easylab-platform/artifact/nuget"
 	_ "github.com/easylab-platform/artifact/oci"
-	_ "github.com/easylab-platform/artifact/pub"
 	_ "github.com/easylab-platform/artifact/protobuf"
+	_ "github.com/easylab-platform/artifact/pub"
 	_ "github.com/easylab-platform/artifact/pypi"
 	_ "github.com/easylab-platform/artifact/rpm"
 	_ "github.com/easylab-platform/artifact/rubygems"
@@ -70,18 +70,18 @@ func envOrStr(k, def string) string {
 }
 
 type server struct {
-	cs        *store.CentralStore
-	registry  *artifactkit.Registry
-	selfBase  string
-	ops       *opsState
-	sbx       *sbxreg.Registry
-	k8s       *k8s.Client
+	cs       *store.CentralStore
+	registry *artifactkit.Registry
+	selfBase string
+	ops      *opsState
+	sbx      *sbxreg.Registry
+	k8s      *k8s.Client
 	// buildBackend is the shared CI produce backend (oci-build /
 	// publish-protocol) used for sandbox image derivation, container builds
 	// and package publishing.
 	buildBackend *ci.K8sBackend
-	workflows sync.Map // workflow id -> *ci.Workflow (declarations)
-	runs      sync.Map // run id -> *ci.Run (instantiations)
+	workflows    sync.Map // workflow id -> *ci.Workflow (declarations)
+	runs         sync.Map // run id -> *ci.Run (instantiations)
 	// auth is the artifactkit Auth over the easyvcs credential store
 	// (unified minted-token semantics via StoreAuth; see easyvcs_token_store.go).
 	auth artifactkit.Auth
@@ -144,13 +144,30 @@ func main() {
 	// derived from the namespace so it is portable across clusters/domains.
 	// Override with EASYLAB_REGISTRY_HOST (e.g. an external TLS ingress).
 	registryHost := envOrStr("EASYLAB_REGISTRY_HOST", fmt.Sprintf("easylab.%s.svc.cluster.local:80", ns))
+	// Egress policy (easyproxy sidecar, default ON): CA material is
+	// generated once per deployment and persisted under EASYVCS_HOME so pod
+	// restarts and easyproxy leaves keep verifying against the same CA.
+	egressDisabled := envOrStr("EASYLAB_EGRESS_POLICY_DISABLED", "") != ""
+	var egressCACert, egressCAKey string
+	if !egressDisabled {
+		cert, key, cerr := ensureEgressCA(filepath.Join(store.HomeDir(), "egress-ca"))
+		if cerr != nil {
+			log.Printf("egress CA: %v (rewrite rules will fail closed)", cerr)
+		} else {
+			egressCACert, egressCAKey = cert, key
+		}
+	}
 	var sK8s *k8s.Client
 	if kc, kerr := k8s.New(k8s.Config{
-		Namespace:     ns,
-		BuildkitImage: envOrStr("EASYLAB_BUILDKIT_IMAGE", "easylab/buildkit-worker:latest"),
-		RegistryHost:  registryHost,
-		RegistryToken: envOrStr("EASYVCS_TOKEN", "devtoken"),
-		Proxy:         envOrStr("EASYLAB_UPSTREAM_PROXY", ""),
+		Namespace:            ns,
+		BuildkitImage:        envOrStr("EASYLAB_BUILDKIT_IMAGE", "easylab/buildkit-worker:latest"),
+		RegistryHost:         registryHost,
+		RegistryToken:        envOrStr("EASYVCS_TOKEN", "devtoken"),
+		Proxy:                envOrStr("EASYLAB_UPSTREAM_PROXY", ""),
+		EgressPolicyDisabled: egressDisabled,
+		EgressPolicyGateway:  envOrStr("EASYLAB_EGRESS_GATEWAY", registryHost),
+		EgressPolicyCACert:   egressCACert,
+		EgressPolicyCAKey:    egressCAKey,
 	}); kerr == nil {
 		opsState.services = ops.NewK8sServiceRunner(kc)
 		sK8s = kc

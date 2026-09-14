@@ -38,6 +38,8 @@ spec:
               value: /etc/agent-presets/presets.json
             - name: DEFAULT_PRESET
               value: build
+            - name: DISABLED_TOOLS
+              value: {{ .Values.agent.disabledTools | quote }}
             - name: AGENT_CORS_ORIGIN
               value: {{ .Values.agent.corsOrigin | quote }}
             {{- with .Values.agent.extraEnv }}

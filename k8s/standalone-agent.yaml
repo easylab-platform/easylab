@@ -53,6 +53,11 @@ spec:
             # web app's origin (or "*" for dev).
             - name: AGENT_CORS_ORIGIN
               value: "*"
+            # Host hard-denylist: the bundled subsession/mail tools are masked;
+            # easylab provides its own branch flow (repo-extension
+            # subsession-create) and coordinates through merge requests.
+            - name: DISABLED_TOOLS
+              value: "subsession-create,mail-send"
             # Multi-tenant auth: bearer tokens resolve to tenants. The admin
             # token manages tenants; the bootstrap pair seeds the first tenant.
             - name: AGENT_AUTH_MODE

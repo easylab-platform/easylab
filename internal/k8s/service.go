@@ -14,9 +14,11 @@ import (
 // Linux: they run a user image as a long-lived Deployment (no worker, no
 // VM/profile support).
 type ServiceSpec struct {
-	// Proxy, when set, injects the easyproxy sidecar (egress policy). Nil
-	// keeps the deployment unchanged.
-	Proxy    *ProxySpec
+	// Proxy, when set, overrides the default egress policy. Nil means: use
+	// the client default (sidecar ON). NoProxy=true skips the sidecar.
+	Proxy   *ProxySpec
+	NoProxy bool
+
 	Name     string
 	Image    string
 	Command  []string
@@ -60,16 +62,20 @@ func (c *Client) LaunchService(ctx context.Context, s ServiceSpec) (SandboxStatu
 			},
 		},
 	}
-	if s.Proxy != nil {
-		if err := c.CreateProxyConfigMap(ctx, s.Name, s.Proxy.Rules); err != nil {
+	proxy := s.Proxy
+	if proxy == nil && !s.NoProxy {
+		proxy = c.EgressPolicySpec()
+	}
+	if proxy != nil {
+		if err := c.CreateProxyConfigMap(ctx, s.Name, proxy.Rules); err != nil {
 			return SandboxStatus{}, fmt.Errorf("proxy configmap: %w", err)
 		}
-		if s.Proxy.CACertPEM != "" {
-			if err := c.CreateProxyCASecret(ctx, s.Name, s.Proxy.CACertPEM, s.Proxy.CAKeyPEM); err != nil {
+		if proxy.CACertPEM != "" && proxy.CAKeyPEM != "" {
+			if err := c.CreateProxyCASecret(ctx, s.Name, proxy.CACertPEM, proxy.CAKeyPEM); err != nil {
 				return SandboxStatus{}, fmt.Errorf("proxy CA secret: %w", err)
 			}
 		}
-		if err := withProxy(&dep.Spec.Template.Spec, s.Name, s.Proxy); err != nil {
+		if err := withProxy(&dep.Spec.Template.Spec, s.Name, proxy); err != nil {
 			return SandboxStatus{}, err
 		}
 	}

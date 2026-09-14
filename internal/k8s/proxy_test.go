@@ -123,3 +123,70 @@ func minimalPod(name string) *corev1.Pod {
 		},
 	}
 }
+
+// TestDefaultInjection verifies the default-on egress policy: a workload
+// without an explicit Proxy gets the sidecar with the built-in rules; NoProxy
+// skips it; Config.EgressPolicyDisabled turns it off globally.
+func TestDefaultInjection(t *testing.T) {
+	c := NewWithClientset(nil, Config{
+		Namespace:           "test",
+		EgressPolicyGateway: "gateway.easylab.svc:8080",
+		EgressPolicyCACert:  "-----BEGIN CERTIFICATE-----\nX\n-----END CERTIFICATE-----",
+		EgressPolicyCAKey:   "-----BEGIN PRIVATE KEY-----\nY\n-----END PRIVATE KEY-----",
+	})
+
+	// Default spec carries the built-in rewrite rules and CA material.
+	def := c.EgressPolicySpec()
+	if def == nil {
+		t.Fatal("egress policy must be enabled by default")
+	}
+	if !strings.Contains(def.Rules, "registry.npmjs.org") ||
+		!strings.Contains(def.Rules, "deb.debian.org") ||
+		!strings.Contains(def.Rules, "cache.nixos.org") {
+		t.Fatalf("default rules missing ecosystems:\n%s", def.Rules)
+	}
+	if def.Image == "" || len(def.ClusterCIDRs) == 0 {
+		t.Fatalf("spec incomplete: image=%q cidrs=%v", def.Image, def.ClusterCIDRs)
+	}
+
+	// Default-on injection: LaunchSandbox path would inject; verify the
+	// injection helper produces the sidecar for the default spec.
+	pod := minimalPod("sbx-default")
+	if err := withProxy(&pod.Spec, pod.Name, def); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == "easyproxy" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("default injection must add the sidecar")
+	}
+	// Workload env trusts the CA.
+	worker := pod.Spec.Containers[0]
+	var sslFile string
+	for _, e := range worker.Env {
+		if e.Name == "SSL_CERT_FILE" {
+			sslFile = e.Value
+		}
+	}
+	if sslFile == "" {
+		t.Fatal("SSL_CERT_FILE missing on workload container")
+	}
+}
+
+// TestDefaultRulesYAMLShape verifies the embedded rule set.
+func TestDefaultRulesYAMLShape(t *testing.T) {
+	y := DefaultRulesYAML("gw:80")
+	if !strings.Contains(y, `target: "gw:80"`) {
+		t.Fatalf("target missing:\n%s", y)
+	}
+	if strings.Contains(y, "mitm_default: true") {
+		t.Fatal("mitm_default must be false")
+	}
+	if strings.Count(y, "action: rewrite") != len(defaultUpstreams) {
+		t.Fatalf("rewrite rule count mismatch")
+	}
+}

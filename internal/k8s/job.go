@@ -57,9 +57,10 @@ type JobSpec struct {
 	// (CI jobs that use a toolchain base image instead of a derived image).
 	WorkerBinHostDir string
 
-	// Proxy, when set, injects the easyproxy sidecar (egress policy). Nil
-	// keeps the pod unchanged.
-	Proxy *ProxySpec
+	// Proxy, when set, overrides the default egress policy. Nil means: use
+	// the client default (sidecar ON). NoProxy=true skips the sidecar.
+	Proxy   *ProxySpec
+	NoProxy bool
 }
 
 // JobResult is a completed job's outcome.
@@ -116,6 +117,7 @@ func (c *Client) RunJob(ctx context.Context, spec JobSpec, token string, onLog f
 		NodeSelector:     profile.NodeSelector,
 		NoService:        true,
 		Proxy:            spec.Proxy,
+		NoProxy:          spec.NoProxy,
 	}); err != nil {
 		return JobResult{}, err
 	}

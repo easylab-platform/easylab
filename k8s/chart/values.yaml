@@ -109,6 +109,12 @@ agent:
   serviceName: abcp-agent
   port: 8000
   corsOrigin: "*"
+  # Tools the host hard-disables for EVERY session regardless of its preset
+  # whitelist. easylab ships its own branch/messaging flow (repo-extension
+  # `subsession-create`) and talks to it via merge requests, so the bundled
+  # agent's subsession/mail tools are masked here (the denylist is the
+  # enforcement backstop: a user may still create or blank a preset).
+  disabledTools: "subsession-create,mail-send"
   extraEnv:
     - name: AGENT_DEFAULT_TENANT
       value: "default"
