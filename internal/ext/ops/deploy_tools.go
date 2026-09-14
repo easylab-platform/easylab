@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"connectrpc.com/connect"
+
 	"github.com/abcp-sdk/abc-protocol-go/extension"
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"github.com/easylab-platform/easylab/internal/ext"
-	"net/url"
 )
 
 func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
@@ -79,22 +82,20 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 				}
 				body["resources"] = res
 			}
-			body["namespace"] = s.runtimeNamespace
-			resp, err := s.httpPostJSON(ctx, s.base+"/api/v1/ops/services", body)
-			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "service-deploy failed: %v", "service-deploy 失败：%v", err)
+			_ = json.Marshal
+			_, lerr := s.sdk.Ops.LaunchService(ctx, connect.NewRequest(&easylabv1.LaunchServiceRequest{
+				Name: name, Image: image, Kind: "deployment",
+				Namespace:   s.runtimeNamespace,
+				Ports:       []*easylabv1.PortSpec{{Container: 8080, Service: 80}},
+				Annotations: ann,
+			}))
+			if lerr != nil {
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "service-deploy failed: %v", "service-deploy 失败：%v", lerr)
 			}
-			// Surface the service's in-cluster DNS address + readiness so the
-			// sandbox (same runtime namespace) can reach it by name, and the
-			// agent knows the endpoint to reference.
+			// Surface the service's in-cluster DNS address so the sandbox (same
+			// runtime namespace) can reach it by name.
 			svcHost := fmt.Sprintf("%s.%s.svc.cluster.local", name, s.runtimeNamespace)
 			ready := "unknown"
-			var pm map[string]interface{}
-			if jerr := json.Unmarshal([]byte(resp), &pm); jerr == nil {
-				if r, ok := pm["ready"].(bool); ok {
-					ready = fmt.Sprintf("%v", r)
-				}
-			}
 			return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName,
 				fmt.Sprintf("Deployed '%s' from %s. In-cluster address: http://%s:80 (ready=%s). The sandbox can reach it via this hostname.", name, image, svcHost, ready),
 				fmt.Sprintf("已从 %s 部署 '%s'。集群内地址：http://%s:80（ready=%s）。沙箱可直接用该主机名访问。", image, name, svcHost, ready)),
@@ -108,14 +109,23 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 			org := strArg(args, "org")
 			repo := strArg(args, "repo")
 			kind := strArg(args, "kind")
-			u := s.base + "/api/v1/ops/services"
-			if ns := strArg(args, "namespace"); ns != "" {
-				u += "?namespace=" + url.QueryEscape(ns)
-			}
-			v, err := s.httpGetJSON(ctx, u)
+			res, err := s.sdk.Ops.ListServices(ctx, connect.NewRequest(&easylabv1.ListServicesRequest{
+				Namespace: strArg(args, "namespace"),
+			}))
 			if err != nil {
 				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "service-list failed: %v", "service-list 失败：%v", err)
 			}
+			entries := make([]map[string]interface{}, 0, len(res.Msg.GetServices()))
+			for _, svc := range res.Msg.GetServices() {
+				entries = append(entries, map[string]interface{}{
+					"name": svc.GetName(), "kind": svc.GetKind(), "phase": svc.GetPhase(),
+					"replicas": svc.GetReplicas(), "ready": svc.GetReady(),
+					"url": svc.GetUrl(), "service_url": svc.GetUrl(), "worker_url": svc.GetImage(),
+					"session": svc.GetSession(), "org": svc.GetOrg(), "repo": svc.GetRepo(),
+				})
+			}
+			raw, _ := json.Marshal(map[string]interface{}{"services": entries})
+			v := string(raw)
 			if !all && sessionName != "" {
 				if _, _, _, ok := tryParseSession(sessionName); ok && v != "" {
 					if filtered := filterServicesBySession(v, sessionName); filtered != "" {
@@ -123,10 +133,6 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 					}
 				}
 			}
-			// Additional tool-layer filters (org/repo/kind) over the returned
-			// annotations/kind. easylab list returns these; we slice here so the
-			// caller can narrow to e.g. only formal services (kind=deployment)
-			// or a specific org/repo without backend support.
 			if org != "" || repo != "" || kind != "" {
 				v = filterServicesByExtra(v, org, repo, kind)
 			}

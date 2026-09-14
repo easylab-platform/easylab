@@ -1,42 +1,60 @@
 package main
 
 import (
-	"net/http"
-	"net/http/httptest"
-	"strings"
+	"context"
 	"testing"
+
+	"connectrpc.com/connect"
+
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
+	"github.com/easylab-platform/easyvcs/store"
 )
 
-// TestOpsBuildEndToEnd exercises POST /api/v1/ops/builds through the router.
-// The k8s backend is only wired in-cluster; off-cluster the endpoint reports
-// 501 (not implemented) rather than silently succeeding. The live build path
-// is exercised in-cluster.
-func TestOpsBuildEndToEnd(t *testing.T) {
+// TestOpsBuildRPCDegrades exercises OpsService.Build: off-cluster (no k8s) it
+// reports Unimplemented rather than silently succeeding; a missing image is
+// InvalidArgument.
+func TestOpsBuildRPCDegrades(t *testing.T) {
 	s := newTestServer(t)
-	seedTestToken(t, s, "t")
+	u, _ := s.cs.CreateUser("builder", "Builder")
+	co := &connOps{s}
 
-	body := strings.NewReader(`{"context":"/data/e2e-bctx","image":"e2e-hello:1"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/ops/builds", body)
-	req.Header.Set("Authorization", "Bearer t")
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	s.router().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("build without k8s: expected 501, got %d %s", rec.Code, rec.Body.String())
+	// No k8s backend: Unimplemented.
+	_, err := co.Build(principalCtx(u), connect.NewRequest(&easylabv1.BuildRequest{Image: "x:1"}))
+	if err == nil || connect.CodeOf(err) != connect.CodeUnimplemented {
+		t.Fatalf("build without k8s: expected Unimplemented, got %v", err)
+	}
+	// Missing image: InvalidArgument (checked before the backend).
+	_, err = co.Build(principalCtx(u), connect.NewRequest(&easylabv1.BuildRequest{}))
+	if err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("build without image: expected InvalidArgument, got %v", err)
+	}
+	// Anonymous: Unauthenticated.
+	_, err = co.Build(principalCtx(nil), connect.NewRequest(&easylabv1.BuildRequest{Image: "x:1"}))
+	if err == nil || connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("anonymous build: expected Unauthenticated, got %v", err)
 	}
 }
 
-// TestOpsBuildMissingImage ensures a build without an image is rejected.
-func TestOpsBuildMissingImage(t *testing.T) {
-	s := newTestServer(t)
-	seedTestToken(t, s, "t")
-	body := strings.NewReader(`{"context":"/tmp","containerfile":"FROM scratch"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/ops/builds", body)
-	req.Header.Set("Authorization", "Bearer t")
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	s.router().ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("build without image: expected 400, got %d %s", rec.Code, rec.Body.String())
+// TestServiceLaunchAuthz verifies LaunchService enforces maintainer+ on a
+// repo-bound service (and requires auth for standalone).
+func TestServiceLaunchAuthz(t *testing.T) {
+	w := newRBACWorld(t)
+	co := &connOps{w.s}
+	// Developer on the repo: denied.
+	_, err := co.LaunchService(principalCtx(w.dev), connect.NewRequest(&easylabv1.LaunchServiceRequest{
+		Name: "svc", Image: "nginx", Org: "team", Repo: "pub",
+	}))
+	if err == nil || connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Fatalf("developer LaunchService: expected PermissionDenied, got %v", err)
+	}
+	// Anonymous standalone: unauthenticated.
+	_, err = co.LaunchService(principalCtx(nil), connect.NewRequest(&easylabv1.LaunchServiceRequest{
+		Name: "svc", Image: "nginx",
+	}))
+	if err == nil || connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("anonymous standalone LaunchService: expected Unauthenticated, got %v", err)
 	}
 }
+
+var _ = context.Background
+var _ = store.RoleOwner

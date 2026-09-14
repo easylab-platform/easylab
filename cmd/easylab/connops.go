@@ -78,9 +78,6 @@ func (c *connOps) GetService(ctx context.Context, req *connect.Request[easylabv1
 }
 
 func (c *connOps) LaunchService(ctx context.Context, req *connect.Request[easylabv1.LaunchServiceRequest]) (*connect.Response[easylabv1.LaunchServiceResponse], error) {
-	if c.s.ops.services == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("services backend unavailable"))
-	}
 	// Authorization: a service bound to a repository requires maintainer+ on
 	// that repo (deploying is a shared, externally-visible side effect, on par
 	// with merging). A standalone service (no org/repo) is owned by the caller.
@@ -90,6 +87,9 @@ func (c *connOps) LaunchService(ctx context.Context, req *connect.Request[easyla
 		}
 	} else if err := requireAuthenticated(ctx, "deploying a service"); err != nil {
 		return nil, err
+	}
+	if c.s.ops.services == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("services backend unavailable"))
 	}
 	ports := map[int]int{}
 	for _, p := range req.Msg.Ports {

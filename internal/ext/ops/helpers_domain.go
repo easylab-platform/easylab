@@ -3,11 +3,13 @@ package opsext
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
+
+	"connectrpc.com/connect"
+
+	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 )
 
 func toJSON(v interface{}) string {
@@ -63,30 +65,23 @@ func jobArgs(args map[string]interface{}) map[string]interface{} {
 }
 
 func (s *server) fetchService(ctx context.Context, name, namespace string) (map[string]interface{}, error) {
-	u := s.base + "/api/v1/ops/services/" + url.PathEscape(name)
-	if namespace != "" {
-		u += "?namespace=" + url.QueryEscape(namespace)
-	}
-	raw, err := s.httpGetJSON(ctx, u)
+	res, err := s.sdk.Ops.GetService(ctx, connect.NewRequest(&easylabv1.GetServiceRequest{Name: name}))
 	if err != nil {
-		// 404 (not found) is the normal "no existing service" case.
-		if strings.Contains(err.Error(), "404") {
+		// NotFound is the normal "no existing service" case.
+		if connect.CodeOf(err) == connect.CodeNotFound {
 			return nil, nil
 		}
 		return nil, err
 	}
-	var out map[string]interface{}
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, err
+	svc := res.Msg.GetService()
+	if svc == nil {
+		return nil, nil
 	}
-	// Flatten annotations into the returned map under "session" for the
-	// ownership check; callers only need easylab/session here.
-	if ann, ok := out["annotations"].(map[string]interface{}); ok {
-		if s, ok := ann["easylab/session"].(string); ok {
-			out["session"] = s
-		}
-	}
-	return out, nil
+	return map[string]interface{}{
+		"name": svc.GetName(), "image": svc.GetImage(), "session": svc.GetSession(),
+		"kind": svc.GetKind(), "phase": svc.GetPhase(), "ready": svc.GetReady(),
+		"org": svc.GetOrg(), "repo": svc.GetRepo(),
+	}, nil
 }
 
 func (s *server) qualifyImage(ref, defaultTag string) string {
@@ -250,8 +245,16 @@ func (s *server) portFile(ctx context.Context, tenant, sessionName string, sc sa
 		message = "port " + sandboxPath
 	}
 
-	commitsPath := fmt.Sprintf("%s/repo/%s/%s/commit",
-		s.base, urlPathEscape(sc.ws.org), urlPathEscape(sc.ws.repo))
+	writeFiles := func(changes []*easylabv1.FileChange) (string, error) {
+		res, werr := s.sdk.Lab.WriteFiles(ctx, connect.NewRequest(&easylabv1.WriteFilesRequest{
+			Org: sc.ws.org, Repo: sc.ws.repo, Ref: sc.ws.branchOrDefault(),
+			Message: message, Changes: changes, NewCommit: true,
+		}))
+		if werr != nil {
+			return "", werr
+		}
+		return res.Msg.GetChangeId(), nil
+	}
 
 	// Determine whether sandbox_path is a directory.
 	info, err := s.sandboxFileStat(ctx, sc.cid, sandboxPath)
@@ -265,23 +268,9 @@ func (s *server) portFile(ctx context.Context, tenant, sessionName string, sc sa
 		if err != nil {
 			return "", ef(ctx, s.ext, tenant, sessionName, "port sandbox read failed: %v", "沙箱读取失败：%v", err)
 		}
-		commitBody := func(changes []map[string]interface{}) map[string]interface{} {
-			return map[string]interface{}{
-				"ref":         sc.ws.branchOrDefault(),
-				"description": message,
-				"new_commit":  true,
-				"changes":     changes,
-			}
-		}
-		var resp map[string]interface{}
-		if err := s.httpPostJSONMap(ctx, commitsPath, commitBody([]map[string]interface{}{
-			{"path": repoPath, "content": string(data)},
-		}), &resp); err != nil {
-			return "", ef(ctx, s.ext, tenant, sessionName, "port write failed: %v", "沙箱写入失败：%v", err)
-		}
-		changeID := strField(resp, "change_id")
-		if changeID == "" {
-			changeID = strField(resp, "commit_id")
+		changeID, werr := writeFiles([]*easylabv1.FileChange{{Path: repoPath, Content: string(data)}})
+		if werr != nil {
+			return "", ef(ctx, s.ext, tenant, sessionName, "port write failed: %v", "沙箱写入失败：%v", werr)
 		}
 		return fmt.Sprintf("Ported '%s' to repo '%s' (change %s).", sandboxPath, repoPath, shortID(changeID)), nil
 	}
@@ -294,7 +283,7 @@ func (s *server) portFile(ctx context.Context, tenant, sessionName string, sc sa
 	if len(files) == 0 {
 		return "", ef(ctx, s.ext, tenant, sessionName, "port sandbox directory '%s' is empty", "沙箱目录 '%s' 为空", sandboxPath)
 	}
-	changes := make([]map[string]interface{}, 0, len(files))
+	changes := make([]*easylabv1.FileChange, 0, len(files))
 	for _, f := range files {
 		rel := f["path"].(string)
 		target := repoPath
@@ -304,23 +293,14 @@ func (s *server) portFile(ctx context.Context, tenant, sessionName string, sc sa
 			target = target + "/" + rel
 		}
 		contentBase64, _ := f["content"].(string)
-		changes = append(changes, map[string]interface{}{
-			"path":    target,
-			"content": base64Decode(contentBase64),
+		changes = append(changes, &easylabv1.FileChange{
+			Path:    target,
+			Content: base64Decode(contentBase64),
 		})
 	}
-	var resp map[string]interface{}
-	if err := s.httpPostJSONMap(ctx, commitsPath, map[string]interface{}{
-		"ref":         sc.ws.branchOrDefault(),
-		"description": message,
-		"new_commit":  true,
-		"changes":     changes,
-	}, &resp); err != nil {
-		return "", ef(ctx, s.ext, tenant, sessionName, "port commit write failed: %v", "提交写入失败：%v", err)
-	}
-	changeID := strField(resp, "change_id")
-	if changeID == "" {
-		changeID = strField(resp, "commit_id")
+	changeID, werr := writeFiles(changes)
+	if werr != nil {
+		return "", ef(ctx, s.ext, tenant, sessionName, "port commit write failed: %v", "提交写入失败：%v", werr)
 	}
 	return fmt.Sprintf("Ported directory '%s' to repo '%s' (%d file(s), change %s).", sandboxPath, repoPath, len(changes), shortID(changeID)), nil
 }

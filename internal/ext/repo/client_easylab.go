@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -235,11 +234,11 @@ func (c *easylabClient) GetBranchHead(ctx context.Context, org, repo, branch str
 // commit applies file actions as a single change on a branch. Returns a
 // change view (revision/sha best-effort).
 func (c *easylabClient) commit(ctx context.Context, org, repo, branch, message string, actions []map[string]interface{}) (map[string]interface{}, error) {
-	// Atomic multi-action commit over the REST commit endpoint: unlike the
-	// single-blob WriteBlob RPC it carries real delete semantics (writing an
-	// empty blob instead of deleting would poison sandbox sync, whose object
-	// decoder cannot distinguish an empty blob from a missing one).
-	changes := make([]map[string]interface{}, 0, len(actions))
+	// Atomic multi-action commit over the WriteFiles RPC: unlike the single-blob
+	// WriteBlob RPC it carries real delete semantics (writing an empty blob
+	// instead of deleting would poison sandbox sync, whose object decoder cannot
+	// distinguish an empty blob from a missing one).
+	changes := make([]*easylabv1.FileChange, 0, len(actions))
 	for _, a := range actions {
 		path, _ := a["path"].(string)
 		del, _ := a["delete"].(bool)
@@ -247,7 +246,7 @@ func (c *easylabClient) commit(ctx context.Context, org, repo, branch, message s
 			del = true
 		}
 		if del {
-			changes = append(changes, map[string]interface{}{"path": path, "delete": true})
+			changes = append(changes, &easylabv1.FileChange{Path: path, Delete: true})
 			continue
 		}
 		data, _ := a["content_base64"].(string)
@@ -255,14 +254,19 @@ func (c *easylabClient) commit(ctx context.Context, org, repo, branch, message s
 		if derr != nil {
 			dec = []byte(data)
 		}
-		changes = append(changes, map[string]interface{}{"path": path, "content": string(dec)})
+		changes = append(changes, &easylabv1.FileChange{Path: path, Content: string(dec)})
 	}
-	return c.post(ctx, fmt.Sprintf("/repo/%s/%s/commit", url.PathEscape(org), url.PathEscape(repo)), map[string]interface{}{
-		"ref":         branch,
-		"description": message,
-		"new_commit":  true,
-		"changes":     changes,
-	})
+	res, err := c.svc.Lab.WriteFiles(ctx, connect.NewRequest(&easylabv1.WriteFilesRequest{
+		Org: org, Repo: repo, Ref: branch, Message: message, Changes: changes, NewCommit: true,
+	}))
+	if err != nil {
+		return nil, errDownstream("easylab", err)
+	}
+	return map[string]interface{}{
+		"revision_id": res.Msg.GetRevisionId(),
+		"change_id":   res.Msg.GetChangeId(),
+		"sha":         res.Msg.GetChangeId(),
+	}, nil
 }
 
 // get/post/put/delete are retained for the few tool-specific endpoints that

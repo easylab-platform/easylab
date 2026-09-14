@@ -259,6 +259,7 @@ func (s *server) router() *http.ServeMux {
 	mux.HandleFunc("DELETE /repositories/{ns}/{name}", s.requireAuth(s.handleDeleteRepo))
 
 	// Smart protocol: advertise/fetch are read-only (no auth); push is auth.
+	// This is the easyvcs CLI/git compatibility face — kept for tooling.
 	mux.HandleFunc("POST /repo/{ns}/{name}/advertise", s.handleAdvertise)
 	mux.HandleFunc("POST /repo/{ns}/{name}/fetch", s.handleFetch)
 	mux.HandleFunc("POST /repo/{ns}/{name}/push", s.requireAuth(s.handlePush))
@@ -279,7 +280,6 @@ func (s *server) router() *http.ServeMux {
 
 	// Lab (hosting) API under /api/v1. The Lab mux owns the full /api/v1
 	// subtree and populates its own PathValue fields from its patterns.
-	mux.Handle("/api/v1/", s.labRouter())
 
 	// Ops: dev/deploy platform (runs, tasks, builds).
 	s.mountOps(mux)
@@ -319,31 +319,10 @@ func (s *server) router() *http.ServeMux {
 	return mux
 }
 
-// mountOps wires the /ops subtree onto the top-level mux.
+// mountOps is retained for compatibility; the ops REST surface was replaced by
+// OpsService RPCs (Build/ListServices/LaunchService/SandboxExec/...).
 func (s *server) mountOps(mux *http.ServeMux) {
-	if s.ops == nil {
-		return
-	}
-	sub := s.opsRouter()
-	// The ops router uses full /api/v1/... patterns; register each directly on
-	// the top-level mux so PathValue is populated by the outer request.
-	mux.Handle("/api/v1/ops/namespaces", http.HandlerFunc(s.opsNamespaces))
-	mux.Handle("/api/v1/ops/tasks", http.HandlerFunc(s.opsTasksList))
-	mux.Handle("/api/v1/ops/tasks/{id}", http.HandlerFunc(s.opsTaskGet))
-	mux.Handle("/api/v1/ops/tasks/{id}/stream", http.HandlerFunc(s.opsTaskStream))
-	mux.Handle("/api/v1/ops/builds", http.HandlerFunc(s.opsBuild))
-	// Service launch (host docker engine socket backend).
-	mux.Handle("/api/v1/ops/services", http.HandlerFunc(s.opsServicesList))
-	mux.Handle("POST /api/v1/ops/services", http.HandlerFunc(s.opsServiceLaunch))
-	mux.Handle("/api/v1/ops/services/{name}", http.HandlerFunc(s.opsServiceGet))
-	mux.Handle("DELETE /api/v1/ops/services/{name}", http.HandlerFunc(s.opsServiceDelete))
-	mux.Handle("POST /api/v1/ops/services/{name}/scale", http.HandlerFunc(s.opsServiceScale))
-	// Sandbox pass-through: run commands / read / write files inside a
-	// persistent podman service container (no repo commit; used by easyvcs-ops).
-	mux.Handle("POST /api/v1/ops/sandbox/{name}/exec", http.HandlerFunc(s.opsSandboxExec))
-	mux.Handle("GET /api/v1/ops/sandbox/{name}/file", http.HandlerFunc(s.opsSandboxReadFile))
-	mux.Handle("PUT /api/v1/ops/sandbox/{name}/file", http.HandlerFunc(s.opsSandboxWriteFile))
-	_ = sub
+	_ = mux
 }
 
 // mountPackageRegistry mounts every enabled artifactkit protocol. The generic

@@ -64,6 +64,8 @@ github.com/easylab-platform/easylab-proto v0.14.0 h1:AfSiADt6lih6CXt5GVaGbqdVk+o
 github.com/easylab-platform/easylab-proto v0.14.0/go.mod h1:PcZuLRhnUB6ZQmF1/vC8ip2IVhOArtp86+ZnCJfXHoY=
 github.com/easylab-platform/easylab-proto v0.15.0 h1:vkgHUjMf97G8NxeQr/esHua9Ds+hX5YAT2iGH3ih2a0=
 github.com/easylab-platform/easylab-proto v0.15.0/go.mod h1:PcZuLRhnUB6ZQmF1/vC8ip2IVhOArtp86+ZnCJfXHoY=
+github.com/easylab-platform/easylab-proto v0.16.0 h1:e5Buhhs7+9hmr7LfT56zCvBkXkE0YV6OD694kDhbzZY=
+github.com/easylab-platform/easylab-proto v0.16.0/go.mod h1:PcZuLRhnUB6ZQmF1/vC8ip2IVhOArtp86+ZnCJfXHoY=
 github.com/easylab-platform/easyvcs v0.5.1 h1:DVt9ie3mIrUIJuq2edoM3qQ5TAIcdv0FxVrfe5C0lP4=
 github.com/easylab-platform/easyvcs v0.5.1/go.mod h1:jFri6d5KqRGaXz6h0TSHoj3TvamFxkrO+bodzwRhGVo=
 github.com/easylab-platform/easyvcs v0.6.0 h1:RH+/YMPNLMEiZQj7cxQ7YdbEDVG/9ELMqV9Wh6UG0sw=
