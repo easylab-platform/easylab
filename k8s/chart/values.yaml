@@ -20,7 +20,7 @@ registry:
 gateway:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
-    tag: "20260914105709"
+    tag: "20260914141437"
     pullPolicy: IfNotPresent
   # External base URL advertised to clients (OCI /token realm, git, ...).
   # Empty derives it from the install namespace: the in-cluster Service URL
@@ -103,7 +103,7 @@ agent:
     # v2 (multi-tenant protocol). Phase 1 rollout: auth disabled, every
     # request pinned to the default tenant; flip to required (+ admin/bootstrap
     # tokens) in phase 2.
-    tag: "20260914120814"
+    tag: "20260914162722"
     pullPolicy: IfNotPresent
   # Service name published for the agent (repo extension defaults to this).
   serviceName: abcp-agent
@@ -114,7 +114,7 @@ agent:
   # `subsession-create`) and talks to it via merge requests, so the bundled
   # agent's subsession/mail tools are masked here (the denylist is the
   # enforcement backstop: a user may still create or blank a preset).
-  disabledTools: "subsession-create,mail-send"
+  disabledTools: "bundled.subsession-create,mail-send"
   extraEnv:
     - name: AGENT_DEFAULT_TENANT
       value: "default"
