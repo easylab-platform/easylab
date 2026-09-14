@@ -14,6 +14,9 @@ import (
 // Linux: they run a user image as a long-lived Deployment (no worker, no
 // VM/profile support).
 type ServiceSpec struct {
+	// Proxy, when set, injects the easyproxy sidecar (egress policy). Nil
+	// keeps the deployment unchanged.
+	Proxy    *ProxySpec
 	Name     string
 	Image    string
 	Command  []string
@@ -56,6 +59,19 @@ func (c *Client) LaunchService(ctx context.Context, s ServiceSpec) (SandboxStatu
 				},
 			},
 		},
+	}
+	if s.Proxy != nil {
+		if err := c.CreateProxyConfigMap(ctx, s.Name, s.Proxy.Rules); err != nil {
+			return SandboxStatus{}, fmt.Errorf("proxy configmap: %w", err)
+		}
+		if s.Proxy.CACertPEM != "" {
+			if err := c.CreateProxyCASecret(ctx, s.Name, s.Proxy.CACertPEM, s.Proxy.CAKeyPEM); err != nil {
+				return SandboxStatus{}, fmt.Errorf("proxy CA secret: %w", err)
+			}
+		}
+		if err := withProxy(&dep.Spec.Template.Spec, s.Name, s.Proxy); err != nil {
+			return SandboxStatus{}, err
+		}
 	}
 	if _, err := c.cs.AppsV1().Deployments(c.namespace).Create(ctx, dep, metav1.CreateOptions{}); err != nil {
 		if isAlreadyExists(err) {

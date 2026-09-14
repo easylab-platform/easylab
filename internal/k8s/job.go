@@ -56,6 +56,10 @@ type JobSpec struct {
 	// WorkerBinHostDir injects the worker binary from a hostPath directory
 	// (CI jobs that use a toolchain base image instead of a derived image).
 	WorkerBinHostDir string
+
+	// Proxy, when set, injects the easyproxy sidecar (egress policy). Nil
+	// keeps the pod unchanged.
+	Proxy *ProxySpec
 }
 
 // JobResult is a completed job's outcome.
@@ -111,6 +115,7 @@ func (c *Client) RunJob(ctx context.Context, spec JobSpec, token string, onLog f
 		DeviceLimits:     profile.DeviceLimits,
 		NodeSelector:     profile.NodeSelector,
 		NoService:        true,
+		Proxy:            spec.Proxy,
 	}); err != nil {
 		return JobResult{}, err
 	}

@@ -40,6 +40,9 @@ type SandboxSpec struct {
 	WorkerBinHostDir string
 	// NoService skips the ClusterIP Service (ephemeral jobs dial the pod IP).
 	NoService bool
+	// Proxy, when set, injects the easyproxy sidecar (egress policy). Nil
+	// keeps the pod unchanged.
+	Proxy *ProxySpec
 }
 
 // SandboxStatus is a live sandbox view.
@@ -164,6 +167,23 @@ func (c *Client) LaunchSandbox(ctx context.Context, s SandboxSpec) (SandboxStatu
 	main.VolumeMounts = append(main.VolumeMounts, mounts...)
 	pod.Spec.Volumes = vols
 	pod.Spec.Containers = []corev1.Container{main}
+	if s.Proxy != nil {
+		if err := c.CreateProxyConfigMap(ctx, s.Name, s.Proxy.Rules); err != nil {
+			return SandboxStatus{}, fmt.Errorf("proxy configmap: %w", err)
+		}
+		if s.Proxy.CACertPEM != "" {
+			// The CA key rides in the same secret created by the caller via
+			// CreateProxyCASecret; only the cert is distributed to pods, the
+			// key stays server-side for easyproxy's MITM — here we copy the
+			// caller-provided material verbatim.
+			if err := c.CreateProxyCASecret(ctx, s.Name, s.Proxy.CACertPEM, s.Proxy.CAKeyPEM); err != nil {
+				return SandboxStatus{}, fmt.Errorf("proxy CA secret: %w", err)
+			}
+		}
+		if err := withProxy(&pod.Spec, s.Name, s.Proxy); err != nil {
+			return SandboxStatus{}, err
+		}
+	}
 
 	// Idempotent launch: a session reuses the same sandbox name. Recreate the
 	// pod so the worker picks up the freshly minted WORKER_TOKEN (the registry
