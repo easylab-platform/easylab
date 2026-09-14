@@ -4,12 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"connectrpc.com/connect"
 
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
+	"github.com/easylab-platform/easylab/internal/registry"
 )
 
 func toJSON(v interface{}) string {
@@ -85,31 +85,7 @@ func (s *server) fetchService(ctx context.Context, name, namespace string) (map[
 }
 
 func (s *server) qualifyImage(ref, defaultTag string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ref
-	}
-	host := s.artifactImageHost
-	// A registry host is present only when the first path segment (before the
-	// first '/') looks like a host: contains '.' or a colon followed by a
-	// numeric port, or equals "localhost". A bare "name:tag" (e.g. "example-
-	// server:main") has no '.' and its colon is followed by a non-numeric tag,
-	// so it is NOT a host and must be qualified.
-	first := ref
-	if i := strings.IndexByte(ref, '/'); i >= 0 {
-		first = ref[:i]
-	}
-	if isRegistryHost(first) {
-		return ref
-	}
-	// Bare name, name:tag, or repo/name[:tag] — qualify with the artifact host.
-	if !strings.Contains(ref, ":") {
-		if defaultTag == "" {
-			defaultTag = "latest"
-		}
-		ref += ":" + defaultTag
-	}
-	return host + "/" + ref
+	return registry.Local(ref, s.artifactImageHost, defaultTag)
 }
 
 func rawMap(v interface{}) map[string]interface{} {
@@ -161,24 +137,6 @@ func k8sServiceName(org, repo, bm string) string {
 	// Over-long: hash to stay within the label limit while remaining unique.
 	h := sha256.Sum256([]byte(org + ":" + repo + ":" + bm))
 	return fmt.Sprintf("svc-%x", h[:8])
-}
-
-func isRegistryHost(seg string) bool {
-	if seg == "localhost" {
-		return true
-	}
-	if strings.Contains(seg, ".") {
-		return true
-	}
-	if i := strings.IndexByte(seg, ':'); i >= 0 {
-		port := seg[i+1:]
-		if port != "" {
-			if _, err := strconv.Atoi(port); err == nil {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func envMapFromArgs(args map[string]interface{}) map[string]string {

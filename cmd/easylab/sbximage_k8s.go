@@ -5,13 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
+	"github.com/easylab-platform/easylab/internal/ci"
 	"github.com/easylab-platform/easylab/internal/k8s"
+	"github.com/easylab-platform/easylab/internal/registry"
 )
 
 // ensureSandboxImage resolves the image for a sandbox runtime. For a derived
@@ -59,15 +58,32 @@ ENTRYPOINT ["/usr/local/bin/easyworker"]
 	}
 
 	// Skip the build when the tag already resolves in the registry.
-	if s.imageExists(ctx, tag) {
+	if s.k8s.ImageExists(ctx, tag) {
 		return tag, false, nil
 	}
-	if err := s.k8s.BuildImage(ctx, k8s.BuildOptions{
-		ContextDir: ctxDir, Dockerfile: "Containerfile", Image: tag,
-	}, nil); err != nil {
+	if err := s.deriveImage(ctx, ctxDir, tag); err != nil {
 		return "", false, fmt.Errorf("derive build: %w", err)
 	}
 	return tag, true, nil
+}
+
+// deriveImage builds a derived sandbox image through the shared CI produce
+// path (oci-build), so sandbox image derivation, container-build and
+// package-publish all run through the one orchestrator (K8sBackend -> the
+// unified worker-job primitive).
+func (s *server) deriveImage(ctx context.Context, ctxDir, tag string) error {
+	if s.buildBackend == nil {
+		return fmt.Errorf("build backend unavailable")
+	}
+	_, err := s.buildBackend.Run(ctx, &ci.Job{
+		Produce: ci.Produce{
+			Action:     ci.ActionOCIBuild,
+			Context:    ctxDir,
+			Dockerfile: "Containerfile",
+			Tag:        tag,
+		},
+	}, nil, nil)
+	return err
 }
 
 // sandboxRegistryRef returns the fully-qualified derived sandbox image ref.
@@ -75,7 +91,7 @@ ENTRYPOINT ["/usr/local/bin/easyworker"]
 // by default, or EASYLAB_REGISTRY_HOST), so it is portable across clusters.
 func (s *server) sandboxRegistryRef(short string) string {
 	host := s.registryHost()
-	return host + "/easylab/sandbox:" + short
+	return registry.Join(host, "easylab/sandbox:"+short)
 }
 
 // registryHost resolves the registry host: an explicit EASYLAB_REGISTRY_HOST
@@ -90,45 +106,6 @@ func (s *server) registryHost() string {
 	}
 	ns := envOrStr("EASYLAB_NAMESPACE", "temp")
 	return fmt.Sprintf("easylab.%s.svc.cluster.local:80", ns)
-}
-
-// imageExists reports whether the registry already has the image tag
-// (best effort: a missing repo/tag is a 404; any other failure rebuilds). The
-// probe uses the in-cluster artifact URL (always reachable from the pod).
-func (s *server) imageExists(ctx context.Context, ref string) bool {
-	_, repo, tag := splitRef(ref)
-	base := os.Getenv("EASYLAB_ARTIFACT_URL")
-	if base == "" {
-		ns := envOrStr("EASYLAB_NAMESPACE", "temp")
-		base = fmt.Sprintf("http://easylab.%s.svc.cluster.local:80", ns)
-	}
-	u := strings.TrimSuffix(base, "/") + "/v2/" + repo + "/manifests/" + tag
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, u, nil)
-	if err != nil {
-		return false
-	}
-	req.Header.Set("Authorization", "Bearer "+envOrStr("EASYVCS_TOKEN", "devtoken"))
-	req.Header.Set("Accept", "application/vnd.docker.distribution.manifest.v2+json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode == http.StatusOK
-}
-
-// splitRef splits <host>/<repo>:<tag> into its parts (tag defaults to latest).
-func splitRef(ref string) (host, repo, tag string) {
-	host, rest := "", ref
-	if i := strings.IndexByte(ref, '/'); i >= 0 {
-		host, rest = ref[:i], ref[i+1:]
-	}
-	tag = "latest"
-	if i := strings.LastIndexByte(rest, ':'); i >= 0 {
-		rest, tag = rest[:i], rest[i+1:]
-	}
-	return host, rest, tag
 }
 
 func workerBinPath() string {

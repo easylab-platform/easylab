@@ -42,6 +42,7 @@ import (
 	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
 	"github.com/easylab-platform/easylab-proto/easylab/v1/easylabv1connect"
 
+	"github.com/easylab-platform/easylab/internal/ci"
 	"github.com/easylab-platform/easylab/internal/k8s"
 	"github.com/easylab-platform/easylab/internal/ops"
 	"github.com/easylab-platform/easylab/internal/sbxreg"
@@ -66,6 +67,10 @@ type server struct {
 	ops       *opsState
 	sbx       *sbxreg.Registry
 	k8s       *k8s.Client
+	// buildBackend is the shared CI produce backend (oci-build /
+	// publish-protocol) used for sandbox image derivation, container builds
+	// and package publishing.
+	buildBackend *ci.K8sBackend
 	workflows sync.Map // workflow id -> *ci.Workflow (declarations)
 	runs      sync.Map // run id -> *ci.Run (instantiations)
 	// auth is the artifactkit Auth over the easyvcs credential store
@@ -145,6 +150,9 @@ func main() {
 	}
 	reg.Owners = cs
 	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, sbx: sbxReg, k8s: sK8s, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
+	if sK8s != nil {
+		s.buildBackend = ci.NewK8sBackend(sK8s)
+	}
 	s.agentAdminURL = os.Getenv("EASYLAB_AGENT_URL")
 	s.agentAdminToken = os.Getenv("EASYLAB_AGENT_ADMIN_TOKEN")
 	s.agentFwdToken = os.Getenv("EASYLAB_AGENT_TOKEN")

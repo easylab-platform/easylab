@@ -10,6 +10,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/easylab-platform/easylab/internal/registry"
 )
 
 // RuntimeProfile is a sandbox execution profile. The linux profile derives an
@@ -238,17 +240,7 @@ func (c *Client) ResolveRuntime(name string) (RuntimeProfile, error) {
 // client's registry host (e.g. "easylab/vm-images/x:tag" ->
 // "<host>/easylab/vm-images/x:tag").
 func (c *Client) qualifyRuntimeImage(ref string) string {
-	first := ref
-	if i := strings.IndexByte(ref, '/'); i >= 0 {
-		first = ref[:i]
-	}
-	if strings.Contains(first, ".") || strings.Contains(first, ":") || first == "localhost" {
-		return ref // already has a registry host
-	}
-	if c.registryHost == "" {
-		return ref
-	}
-	return c.registryHost + "/" + ref
+	return registry.Local(ref, c.registryHost, "")
 }
 
 func int64Ptr(v int64) *int64 { return &v }

@@ -10,31 +10,6 @@ import (
 	"github.com/easylab-platform/easyvcs/store"
 )
 
-// TestOpsBuildRPCDegrades exercises OpsService.Build: off-cluster (no k8s) it
-// reports Unimplemented rather than silently succeeding; a missing image is
-// InvalidArgument.
-func TestOpsBuildRPCDegrades(t *testing.T) {
-	s := newTestServer(t)
-	u, _ := s.cs.CreateUser("builder", "Builder")
-	co := &connOps{s}
-
-	// No k8s backend: Unimplemented.
-	_, err := co.Build(principalCtx(u), connect.NewRequest(&easylabv1.BuildRequest{Image: "x:1"}))
-	if err == nil || connect.CodeOf(err) != connect.CodeUnimplemented {
-		t.Fatalf("build without k8s: expected Unimplemented, got %v", err)
-	}
-	// Missing image: InvalidArgument (checked before the backend).
-	_, err = co.Build(principalCtx(u), connect.NewRequest(&easylabv1.BuildRequest{}))
-	if err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("build without image: expected InvalidArgument, got %v", err)
-	}
-	// Anonymous: Unauthenticated.
-	_, err = co.Build(principalCtx(nil), connect.NewRequest(&easylabv1.BuildRequest{Image: "x:1"}))
-	if err == nil || connect.CodeOf(err) != connect.CodeUnauthenticated {
-		t.Fatalf("anonymous build: expected Unauthenticated, got %v", err)
-	}
-}
-
 // TestServiceLaunchAuthz verifies LaunchService enforces maintainer+ on a
 // repo-bound service (and requires auth for standalone).
 func TestServiceLaunchAuthz(t *testing.T) {

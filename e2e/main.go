@@ -230,13 +230,14 @@ func main() {
 	} else {
 		fmt.Println("NOTE sandbox-download skipped (AGENT_FILE_CODE unset; upload a file via agent IngestFile first)")
 	}
-	buildC, _ := run(ag, extOps, "container-build", 120*time.Second, map[string]any{
-		"dockerfile-path": "Dockerfile", "tag": "e2e-tools"})
+	buildC, _ := run(ag, extOps, "ci-run", 120*time.Second, map[string]any{
+		"preset": "container-build", "dockerfile-path": "Dockerfile", "tag": "e2e-tools"})
 	runID := ""
 	if m := regexp.MustCompile(`run ([^,\s]+)`).FindStringSubmatch(buildC); m != nil {
 		runID = m[1]
 	}
-	run(ag, extOps, "package-publish", 120*time.Second, map[string]any{"protocol": "npm"})
+	run(ag, extOps, "ci-run", 120*time.Second, map[string]any{"preset": "npm-publish", "protocol": "npm"})
+	run(ag, extOps, "ci-run", 120*time.Second, map[string]any{"workflow": ""})
 	run(ag, extOps, "service-deploy", 600*time.Second, map[string]any{
 		"image": "docker.io/library/nginx:alpine", "name": "e2e-tools-svc"})
 	run(ag, extOps, "service-list", 30*time.Second, map[string]any{})

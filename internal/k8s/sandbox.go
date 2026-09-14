@@ -21,11 +21,6 @@ type SandboxSpec struct {
 	Workspace string            // default /workspace
 	Env       map[string]string // extra env (WORKER_TOKEN added by caller)
 	Command   []string          // entrypoint override
-	// InitWorker, when set, is an image carrying the static worker binary; an
-	// init container copies it into a shared emptyDir (used to inject the
-	// worker into an arbitrary base image without building a derived image).
-	InitWorker   string
-	WorkerBinSrc string // path of the binary inside InitWorker (default /usr/local/bin/easyworker)
 	DeviceLimits map[string]string
 	NodeSelector map[string]string
 	NeedsTun     bool
@@ -135,22 +130,6 @@ func (c *Client) LaunchSandbox(ctx context.Context, s SandboxSpec) (SandboxStatu
 	}
 	var vols []corev1.Volume
 	var mounts []corev1.VolumeMount
-	if s.InitWorker != "" {
-		src := s.WorkerBinSrc
-		if src == "" {
-			src = "/usr/local/bin/easyworker"
-		}
-		vols = append(vols, corev1.Volume{Name: "worker-bin", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
-		mounts = append(mounts, corev1.VolumeMount{Name: "worker-bin", MountPath: "/easylab-worker"})
-		pod.Spec.InitContainers = []corev1.Container{{
-			Name: "inject-worker", Image: s.InitWorker,
-			Command:      []string{"/bin/sh", "-c", "cp " + src + " /easylab-worker/easyworker && chmod +x /easylab-worker/easyworker"},
-			VolumeMounts: []corev1.VolumeMount{{Name: "worker-bin", MountPath: "/easylab-worker"}},
-		}}
-		if len(main.Command) == 0 {
-			main.Command = []string{"/easylab-worker/easyworker"}
-		}
-	}
 	if needsTun {
 		vols = append(vols, corev1.Volume{Name: "devtun", VolumeSource: corev1.VolumeSource{
 			HostPath: &corev1.HostPathVolumeSource{Path: "/dev/net/tun", Type: hpPtr(corev1.HostPathCharDev)}}})

@@ -223,39 +223,93 @@ tools:
           descriptions:
             zh: 端口文件的提交信息（默认给出描述性信息）。
       required: [sandbox-path, repo-path]
-  - name: container-build
-    description: Build a container image from a Containerfile in the repo using the remote buildkit builder.
+  - name: ci-run
+    description: "Run CI. Either a built-in preset (`container-build` builds+pushes an image; `<protocol>-publish` e.g. npm-publish/pypi-publish/pypi publishes a package) or a workflow declared in the repo's .easylab/workflows.yaml (workflow=<name>; empty runs all). Runs asynchronously through the one CI pipeline; the returned run id(s) are polled via the CI run APIs."
     descriptions:
-      zh: 使用远程 buildkit 构建器从仓库中的 Containerfile 构建容器镜像。
+      zh: "运行 CI。可以是内置预设（`container-build` 构建并推送镜像；`<protocol>-publish` 如 npm-publish/pypi-publish 发布包），也可以是仓库 .easylab/workflows.yaml 中声明的 workflow（workflow=<名称>；为空则运行全部）。通过统一的 CI 管线异步执行；返回的 run id 用 CI 运行接口轮询。"
     input_schema:
       type: object
       properties:
-        dockerfile-path:
+        preset:
           type: string
-          description: "Repo-relative path to the Dockerfile (default: ./Dockerfile)."
+          description: "Built-in preset: container-build | <protocol>-publish (npm-publish, pypi-publish, cargo-publish, ...)."
           descriptions:
-            zh: Dockerfile 的仓库相对路径（默认 ./Dockerfile）。
+            zh: "内置预设：container-build | <protocol>-publish（npm-publish、pypi-publish、cargo-publish 等）。"
+        workflow:
+          type: string
+          description: Workflow name in .easylab/workflows.yaml (empty = all). Ignored when preset is set.
+          descriptions:
+            zh: .easylab/workflows.yaml 中的 workflow 名称（为空则全部）。设置 preset 时忽略。
         tag:
           type: string
-          description: Image tag (defaults to the session branch).
+          description: "container-build: image name (tag defaults to the branch or image-tag)."
           descriptions:
-            zh: 镜像标签（默认会话分支）。
+            zh: "container-build：镜像名（标签默认会话分支或 image-tag）。"
         image-tag:
           type: string
-          description: Optional semantic version for the pushed image reference (e.g. v0.0.1). When omitted the tag defaults to the source branch (a floating tag).
+          description: "container-build: explicit image tag (e.g. v0.0.1); overrides the branch."
           descriptions:
-            zh: 可选的语义化版本号（如 v0.0.1）。省略时标签默认为源分支（浮动标签）。
+            zh: "container-build：显式镜像标签（如 v0.0.1）；覆盖分支。"
+        dockerfile-path:
+          type: string
+          description: "container-build: repo-relative Dockerfile path (default ./Dockerfile)."
+          descriptions:
+            zh: "container-build：Dockerfile 的仓库相对路径（默认 ./Dockerfile）。"
         context:
           type: string
-          description: "Build context path, relative to the repo root (default: repo root)."
+          description: "container-build: build context path relative to the repo root (default repo root)."
           descriptions:
-            zh: 构建上下文路径，相对于仓库根目录（默认：仓库根目录）。
-        no-cache:
-          type: boolean
-          description: Skip the layer cache (build from scratch).
+            zh: "container-build：构建上下文路径，相对于仓库根目录（默认：仓库根目录）。"
+        protocol:
+          type: string
+          description: "Package protocol for <protocol>-publish (npm / pypi / maven / …); inferred from preset when the preset already ends in -publish."
           descriptions:
-            zh: 跳过层缓存（从零构建）。
-      required: [dockerfile-path, tag]
+            zh: "发布协议（npm / pypi / maven 等）；预设以 -publish 结尾时可从预设推断。"
+        name:
+          type: string
+          description: Package / release name (preset arg override).
+          descriptions:
+            zh: 包 / release 名称（预设参数覆盖）。
+        version:
+          type: string
+          description: Package version to publish.
+          descriptions:
+            zh: 要发布的包版本。
+        file:
+          type: string
+          description: Repo-relative path to the package archive to upload (generic).
+          descriptions:
+            zh: 要上传的包归档的仓库相对路径（generic 用）。
+        name_arg:
+          type: string
+          description: Optional preset arg override for NAME (e.g. maven groupId).
+          descriptions:
+            zh: 可选的预设参数 name 覆盖（如 maven groupId）。
+        version_arg:
+          type: string
+          description: Optional preset arg override for VERSION.
+          descriptions:
+            zh: 可选的预设参数 version 覆盖。
+        file_arg:
+          type: string
+          description: Optional preset arg override for FILE (generic).
+          descriptions:
+            zh: 可选的预设参数 file 覆盖（generic 用）。
+        org:
+          type: string
+          description: Target organization (defaults to the session's).
+          descriptions:
+            zh: 目标组织（默认取会话）。
+        repo:
+          type: string
+          description: Target repository (defaults to the session's).
+          descriptions:
+            zh: 目标仓库（默认取会话）。
+        branch:
+          type: string
+          description: Branch to read / build from (defaults to the session's).
+          descriptions:
+            zh: 读取 / 构建所用的分支（默认取会话）。
   - name: service-deploy
     description: Deploy a container image as a Kubernetes deployment (with optional nested resource requests/limits). On success returns the service's in-cluster DNS hostname (<name>.<namespace>.svc.cluster.local) so the sandbox can reach it by name.
     descriptions:
@@ -368,54 +422,6 @@ tools:
           descriptions:
             zh: 要列出的 Kubernetes 命名空间（默认 ops 运行时命名空间）。
 
-  - name: package-publish
-    description: "Publish the repo checkout as a package. Runs the protocol's official CLI inside a containerfile build (buildkit, no image export). Protocols: npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift. Manifest-driven protocols (npm/pypi/cargo/...) read name+version from the package manifest; go/hex/composer/maven/swift/generic need explicit name+version (+file for generic)."
-    descriptions:
-      zh: 把仓库检出发布为包。在 containerfile 构建内运行该协议的官方 CLI（buildkit，不导出镜像）。协议：npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift。清单驱动的协议（npm/pypi/cargo/...）从包清单读取 name+version；go/hex/composer/maven/swift/generic 需要显式 name+version（generic 还需 file）。
-    input_schema:
-      type: object
-      properties:
-        protocol:
-          type: string
-          description: Package protocol (npm / pypi / maven / …).
-          descriptions:
-            zh: 包协议（npm / pypi / maven 等）。
-        org:
-          type: string
-          description: Target organization.
-          descriptions:
-            zh: 目标组织。
-        repo:
-          type: string
-          description: Target repository.
-          descriptions:
-            zh: 目标仓库。
-        branch:
-          type: string
-          description: Branch to read or publish from.
-          descriptions:
-            zh: 读取或发布所用的分支（分支）。
-        name:
-          type: string
-          description: Deployment / release name.
-          descriptions:
-            zh: 部署 / release 名称。
-        version:
-          type: string
-          description: Package version to publish.
-          descriptions:
-            zh: 要发布的包版本。
-        file:
-          type: string
-          description: Repo-relative path to the package archive to upload.
-          descriptions:
-            zh: 要上传的包归档的仓库相对路径。
-        dockerfile-path:
-          type: string
-          description: "Repo-relative path to the Dockerfile (default: ./Dockerfile)."
-          descriptions:
-            zh: Dockerfile 的仓库相对路径（默认 ./Dockerfile）。
-      required: [protocol]
   - name: package-search
     description: Search packages and their versions stored in the artifact registry (all protocols, incl. git releases stored as format=release).
     descriptions:
@@ -466,46 +472,3 @@ tools:
           descriptions:
             zh: 沙箱内的目标路径（相对于工作区根目录）。
       required: [code, path]
-  - name: workflow-run
-    description: "Run a workflow declared in the repo's .easylab/workflows.yaml (manual trigger). Loads the file from the given branch, expands the named preset (or all workflows when name is empty) and runs it asynchronously; returns the run id(s). Use the CI run APIs to poll status and stream logs. Presets: npm-publish, pypi-publish, cargo-publish, ... and container-build."
-    descriptions:
-      zh: "运行仓库 .easylab/workflows.yaml 中声明的 workflow（手动触发）。从指定分支加载文件，展开命名预设（name 为空则运行全部），异步执行并返回 run id。用 CI 运行接口轮询状态、流式查看日志。预设：npm-publish、pypi-publish、cargo-publish 等，以及 container-build。"
-    input_schema:
-      type: object
-      properties:
-        org:
-          type: string
-          description: Target organization.
-          descriptions:
-            zh: 目标组织。
-        repo:
-          type: string
-          description: Target repository.
-          descriptions:
-            zh: 目标仓库。
-        branch:
-          type: string
-          description: Branch whose tree holds .easylab/workflows.yaml.
-          descriptions:
-            zh: 存放 .easylab/workflows.yaml 的分支。
-        name:
-          type: string
-          description: Workflow name to run (empty = all workflows in the file).
-          descriptions:
-            zh: 要运行的 workflow 名称（为空则运行文件内全部）。
-        name_arg:
-          type: string
-          description: Optional preset arg override for NAME (e.g. maven groupId).
-          descriptions:
-            zh: 可选的预设参数 name 覆盖（如 maven groupId）。
-        version_arg:
-          type: string
-          description: Optional preset arg override for VERSION.
-          descriptions:
-            zh: 可选的预设参数 version 覆盖。
-        file_arg:
-          type: string
-          description: Optional preset arg override for FILE (generic).
-          descriptions:
-            zh: 可选的预设参数 file 覆盖（generic 用）。
-      required: [org, repo, branch]

@@ -7,8 +7,6 @@ import (
 
 	"connectrpc.com/connect"
 	workerv1 "github.com/easylab-platform/easylab-proto/worker/v1"
-	"github.com/easylab-platform/easyvcs/revision"
-	"github.com/easylab-platform/easyvcs/store"
 )
 
 // syncSandboxWorkspace pushes the repo tree at the branch head into the sandbox
@@ -18,16 +16,7 @@ func (s *server) syncSandboxWorkspace(ctx context.Context, name, org, repoName, 
 	if s.k8s == nil {
 		return fmt.Errorf("k8s backend unavailable")
 	}
-	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: org, Name: repoName})
-	if err != nil {
-		return fmt.Errorf("open %s/%s: %w", org, repoName, err)
-	}
-	ws := revision.NewWorkspace(repo)
-	treeID, err := treeOfRef(ws, repo, branch)
-	if err != nil {
-		return fmt.Errorf("ref %s: %w", branch, err)
-	}
-	tar, _, err := buildTreeTar(ws, treeID)
+	treeID, tar, err := s.exportWorkspace(org, repoName, branch)
 	if err != nil {
 		return err
 	}
@@ -37,7 +26,7 @@ func (s *server) syncSandboxWorkspace(ctx context.Context, name, org, repoName, 
 	// (boot id differs).
 	bootID := s.workerBootID(ctx, name)
 	if row, ok, _ := s.sbx.Get(name); ok &&
-		row.SyncedRev == treeID.String() && row.SyncedBootID != "" && row.SyncedBootID == bootID {
+		row.SyncedRev == treeID && row.SyncedBootID != "" && row.SyncedBootID == bootID {
 		return nil
 	}
 	c := &connSandbox{s: s}
@@ -48,12 +37,12 @@ func (s *server) syncSandboxWorkspace(ctx context.Context, name, org, repoName, 
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	if _, err := w.SyncFolder(cctx, connect.NewRequest(&workerv1.SyncFolderRequest{
-		Tarball: tar, Dest: ".", Clean: true, Rev: treeID.String(),
+		Tarball: tar, Dest: ".", Clean: true, Rev: treeID,
 	})); err != nil {
 		return fmt.Errorf("sync folder: %w", err)
 	}
 	// Record the synced rev + the worker boot id that owns this workspace.
-	return s.sbx.MarkSynced(name, treeID.String(), bootID)
+	return s.sbx.MarkSynced(name, treeID, bootID)
 }
 
 // workerBootID fetches the sandbox worker's boot id ("" when unreachable).

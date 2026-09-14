@@ -13,8 +13,9 @@ import (
 )
 
 // K8sBackend implements Backend on Kubernetes. Everything runs through the
-// unified worker-job primitive: CI steps, image builds (a worker job with a
-// rootless buildkitd sidecar) and publish-protocol builds. It replaces
+// unified worker-job primitive: CI steps and produce builds (oci-build,
+// publish-protocol) are worker jobs, and oci-build runs buildkit inside the
+// buildkit-worker image as a normal job (no sidecar). It replaces
 // PodmanBackend.
 type K8sBackend struct {
 	k8s           *k8s.Client

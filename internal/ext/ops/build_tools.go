@@ -3,7 +3,6 @@ package opsext
 import (
 	"context"
 	"fmt"
-	"github.com/easylab-platform/easylab/internal/ext"
 	"net/url"
 	"strings"
 	"time"
@@ -11,53 +10,46 @@ import (
 	"connectrpc.com/connect"
 	"github.com/abcp-sdk/abc-protocol-go/extension"
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
+	"github.com/easylab-platform/easylab/internal/ext"
+	"github.com/easylab-platform/easylab/internal/registry"
 )
 
+// registerBuildTools registers the CI/registry tools. Every build/publish/CI
+// entry point is the single `ci-run` tool, which drives the one CI pipeline
+// (WorkflowService -> K8sBackend): either a preset (`container-build`,
+// `<protocol>-publish`) or a workflow declared in `.easylab/workflows.yaml`.
 func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 
-	m["container-build"] = extension.ToolSpec{
+	m["ci-run"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			ctx = ext.WithLabTenant(ctx, tenant)
-			ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
-			if err != nil {
-				return extension.ToolResultData{}, err
+			preset := strArg(args, "preset")
+			workflow := strArg(args, "workflow")
+			org, repo, branch := strArg(args, "org"), strArg(args, "repo"), strArg(args, "branch")
+			if org == "" || repo == "" || branch == "" {
+				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
+				if err != nil {
+					return extension.ToolResultData{}, err
+				}
+				if org == "" {
+					org = ws.org
+				}
+				if repo == "" {
+					repo = ws.repo
+				}
+				if branch == "" {
+					branch = ws.branch
+				}
 			}
-			image := strArg(args, "tag")
-			if image == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "container-build: missing 'tag' (image name)", "container-build：缺少 'tag'（镜像名）")
+			branch = branchOrDefault(branch)
+
+			if preset != "" {
+				return s.runPreset(ctx, args, tenant, sessionName, preset, org, repo, branch)
 			}
-			// Tag defaults to the session branch (matching container-build's
-			// historical {tag}:{branch}); an explicit image_tag overrides it.
-			ref := image + ":" + ws.branchOrDefault()
-			if imageTag := strArg(args, "image-tag"); imageTag != "" {
-				ref = image + ":" + imageTag
-			}
-			fullImage := s.artifactImageHost + "/" + ref
-			// Build via easylab WorkflowService produce.oci-build (image build +
-			// push). The workflow is created (single job, no needs) and run.
-			wfRes, err := s.sdk.Workflow.CreateWorkflow(ctx, connect.NewRequest(&easylabv1.CreateWorkflowRequest{Workflow: &easylabv1.Workflow{
-				Name: "container-build-" + ws.branchOrDefault() + "-" + shortID(fmt.Sprintf("%d", time.Now().UnixNano())),
-				Org:  ws.org, Repo: ws.repo, Branch: ws.branchOrDefault(),
-				On: &easylabv1.Trigger{Events: []string{"manual"}},
-				Jobs: []*easylabv1.JobDef{{
-					Id:      "build",
-					RunsOn:  []string{"os=linux", "is_container=true"},
-					Steps:   []*easylabv1.Step{},
-					Produce: &easylabv1.Produce{Action: "oci-build", Tag: fullImage},
-				}},
-			}}))
-			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "container-build workflow failed: %v", "container-build 工作流失败：%v", err)
-			}
-			wid := wfRes.Msg.GetWorkflow().GetId()
-			runRes, err := s.sdk.Workflow.TriggerRun(ctx, connect.NewRequest(&easylabv1.TriggerRunRequest{WorkflowId: wid}))
-			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "container-build trigger failed: %v", "container-build 触发失败：%v", err)
-			}
-			out := fmt.Sprintf("Build launched (run %s, image %s).", runRes.Msg.GetRun().GetId(), fullImage)
-			return extension.ToolResultData{Content: out}, nil
+			return s.runWorkflowFile(ctx, args, tenant, sessionName, workflow, org, repo, branch)
 		},
 	}
+
 	m["container-search"] = extension.ToolSpec{
 		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 			ctx = ext.WithLabTenant(ctx, tenant)
@@ -88,96 +80,6 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "container-search failed: %v", "container-search 失败：%v", err)
 			}
 			return extension.ToolResultData{Content: v}, nil
-		},
-	}
-	m["package-publish"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-			ctx = ext.WithLabTenant(ctx, tenant)
-			protocol := strArg(args, "protocol")
-			org, repo, branch := strArg(args, "org"), strArg(args, "repo"), strArg(args, "branch")
-			if org == "" || repo == "" {
-				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
-				if err != nil {
-					return extension.ToolResultData{}, err
-				}
-				if org == "" {
-					org, repo = ws.org, ws.repo
-				}
-				if branch == "" {
-					branch = ws.branch
-				}
-			}
-			// Publish via easylab WorkflowService produce.publish-protocol.
-			wfRes, err := s.sdk.Workflow.CreateWorkflow(ctx, connect.NewRequest(&easylabv1.CreateWorkflowRequest{Workflow: &easylabv1.Workflow{
-				Name: "publish-" + protocol + "-" + shortID(fmt.Sprintf("%d", time.Now().UnixNano())),
-				Org:  org, Repo: repo, Branch: branchOrDefault(branch),
-				On: &easylabv1.Trigger{Events: []string{"manual"}},
-				Jobs: []*easylabv1.JobDef{{
-					Id:     "publish",
-					RunsOn: []string{"os=linux", "is_container=true"},
-					Steps:  []*easylabv1.Step{{Name: "publish", Run: "true"}},
-					Produce: &easylabv1.Produce{Action: "publish-protocol", Protocol: protocol,
-						Name: strArg(args, "name"), Version: strArg(args, "version"), File: strArg(args, "file")},
-				}},
-			}}))
-			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "package-publish workflow failed: %v", "package-publish 工作流失败：%v", err)
-			}
-			wid := wfRes.Msg.GetWorkflow().GetId()
-			_, err = s.sdk.Workflow.TriggerRun(ctx, connect.NewRequest(&easylabv1.TriggerRunRequest{WorkflowId: wid}))
-			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "package-publish trigger failed: %v", "package-publish 触发失败：%v", err)
-			}
-			ref := fmt.Sprintf("%s/%s@%s", org, repo, branchOrDefault(branch))
-			content := fmt.Sprintf("Publish launched (%s, context %s).", protocol, ref)
-			return extension.ToolResultData{Content: content}, nil
-		},
-	}
-	m["workflow-run"] = extension.ToolSpec{
-		Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
-			ctx = ext.WithLabTenant(ctx, tenant)
-			org, repo, branch := strArg(args, "org"), strArg(args, "repo"), strArg(args, "branch")
-			if org == "" || repo == "" || branch == "" {
-				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
-				if err != nil {
-					return extension.ToolResultData{}, err
-				}
-				if org == "" {
-					org = ws.org
-				}
-				if repo == "" {
-					repo = ws.repo
-				}
-				if branch == "" {
-					branch = ws.branch
-				}
-			}
-			// Run .easylab/workflows.yaml from the branch tree (async).
-			presetArgs := map[string]string{}
-			for arg, key := range map[string]string{"name_arg": "name", "version_arg": "version", "file_arg": "file"} {
-				if v := strArg(args, arg); v != "" {
-					presetArgs[key] = v
-				}
-			}
-			res, err := s.sdk.Workflow.RunWorkflowFile(ctx, connect.NewRequest(&easylabv1.RunWorkflowFileRequest{
-				Org: org, Repo: repo, Branch: branch,
-				Name: strArg(args, "name"), Args: presetArgs,
-			}))
-			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "workflow-run failed: %v", "workflow-run 失败：%v", err)
-			}
-			if e := res.Msg.GetError(); e != "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "workflow-run: %s", "workflow-run：%s", e)
-			}
-			var ids []string
-			for _, r := range res.Msg.GetRuns() {
-				ids = append(ids, r.GetId())
-			}
-			content := fmt.Sprintf("Launched %d run(s) from .easylab/workflows.yaml: %s", len(ids), strings.Join(ids, ", "))
-			if sk := res.Msg.GetSkipped(); len(sk) > 0 {
-				content += fmt.Sprintf(" (skipped: %s)", strings.Join(sk, ", "))
-			}
-			return extension.ToolResultData{Content: content, Data: map[string]interface{}{"run_ids": ids}}, nil
 		},
 	}
 	m["package-search"] = extension.ToolSpec{
@@ -233,4 +135,94 @@ func (s *server) registerBuildTools(m map[string]extension.ToolSpec) {
 			return extension.ToolResultData{Content: fmt.Sprintf("mirroring %s/%s from %s (pull scheduled)", org, repo, gitURL)}, nil
 		},
 	}
+}
+
+// runPreset creates and triggers a one-job workflow from a built-in produce
+// preset: `container-build` (oci-build) or `<protocol>-publish`
+// (publish-protocol).
+func (s *server) runPreset(ctx context.Context, args map[string]interface{}, tenant, sessionName, preset, org, repo, branch string) (extension.ToolResultData, error) {
+	job := &easylabv1.JobDef{Id: "run", RunsOn: []string{"os=linux", "is_container=true"}}
+	switch {
+	case preset == "container-build":
+		image := strArg(args, "tag")
+		if image == "" {
+			return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "ci-run: preset container-build requires 'tag'", "ci-run：预设 container-build 需要 'tag'")
+		}
+		ref := image + ":" + branch
+		if imageTag := strArg(args, "image-tag"); imageTag != "" {
+			ref = image + ":" + imageTag
+		}
+		job.Produce = &easylabv1.Produce{
+			Action:     "oci-build",
+			Tag:        registry.Join(s.artifactImageHost, ref),
+			Dockerfile: strArg(args, "dockerfile-path"),
+			Context:    strArg(args, "context"),
+		}
+	case strings.HasSuffix(preset, "-publish"):
+		protocol := strArg(args, "protocol")
+		if protocol == "" {
+			protocol = strings.TrimSuffix(preset, "-publish")
+		}
+		job.Produce = &easylabv1.Produce{
+			Action:   "publish-protocol",
+			Protocol: protocol,
+			Name:     strArg(args, "name"),
+			Version:  strArg(args, "version"),
+			File:     strArg(args, "file"),
+		}
+	default:
+		return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "ci-run: unknown preset %q (container-build | <protocol>-publish)", "ci-run：未知预设 %q（container-build | <protocol>-publish）", preset)
+	}
+	wfRes, err := s.sdk.Workflow.CreateWorkflow(ctx, connect.NewRequest(&easylabv1.CreateWorkflowRequest{Workflow: &easylabv1.Workflow{
+		Name: preset + "-" + shortID(fmt.Sprintf("%d", time.Now().UnixNano())),
+		Org:  org, Repo: repo, Branch: branch,
+		On:   &easylabv1.Trigger{Events: []string{"manual"}},
+		Jobs: []*easylabv1.JobDef{job},
+	}}))
+	if err != nil {
+		return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "ci-run workflow failed: %v", "ci-run 工作流失败：%v", err)
+	}
+	wid := wfRes.Msg.GetWorkflow().GetId()
+	runRes, err := s.sdk.Workflow.TriggerRun(ctx, connect.NewRequest(&easylabv1.TriggerRunRequest{WorkflowId: wid}))
+	if err != nil {
+		return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "ci-run trigger failed: %v", "ci-run 触发失败：%v", err)
+	}
+	rid := runRes.Msg.GetRun().GetId()
+	detail := ""
+	if job.Produce != nil && job.Produce.Tag != "" {
+		detail = ", image " + job.Produce.Tag
+	}
+	return extension.ToolResultData{
+		Content: fmt.Sprintf("CI launched (preset %s, run %s%s).", preset, rid, detail),
+		Data:    map[string]interface{}{"run_id": rid, "workflow_id": wid, "preset": preset},
+	}, nil
+}
+
+// runWorkflowFile runs the workflow(s) declared in the branch's
+// .easylab/workflows.yaml (name empty = all).
+func (s *server) runWorkflowFile(ctx context.Context, args map[string]interface{}, tenant, sessionName, name, org, repo, branch string) (extension.ToolResultData, error) {
+	presetArgs := map[string]string{}
+	for arg, key := range map[string]string{"name_arg": "name", "version_arg": "version", "file_arg": "file"} {
+		if v := strArg(args, arg); v != "" {
+			presetArgs[key] = v
+		}
+	}
+	res, err := s.sdk.Workflow.RunWorkflowFile(ctx, connect.NewRequest(&easylabv1.RunWorkflowFileRequest{
+		Org: org, Repo: repo, Branch: branch, Name: name, Args: presetArgs,
+	}))
+	if err != nil {
+		return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "ci-run failed: %v", "ci-run 失败：%v", err)
+	}
+	if e := res.Msg.GetError(); e != "" {
+		return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "ci-run: %s", "ci-run：%s", e)
+	}
+	var ids []string
+	for _, r := range res.Msg.GetRuns() {
+		ids = append(ids, r.GetId())
+	}
+	content := fmt.Sprintf("Launched %d run(s) from .easylab/workflows.yaml: %s", len(ids), strings.Join(ids, ", "))
+	if sk := res.Msg.GetSkipped(); len(sk) > 0 {
+		content += fmt.Sprintf(" (skipped: %s)", strings.Join(sk, ", "))
+	}
+	return extension.ToolResultData{Content: content, Data: map[string]interface{}{"run_ids": ids}}, nil
 }

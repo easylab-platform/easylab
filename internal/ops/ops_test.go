@@ -1,27 +1,6 @@
 package ops
 
-import (
-	"testing"
-	"time"
-)
-
-func TestTaskRegistryLifecycle(t *testing.T) {
-	reg := NewTaskRegistry()
-	id := reg.NewID("run")
-	task := reg.Create(id, KindRun)
-	if task.State() != StateRunning {
-		t.Fatalf("initial state: %s", task.State())
-	}
-	task.Log("first")
-	task.Finish(true, "ok", "")
-	if task.State() != StateSucceeded {
-		t.Fatalf("final state: %s", task.State())
-	}
-	list := reg.List()
-	if len(list) != 1 {
-		t.Fatalf("tasks: %d", len(list))
-	}
-}
+import "testing"
 
 func TestNamespaces(t *testing.T) {
 	reg := NewNamespaceRegistry([]string{"staging", "prod", "staging"})
@@ -45,24 +24,4 @@ func TestNamespaces(t *testing.T) {
 	if empty.Default() != "default" {
 		t.Fatalf("empty default: %s", empty.Default())
 	}
-}
-
-// TestSSEStream validates the task stream endpoint emits JSON events.
-func TestSSEStream(t *testing.T) {
-	reg := NewTaskRegistry()
-	id := reg.NewID("run")
-	task := reg.Create(id, KindRun)
-	task.Log("hello")
-
-	// Subscribe (manual, as the handler does).
-	ch, cancel := task.Subscribe()
-	defer cancel()
-	var first TaskEvent
-	select {
-	case ev := <-ch:
-		first = ev
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("no event")
-	}
-	_ = first
 }

@@ -12,6 +12,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/easylab-platform/easylab/internal/registry"
 )
 
 // DataDir returns easylab's in-container data root (the /data hostPath mount).
@@ -144,43 +146,9 @@ func isNotFound(err error) bool {
 func stringsContains(s, sub string) bool { return strings.Contains(s, sub) }
 
 // RewriteImageRef rewrites an external image reference to a pull-through ref
-// on the local registry host. The node cannot reach public registries, but
-// easylab's OCI registry proxies docker.io: a ref like
-// "docker.io/library/nginx:alpine" becomes
-// "<host>/docker.io/library/nginx:alpine" and kubelet pulls it from easylab.
-// Refs already pointing at an in-cluster registry are returned unchanged.
+// on the local registry host (see internal/registry.PullThrough).
 func RewriteImageRef(ref, host string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" || host == "" {
-		return ref
-	}
-	first := ref
-	if i := strings.IndexByte(ref, '/'); i >= 0 {
-		first = ref[:i]
-	}
-	// Local / in-cluster registries must not be prefixed.
-	if first == host || first == "localhost" || strings.HasPrefix(first, "localhost:") {
-		return ref
-	}
-	if strings.Contains(first, ".svc") {
-		return ref
-	}
-	// A Docker Hub repo has no registry host: either a bare "name[:tag]" (no
-	// slash at all) or a "path/name[:tag]" whose first segment has no '.'/':'.
-	isRegistry := strings.Contains(first, ".") ||
-		(strings.Contains(first, ":") && strings.Contains(ref, "/"))
-	if !isRegistry {
-		// Docker Hub shorthand. A bare "name[:tag]" is normalized to
-		// "library/name" (Docker Hub's rule), which the pull-through proxy
-		// resolves against docker.io.
-		if strings.Contains(ref, "/") {
-			return host + "/docker.io/" + ref
-		}
-		return host + "/docker.io/library/" + ref
-	}
-	// A registry host (docker.io, ghcr.io, quay.io, host:port, ...): prefix it
-	// so the pull goes through easylab's pull-through proxy.
-	return host + "/" + ref
+	return registry.PullThrough(ref, host)
 }
 
 // LabelKey sanitizes an arbitrary string into a deterministic k8s-safe label

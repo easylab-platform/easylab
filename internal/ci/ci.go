@@ -1,8 +1,8 @@
 // Package ci implements the event-driven CI/Workflow layer: declarative
 // workflows (on -> jobs) instantiated as Runs, job DAG scheduling (needs),
 // a runner registry (labels + heartbeat) and the produce actions
-// (oci-build / artifact-upload / publish-protocol). CI is independent of the
-// dev (sandbox/service) world: runners with session_bound=true do not join
+// (oci-build / publish-protocol). CI is independent of the dev
+// (sandbox/service) world: runners with session_bound=true do not join
 // the CI pool.
 package ci
 
@@ -16,7 +16,6 @@ type Action string
 
 const (
 	ActionOCIBuild        Action = "oci-build"
-	ActionArtifactUpload  Action = "artifact-upload"
 	ActionPublishProtocol Action = "publish-protocol"
 )
 

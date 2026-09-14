@@ -37,9 +37,6 @@ type Client struct {
 	// proxy is the upstream HTTP(S) proxy used by ephemeral build pods to
 	// reach public registries (base images).
 	proxy string
-	// workerImage is the default linux worker image (base+worker) when a job
-	// has no explicit container.
-	workerImage string
 	// runtimes are the sandbox execution profiles (linux/windows/macos/...).
 	runtimes map[string]RuntimeProfile
 }
@@ -51,7 +48,6 @@ type Config struct {
 	RegistryHost  string
 	RegistryToken string
 	Proxy         string
-	WorkerImage   string
 }
 
 // New builds a client from the in-cluster config (production) or, when
@@ -94,7 +90,6 @@ func newClient(cs kubernetes.Interface, cfg Config) *Client {
 		registryHost:  cfg.RegistryHost,
 		registryToken: cfg.RegistryToken,
 		proxy:         cfg.Proxy,
-		workerImage:   cfg.WorkerImage,
 		runtimes:      loadRuntimes(),
 	}
 }

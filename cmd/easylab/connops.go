@@ -1,8 +1,6 @@
 package main
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -13,12 +11,10 @@ import (
 	"connectrpc.com/connect"
 	"github.com/easylab-platform/easylab/internal/k8s"
 	"github.com/easylab-platform/easylab/internal/ops"
-	"github.com/easylab-platform/easyvcs/object"
-	"github.com/easylab-platform/easyvcs/revision"
 )
 
 // connOps implements easylabv1connect.OpsServiceHandler over the EasyLab ops
-// substrate (task registry + k8s service runner).
+// substrate (featured services + k8s service runner).
 type connOps struct {
 	s *server
 }
@@ -204,49 +200,10 @@ func (c *connOps) SandboxWrite(ctx context.Context, req *connect.Request[easylab
 }
 
 func (c *connOps) SandboxJobKill(ctx context.Context, req *connect.Request[easylabv1.SandboxJobKillRequest]) (*connect.Response[easylabv1.SandboxJobKillResponse], error) {
-	// The sandbox pass-through has no per-job kill on the podman runner; the
-	// task registry is the run/job store. Best-effort no-op for now.
+	// Sandbox command execution goes through the worker API, not the ops
+	// substrate. This legacy passthrough is deprecated in favor of
+	// SandboxService.JobKill.
 	return connect.NewResponse(&easylabv1.SandboxJobKillResponse{Ok: true}), nil
-}
-
-func (c *connOps) ListTasks(ctx context.Context, req *connect.Request[easylabv1.ListTasksRequest]) (*connect.Response[easylabv1.ListTasksResponse], error) {
-	tasks := c.s.ops.builders.List()
-	out := make([]*easylabv1.TaskEntry, 0, len(tasks))
-	for _, t := range tasks {
-		out = append(out, &easylabv1.TaskEntry{
-			Id:    t.ID,
-			Kind:  string(t.Kind),
-			State: string(t.State()),
-		})
-	}
-	return connect.NewResponse(&easylabv1.ListTasksResponse{Tasks: out}), nil
-}
-
-func (c *connOps) GetTask(ctx context.Context, req *connect.Request[easylabv1.GetTaskRequest]) (*connect.Response[easylabv1.GetTaskResponse], error) {
-	task := c.s.ops.builders.Get(req.Msg.Id)
-	if task == nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("task not found"))
-	}
-	return connect.NewResponse(&easylabv1.GetTaskResponse{Task: &easylabv1.TaskEntry{
-		Id:    task.ID,
-		Kind:  string(task.Kind),
-		State: string(task.State()),
-	}}), nil
-}
-
-func (c *connOps) TaskLog(ctx context.Context, req *connect.Request[easylabv1.TaskLogRequest], stream *connect.ServerStream[easylabv1.TaskLogResponse]) error {
-	task := c.s.ops.builders.Get(req.Msg.Id)
-	if task == nil {
-		return connect.NewError(connect.CodeNotFound, fmt.Errorf("task not found"))
-	}
-	ch, cancel := task.Subscribe()
-	defer cancel()
-	for ev := range ch {
-		if err := stream.Send(&easylabv1.TaskLogResponse{Stream: ev.Event, Line: ev.Data}); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func serviceInfo(s ops.ServiceStatus) *easylabv1.ServiceInfo {
@@ -275,52 +232,4 @@ func (c *connOps) Sync(ctx context.Context, req *connect.Request[easylabv1.SyncR
 	// container is no longer part of the model. Workspace sync for sandboxes
 	// goes through SandboxService.SyncWorkspace (worker SyncFolder).
 	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("Sync: use SandboxService.SyncWorkspace"))
-}
-
-// buildTreeTar packs the snapshot tree at treeID into an uncompressed tar,
-// returning the archive and the file count.
-func buildTreeTar(ws *revision.Workspace, treeID object.ID) ([]byte, int, error) {
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	files := 0
-	var walk func(prefix string, id object.ID) error
-	walk = func(prefix string, id object.ID) error {
-		tree, err := ws.ReadTree(id)
-		if err != nil {
-			return err
-		}
-		for _, e := range tree.SortedEntries() {
-			full := e.Name
-			if prefix != "" {
-				full = prefix + "/" + e.Name
-			}
-			switch e.Kind {
-			case object.KindTree:
-				if err := walk(full, e.ID); err != nil {
-					return err
-				}
-			case object.KindBlob:
-				data, err := ws.ReadBlob(e.ID)
-				if err != nil {
-					return err
-				}
-				hdr := &tar.Header{Name: full, Mode: 0o644, Size: int64(len(data))}
-				if err := tw.WriteHeader(hdr); err != nil {
-					return err
-				}
-				if _, err := tw.Write(data); err != nil {
-					return err
-				}
-				files++
-			}
-		}
-		return nil
-	}
-	if err := walk("", treeID); err != nil {
-		return nil, 0, err
-	}
-	if err := tw.Close(); err != nil {
-		return nil, 0, err
-	}
-	return buf.Bytes(), files, nil
 }

@@ -1,23 +1,18 @@
 package main
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"log"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect"
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"github.com/easylab-platform/easylab-proto/easylab/v1/easylabv1connect"
 	"github.com/easylab-platform/easylab/internal/ci"
+	"github.com/easylab-platform/easylab/internal/workspace"
 	"github.com/easylab-platform/easyvcs/revision"
 	"github.com/easylab-platform/easyvcs/store"
 )
@@ -42,7 +37,10 @@ func NewWorkflowService(s *server) *connWorkflow {
 	reg := ci.NewRunnerRegistry()
 	// The k8s client may be nil off-cluster (tests/dev); the scheduler still
 	// works for registry/runner/zoom when no backend produces jobs.
-	back := ci.NewK8sBackend(s.k8s)
+	back := s.buildBackend
+	if back == nil {
+		back = ci.NewK8sBackend(s.k8s)
+	}
 	// Seed produce build contexts with the repo tree at the branch head.
 	back.SetWorkspaceExporter(func(org, repo, branch, dir string) error {
 		return exportRepoTree(s, org, repo, branch, dir)
@@ -381,6 +379,7 @@ func readRepoFile(s *server, org, repoName, ref, path string) ([]byte, error) {
 	}
 	return ws.ReadBlob(entry.ID)
 }
+
 func errWorkflowNotFound() error {
 	return connect.NewError(connect.CodeNotFound, fmt.Errorf("workflow not found"))
 }
@@ -397,74 +396,18 @@ func newID() string {
 }
 
 // exportRepoTree materializes org/repo@branch into dir (the repo tree as the
-// produce build context), reusing the sandbox-sync tar builder.
+// produce build context).
 func exportRepoTree(s *server, org, repoName, branch, dir string) error {
-	r, err := s.cs.OpenRepo(store.RepoRef{Namespace: org, Name: repoName})
-	if err != nil {
-		return fmt.Errorf("open %s/%s: %w", org, repoName, err)
-	}
-	ws := revision.NewWorkspace(r)
-	treeID, err := treeOfRef(ws, r, branch)
-	if err != nil {
-		return fmt.Errorf("ref %s: %w", branch, err)
-	}
-	tarball, _, err := buildTreeTar(ws, treeID)
+	_, tar, err := s.exportWorkspace(org, repoName, branch)
 	if err != nil {
 		return err
 	}
-	return extractTarTo(dir, tarball)
+	return workspace.Extract(dir, tar)
 }
 
 // exportRepoTar returns the org/repo@branch tree as a tarball (used to seed a
 // CI job sandbox's workspace).
 func exportRepoTar(s *server, org, repoName, branch string) ([]byte, error) {
-	r, err := s.cs.OpenRepo(store.RepoRef{Namespace: org, Name: repoName})
-	if err != nil {
-		return nil, fmt.Errorf("open %s/%s: %w", org, repoName, err)
-	}
-	ws := revision.NewWorkspace(r)
-	treeID, err := treeOfRef(ws, r, branch)
-	if err != nil {
-		return nil, fmt.Errorf("ref %s: %w", branch, err)
-	}
-	tarball, _, err := buildTreeTar(ws, treeID)
-	return tarball, err
-}
-
-// extractTarTo unpacks a tarball into dir (regular files + directories).
-func extractTarTo(dir string, tarball []byte) error {
-	tr := tar.NewReader(bytes.NewReader(tarball))
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		clean := filepath.Clean("/" + hdr.Name)
-		if clean == "/" || strings.Contains(clean, "..") {
-			continue
-		}
-		target := filepath.Join(dir, clean)
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777|0o400)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
-				return err
-			}
-			f.Close()
-		}
-	}
+	_, tar, err := s.exportWorkspace(org, repoName, branch)
+	return tar, err
 }
