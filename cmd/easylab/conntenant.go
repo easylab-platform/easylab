@@ -10,6 +10,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	agentv1 "github.com/abcp-sdk/agent-proto/agent/v1"
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"github.com/easylab-platform/easyvcs/store"
 )
@@ -89,7 +90,52 @@ func (c *connTenant) UpdateTenant(ctx context.Context, req *connect.Request[easy
 	if err != nil {
 		return nil, statusErr(err)
 	}
+	// Propagate the disabled state to the agent tenant so its tokens stop
+	// authenticating alongside ours (best effort: the agent may be absent).
+	if req.Msg.Disabled != nil {
+		agentID := c.s.agentTenantForTenant(id)
+		if agentID != "" && c.s.agentAdmin() != nil {
+			actx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			if _, aerr := c.s.agentAdmin().UpdateTenant(actx, connect.NewRequest(&agentv1.UpdateTenantRequest{
+				Id: agentID, Disabled: req.Msg.Disabled,
+			})); aerr != nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("agent tenant update: %w", aerr))
+			}
+		}
+	}
 	return connect.NewResponse(&easylabv1.UpdateTenantResponse{Tenant: tenantMsg(t)}), nil
+}
+
+// DeleteTenant removes the tenant end to end: the agent tenant first (so no
+// orphan remains if the local delete fails), then every easyvcs row. Only the
+// default-tenant operator may delete, and the default tenant is protected.
+func (c *connTenant) DeleteTenant(ctx context.Context, req *connect.Request[easylabv1.DeleteTenantRequest]) (*connect.Response[easylabv1.DeleteTenantResponse], error) {
+	if tenantFromContext(ctx) != 1 {
+		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("tenant deletion requires a default-tenant operator credential"))
+	}
+	id, err := strconv.ParseInt(req.Msg.Id, 10, 64)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid tenant id"))
+	}
+	agentID := c.s.agentTenantForTenant(id)
+	agentDeleted := false
+	if agentID != "" && c.s.agentAdmin() != nil {
+		actx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		if _, aerr := c.s.agentAdmin().DeleteTenant(actx, connect.NewRequest(&agentv1.DeleteTenantRequest{Id: agentID})); aerr != nil {
+			// Surface, but do not refuse the local delete (the agent may have
+			// no such tenant, e.g. a tenant predating agent tenancy).
+			return connect.NewResponse(&easylabv1.DeleteTenantResponse{
+				Ok: false, AgentDeleted: false, Error: fmt.Sprintf("agent tenant delete: %v", aerr),
+			}), nil
+		}
+		agentDeleted = true
+	}
+	if err := c.s.cs.DeleteTenant(id); err != nil {
+		return nil, statusErr(err)
+	}
+	return connect.NewResponse(&easylabv1.DeleteTenantResponse{Ok: true, AgentDeleted: agentDeleted}), nil
 }
 
 func (c *connTenant) ListTenantMembers(ctx context.Context, req *connect.Request[easylabv1.ListTenantMembersRequest]) (*connect.Response[easylabv1.ListTenantMembersResponse], error) {

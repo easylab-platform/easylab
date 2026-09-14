@@ -10,6 +10,8 @@ import (
 
 	"strings"
 	"time"
+
+	"github.com/easylab-platform/easylab/internal/ext"
 )
 
 // Shared HTTP clients: one for regular JSON calls, one long-lived for
@@ -264,15 +266,22 @@ func (s *server) httpGetRaw(ctx context.Context, url string) ([]byte, error) {
 	return body, nil
 }
 
-// addAuth attaches the appropriate token to a request: easylab routes get the
-// easylab write token (`Authorization: token <…>`); artifact-registry routes
-// get the artifact token (`Authorization: Bearer <…>`). Anonymous registry
-// reads are fine without a token.
+// addAuth attaches the appropriate credential to a request: easylab routes get
+// the write token as a Bearer credential (identical to every other caller —
+// the gateway accepts Bearer/token/bare uniformly); artifact-registry routes
+// get the artifact token. Anonymous registry reads are fine without a token.
+//
+// The tenant of the caller rides X-Agent-Tenant from the request context
+// (attached per tool call / lifecycle event), so easylab scopes the operation
+// to the right tenant. It is honored only from loopback.
 func (s *server) addAuth(req *http.Request) {
+	if t := ext.LabTenantOf(req.Context()); t != "" {
+		req.Header.Set("X-Agent-Tenant", t)
+	}
 	u := req.URL.String()
 	isEasylab := strings.HasPrefix(u, s.base+"/") || u == s.base
 	if isEasylab && s.easylabToken != "" {
-		req.Header.Set("Authorization", "token "+s.easylabToken)
+		req.Header.Set("Authorization", "Bearer "+s.easylabToken)
 		return
 	}
 	if strings.HasPrefix(u, s.artifact+"/") && s.artifactToken != "" {

@@ -58,6 +58,8 @@ github.com/easylab-platform/easylab-proto v0.11.0 h1:ylLRR+GivWS2kujJCkbvZx2Ifp2
 github.com/easylab-platform/easylab-proto v0.11.0/go.mod h1:PcZuLRhnUB6ZQmF1/vC8ip2IVhOArtp86+ZnCJfXHoY=
 github.com/easylab-platform/easylab-proto v0.12.0 h1:3Yax1rmZkHbvKGhnEF438LlWOqAbUDnr0SGtRTaJ1lY=
 github.com/easylab-platform/easylab-proto v0.12.0/go.mod h1:PcZuLRhnUB6ZQmF1/vC8ip2IVhOArtp86+ZnCJfXHoY=
+github.com/easylab-platform/easylab-proto v0.13.0 h1:TWj28r4BkUraqcjrOsueSBBQyOsjkm7bW9uRXpl6scU=
+github.com/easylab-platform/easylab-proto v0.13.0/go.mod h1:PcZuLRhnUB6ZQmF1/vC8ip2IVhOArtp86+ZnCJfXHoY=
 github.com/easylab-platform/easyvcs v0.5.1 h1:DVt9ie3mIrUIJuq2edoM3qQ5TAIcdv0FxVrfe5C0lP4=
 github.com/easylab-platform/easyvcs v0.5.1/go.mod h1:jFri6d5KqRGaXz6h0TSHoj3TvamFxkrO+bodzwRhGVo=
 github.com/easylab-platform/easyvcs v0.6.0 h1:RH+/YMPNLMEiZQj7cxQ7YdbEDVG/9ELMqV9Wh6UG0sw=
@@ -70,6 +72,8 @@ github.com/easylab-platform/easyvcs v0.8.0 h1:OoKTpahT1Gtbpr9YxBe+VYeMqzNXV+1W5D
 github.com/easylab-platform/easyvcs v0.8.0/go.mod h1:jFri6d5KqRGaXz6h0TSHoj3TvamFxkrO+bodzwRhGVo=
 github.com/easylab-platform/easyvcs v0.8.1 h1:q2jpdGQlv/WDd4crgvZI2BqKV5oqpEHDjmbT2m/VjEE=
 github.com/easylab-platform/easyvcs v0.8.1/go.mod h1:jFri6d5KqRGaXz6h0TSHoj3TvamFxkrO+bodzwRhGVo=
+github.com/easylab-platform/easyvcs v0.8.2 h1:wbUPSBMXhXyVFAK4ZTLVXTy+SqQLXvh00ScH8su0ZCc=
+github.com/easylab-platform/easyvcs v0.8.2/go.mod h1:jFri6d5KqRGaXz6h0TSHoj3TvamFxkrO+bodzwRhGVo=
 github.com/emicklei/go-restful/v3 v3.12.2 h1:DhwDP0vY3k8ZzE0RunuJy8GhNpPL6zqLkDf9B/a0/xU=
 github.com/emicklei/go-restful/v3 v3.12.2/go.mod h1:6n3XBCmQQb25CM2LCACGz8ukIrRry+4bhvbpWn3mrbc=
 github.com/fxamacker/cbor/v2 v2.9.0 h1:NpKPmjDBgUfBms6tr6JZkTHtfFGcMKsw3eGcmD/sapM=

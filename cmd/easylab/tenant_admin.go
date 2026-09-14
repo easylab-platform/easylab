@@ -110,7 +110,7 @@ func (s *server) provisionTenant(slug, displayName, adminUser, adminDisplay stri
 			return nil, fmt.Errorf("agent tenant create: %w", err)
 		}
 		agentToken = res.Msg.GetToken()
-		if err := s.cs.SetAgentToken(tenant.ID, agentToken); err != nil {
+		if err := s.cs.SetAgentBinding(tenant.ID, slug, agentToken); err != nil {
 			return nil, err
 		}
 	}
@@ -151,22 +151,76 @@ func (s *server) agentAdmin() agentv1connect.AdminServiceClient {
 
 func (s *server) mountTenants(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/tenants", s.requireAuth(s.handleTenantCreate))
+	mux.HandleFunc("DELETE /api/v1/tenants/{slug}", s.requireAuth(s.handleTenantDelete))
+}
+
+// handleTenantDelete removes a tenant by slug (default-tenant operator only),
+// cascading to the agent tenant. Errors from the local delete are fatal; an
+// agent-side failure is surfaced but the local delete still proceeds only when
+// the agent tenant did not exist — otherwise the caller retries.
+func (s *server) handleTenantDelete(w http.ResponseWriter, r *http.Request) {
+	if s.tenantOfHeader(r.Header) != 1 {
+		writeErr(w, http.StatusForbidden, fmt.Errorf("tenant administration requires a default-tenant operator credential"))
+		return
+	}
+	slug := r.PathValue("slug")
+	t, err := s.cs.GetTenantBySlug(slug)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("tenant %q not found", slug))
+		return
+	}
+	agentID := s.agentTenantForTenant(t.ID)
+	agentDeleted := false
+	if agentID != "" && s.agentAdmin() != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		if _, aerr := s.agentAdmin().DeleteTenant(ctx, connect.NewRequest(&agentv1.DeleteTenantRequest{Id: agentID})); aerr != nil {
+			writeErr(w, http.StatusBadGateway, fmt.Errorf("agent tenant delete: %w", aerr))
+			return
+		}
+		agentDeleted = true
+	}
+	if err := s.cs.DeleteTenant(t.ID); err != nil {
+		writeErr(w, statusFor(err), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_deleted": agentDeleted})
 }
 
 // ---- shared plumbing ----
 
 // agentTokenForTenant resolves the credential the gateway must present to
-// the agent for a tenant's forwarded RPCs: the tenant's bootstrap token, or
-// the deployment-wide EASYLAB_AGENT_TOKEN for the default tenant.
+// the agent for a tenant's forwarded RPCs. The binding is a DB record
+// (tenants.agent_token); the deployment-wide EASYLAB_AGENT_TOKEN is a fallback
+// for the default tenant only when the DB row is empty (an agent predating the
+// binding, or a fresh database before bootstrapAgentTenant runs).
 func (s *server) agentTokenForTenant(tid int64) string {
-	if tid == 0 || tid == 1 {
-		return s.agentFwdToken
+	if tid == 0 {
+		tid = 1
 	}
-	if tok, err := s.cs.AgentToken(tid); err == nil && tok != "" {
+	if _, tok, err := s.cs.AgentBinding(tid); err == nil && tok != "" {
 		return tok
+	}
+	if tid == 1 {
+		return s.agentFwdToken
 	}
 	// A tenant without an agent credential cannot borrow another's: fail
 	// closed with an empty token (the agent rejects unauthenticated calls).
+	return ""
+}
+
+// agentTenantForTenant resolves the tenant's bound agent tenant id ("" when
+// unbound; the default tenant falls back to EASYLAB_AGENT_TENANT / "default").
+func (s *server) agentTenantForTenant(tid int64) string {
+	if tid == 0 {
+		tid = 1
+	}
+	if at, _, err := s.cs.AgentBinding(tid); err == nil && at != "" {
+		return at
+	}
+	if tid == 1 {
+		return envOrStr("EASYLAB_AGENT_TENANT", "default")
+	}
 	return ""
 }
 

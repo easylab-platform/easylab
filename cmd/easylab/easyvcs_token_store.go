@@ -27,7 +27,11 @@ func (s *easyvcsTokenStore) LookupToken(ctx context.Context, token string) (arti
 	if err != nil {
 		return artifactkit.Principal{}, false
 	}
-	return artifactkit.Principal{Username: tokenUsername(s.cs, t.UserID), Level: tokenLevel(t.Level)}, true
+	return artifactkit.Principal{
+		Username: tokenUsername(s.cs, t.UserID),
+		Level:    tokenLevel(t.Level),
+		TenantID: tenantOfUser(s.cs, t.UserID),
+	}, true
 }
 
 // LookupUsername resolves a principal by username, reporting the strongest
@@ -41,7 +45,7 @@ func (s *easyvcsTokenStore) LookupUsername(ctx context.Context, username string)
 	if err != nil || len(toks) == 0 {
 		// A user with no credential row cannot obtain write: default to the
 		// read (pull-only) level so a mint stays fail-closed.
-		return artifactkit.Principal{Username: username, Level: artifactkit.LevelRead}, true
+		return artifactkit.Principal{Username: username, Level: artifactkit.LevelRead, TenantID: u.TenantID}, true
 	}
 	level := artifactkit.LevelRead
 	for _, t := range toks {
@@ -50,7 +54,7 @@ func (s *easyvcsTokenStore) LookupUsername(ctx context.Context, username string)
 			break
 		}
 	}
-	return artifactkit.Principal{Username: username, Level: level}, true
+	return artifactkit.Principal{Username: username, Level: level, TenantID: u.TenantID}, true
 }
 
 // OpenInstance reports whether the deployment has no users at all.
@@ -92,4 +96,13 @@ func tokenUsername(cs *store.CentralStore, userID int64) string {
 		return u.Username
 	}
 	return ""
+}
+
+// tenantOfUser resolves a user's tenant (0 → default tenant 1).
+func tenantOfUser(cs *store.CentralStore, userID int64) int64 {
+	u, err := cs.GetUser(userID)
+	if err != nil || u.TenantID == 0 {
+		return 1
+	}
+	return u.TenantID
 }

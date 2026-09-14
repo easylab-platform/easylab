@@ -26,7 +26,7 @@ func embedExtensions(ctx context.Context, registryHost string) {
 	base := "http://127.0.0.1:8080"
 	token := os.Getenv("EASYLAB_TOKEN")
 	if token == "" {
-		token = "devtoken"
+		token = envOrStr("EASYVCS_TOKEN", "devtoken")
 	}
 	agent := os.Getenv("EASYLAB_AGENT_URL")
 	if agent == "" {

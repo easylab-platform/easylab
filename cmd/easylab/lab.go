@@ -141,9 +141,7 @@ func (s *server) labRouter() *http.ServeMux {
 // the server behaves as an open Lab (anonymous is treated as admin) so a fresh
 // fixture works without a bootstrap token.
 func (s *server) labPrincipal(r *http.Request) (*store.User, string) {
-	header := r.Header.Get("Authorization")
-	if strings.HasPrefix(header, "Bearer ") {
-		token := strings.TrimPrefix(header, "Bearer ")
+	if token, ok := requestCredential(r); ok {
 		if tok, err := s.cs.LookupToken(token); err == nil {
 			u, _ := s.cs.GetUser(tok.UserID)
 			return u, tok.Level

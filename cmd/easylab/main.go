@@ -147,6 +147,12 @@ func main() {
 	s.agentAdminToken = os.Getenv("EASYLAB_AGENT_ADMIN_TOKEN")
 	s.agentFwdToken = os.Getenv("EASYLAB_AGENT_TOKEN")
 
+	// Ensure the deployment's operator credential exists in the store so the
+	// chart's fixed tokens are registered (not the retired flat-token realm),
+	// and bind the default tenant's agent tenancy into the DB.
+	s.bootstrapOperator()
+	s.bootstrapAgentTenant()
+
 	// Publish the worker binary to the shared /data mount so build/job pods
 	// can inject it from a hostPath without a per-job derived image.
 	if s.k8s != nil {
@@ -232,12 +238,11 @@ func (s *server) authOK(r *http.Request) bool {
 	if s.cs.IsOpenInstance() {
 		return true
 	}
-	header := r.Header.Get("Authorization")
-	token := strings.TrimPrefix(header, "Bearer ")
-	if token == "" || token == header {
+	token, ok := requestCredential(r)
+	if !ok {
 		return false
 	}
-	_, ok := s.auth.CheckToken(r.Context(), token)
+	_, ok = s.auth.CheckToken(r.Context(), token)
 	return ok
 }
 

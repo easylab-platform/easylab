@@ -20,7 +20,7 @@ registry:
 gateway:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
-    tag: "20260913193930"
+    tag: "20260914051159"
     pullPolicy: IfNotPresent
   # External base URL advertised to clients (OCI /token realm, git, ...).
   # Empty derives it from the install namespace: the in-cluster Service URL
@@ -28,6 +28,9 @@ gateway:
   # when clients outside the cluster must reach the gateway.
   selfBase: ""
   token: devtoken
+  # User name of the bootstrapped default-tenant operator (owns the fixed
+  # token above).
+  bootstrapUser: operator
   # Artifact (OCI + /pkgs) base URL used by builds. Empty derives
   # http://easylab.<ns>.svc.cluster.local:80.
   artifactURL: ""
@@ -114,6 +117,9 @@ agent:
   # AdminService (tenant provisioning).
   forwardToken: "06801d6eab61494a916b826551dad7ddfd88b43fb1c57a25"
   adminToken: "679d52ee3e238d9984667278afbecc5437705b401fe74b2e"
+  # The default tenant's abcp-agent tenant id; the gateway records it (with
+  # forwardToken) as the DB binding on startup.
+  bootstrapTenant: "default"
   authEnv:
     - name: AGENT_AUTH_MODE
       value: "required"

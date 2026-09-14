@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"strings"
 
 	"github.com/easylab-platform/easyvcs/store"
 )
@@ -23,9 +22,8 @@ func (s *server) tenantOfHeader(h http.Header) int64 {
 	if s.cs == nil {
 		return 1
 	}
-	raw := h.Get("Authorization")
-	token := strings.TrimPrefix(raw, "Bearer ")
-	if token == "" || token == raw {
+	token, ok := credential(h)
+	if !ok {
 		return 1
 	}
 	return s.tenantOfToken(token)
