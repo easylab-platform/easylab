@@ -41,7 +41,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 	// fileBody builds the atomic-commit action body for a create/update.
 	// (unused inline helper retained for clarity in write/edit paths below.)
 
-	return map[string]extension.ToolSpec{
+	m := map[string]extension.ToolSpec{
 		"read": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, tenant string) (extension.ToolResultData, error) {
 				ctx = ext.WithLabTenant(ctx, tenant)
@@ -582,6 +582,8 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			},
 		},
 	}
+	s.registerVCSTools(m)
+	return m
 }
 
 // sessionBase resolves the (org, repo, branch) triple for a tool call from

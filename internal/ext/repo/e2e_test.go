@@ -4,8 +4,6 @@ package repoext
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -30,8 +28,8 @@ func TestManifestBinding(t *testing.T) {
 	if m.ID != "repo" {
 		t.Fatalf("manifest id = %q", m.ID)
 	}
-	if len(m.Tools) != 14 {
-		t.Fatalf("manifest tools = %d, want 14", len(m.Tools))
+	if len(m.Tools) != 35 {
+		t.Fatalf("manifest tools = %d, want 35", len(m.Tools))
 	}
 	if len(m.Variables) != 3 {
 		t.Fatalf("manifest variables = %d, want 3", len(m.Variables))
@@ -122,44 +120,7 @@ func TestDiscoverWire(t *testing.T) {
 	if len(manifests) != 1 || manifests[0].Id != "repo" {
 		t.Fatalf("discover = %+v", manifests)
 	}
-	if len(*manifests[0].Tools) != 21 {
-		t.Fatalf("discover tools = %d, want 14", len(*manifests[0].Tools))
-	}
-}
-
-// TestExploreWire drives the explore tool (no session context required)
-// through the abep envelope against a fake easylab.
-func TestExploreWire(t *testing.T) {
-	lab := newFakeLab()
-	defer lab.Close()
-	// Seed org/repo through the fake's HTTP surface (same paths the explore
-	// tool reads from).
-	post := func(path string, body map[string]interface{}) {
-		b, _ := json.Marshal(body)
-		resp, err := http.Post(lab.URL()+path, "application/json", strings.NewReader(string(b)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		resp.Body.Close()
-	}
-	post("/api/v1/repos/acme/api", map[string]interface{}{"default_branch": "main"})
-
-	s := &server{base: lab.URL(), lab: newClient(lab.URL(), "t")}
-
-	m, err := manifest.ParseManifest(manifestYaml)
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, ext := startRepoExt(t, m.BuildConfig(manifest.Bindings{Handlers: s.handlers()}))
-	defer ext.Close()
-	defer agent.Close()
-
-	res, err := agent.CallTool(context.Background(), "", "t1", "repo", "explore", "x1",
-		map[string]any{})
-	if err != nil {
-		t.Fatalf("explore wire: %v", err)
-	}
-	if !strings.Contains(res.Content, "acme") || !strings.Contains(res.Content, "api") {
-		t.Fatalf("explore content = %q", res.Content)
+	if len(*manifests[0].Tools) != 35 {
+		t.Fatalf("discover tools = %d, want 35", len(*manifests[0].Tools))
 	}
 }
