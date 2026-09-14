@@ -3,22 +3,17 @@ package main
 import (
 	"log"
 	"os"
-
-	"github.com/easylab-platform/easyvcs/store"
 )
 
 // bootstrapOperator ensures the deployment's operator credential exists in the
 // store, so the chart's fixed tokens (EASYVCS_TOKEN / EASYLAB_TOKEN /
 // ARTIFACT_TOKEN, all defaulting to the same value) are valid registered
-// tokens rather than the retired flat-token realm.
+// tokens. The operator is a normal user (user IS the ownership boundary).
 //
-// Idempotent: the user and the token are created only when absent. The
-// operator belongs to the DEFAULT tenant (id 1), which owns all pre-tenancy
-// data and is the only tenant allowed to provision other tenants.
+// Idempotent: the user and the token are created only when absent.
 //
 // Env: EASYLAB_BOOTSTRAP_TOKEN (the credential value), EASYLAB_BOOTSTRAP_USER
-// (default "operator"). An empty token disables bootstrapping (the deployment
-// must seed credentials itself).
+// (default "operator"). An empty token disables bootstrapping.
 func (s *server) bootstrapOperator() {
 	token := os.Getenv("EASYLAB_BOOTSTRAP_TOKEN")
 	if token == "" {
@@ -28,10 +23,8 @@ func (s *server) bootstrapOperator() {
 
 	u, err := s.cs.GetUserByUsername(username)
 	if err != nil {
-		// Create in the default tenant (id 1).
-		u, err = s.cs.CreateUserTenant(1, username, "EasyLab Operator")
+		u, err = s.cs.CreateUser(username, "EasyLab Operator")
 		if err != nil {
-			// A concurrent replica may have won the race; re-read.
 			if u2, gerr := s.cs.GetUserByUsername(username); gerr == nil {
 				u = u2
 			} else {
@@ -40,18 +33,14 @@ func (s *server) bootstrapOperator() {
 			}
 		}
 	}
-	// Register the credential if it is not already known. LookupToken hashes
-	// the value, so this is a cheap idempotency probe.
+	// Register the credential if it is not already known.
 	if _, err := s.cs.LookupToken(token); err == nil {
 		return
 	}
 	if _, err := s.cs.CreateToken(token, u.ID, "write"); err != nil {
-		// Duplicate (another replica won) is not an error.
 		if _, lerr := s.cs.LookupToken(token); lerr == nil {
 			return
 		}
 		log.Printf("bootstrap operator token: %v", err)
 	}
 }
-
-var _ = store.ErrUsernameTaken // keep store import stable across edits

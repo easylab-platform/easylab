@@ -28,8 +28,11 @@ gateway:
   # when clients outside the cluster must reach the gateway.
   selfBase: ""
   token: devtoken
-  # User name of the bootstrapped default-tenant operator (owns the fixed
-  # token above).
+  # Static admin credential for user administration (UserService create/update/
+  # delete + token minting). Sent as the bearer credential; distinct from the
+  # user tokens above.
+  adminToken: admin-devtoken
+  # User name of the bootstrapped operator (owns the fixed token above).
   bootstrapUser: operator
   # Artifact (OCI + /pkgs) base URL used by builds. Empty derives
   # http://easylab.<ns>.svc.cluster.local:80.

@@ -8,6 +8,7 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"connectrpc.com/connect"
 	"context"
 	"encoding/json"
 	"flag"
@@ -71,8 +72,9 @@ type server struct {
 	// (unified minted-token semantics via StoreAuth; see easyvcs_token_store.go).
 	auth artifactkit.Auth
 
-	// agent tenancy wiring: the operator surface (AdminService, static token)
-	// and the fallback credential for the default tenant's forwarded RPCs.
+	// agent wiring: the AdminService client (static admin token, user
+	// provisioning) and the fallback credential for forwarded agent RPCs when
+	// a user has no bound agent token (single-user / bootstrap deployments).
 	agentAdminOnce   sync.Once
 	agentAdminClient agentv1connect.AdminServiceClient
 	agentAdminURL    string
@@ -148,10 +150,10 @@ func main() {
 	s.agentFwdToken = os.Getenv("EASYLAB_AGENT_TOKEN")
 
 	// Ensure the deployment's operator credential exists in the store so the
-	// chart's fixed tokens are registered (not the retired flat-token realm),
-	// and bind the default tenant's agent tenancy into the DB.
+	// chart's fixed tokens are registered, and bind the operator's agent
+	// tenancy into the DB.
 	s.bootstrapOperator()
-	s.bootstrapAgentTenant()
+	s.bootstrapAgentBinding()
 
 	// Publish the worker binary to the shared /data mount so build/job pods
 	// can inject it from a hostPath without a per-job derived image.
@@ -279,9 +281,6 @@ func (s *server) router() *http.ServeMux {
 	// subtree and populates its own PathValue fields from its patterns.
 	mux.Handle("/api/v1/", s.labRouter())
 
-	// Tenant provisioning (default-tenant operators).
-	s.mountTenants(mux)
-
 	// Ops: dev/deploy platform (runs, tasks, builds).
 	s.mountOps(mux)
 
@@ -290,29 +289,31 @@ func (s *server) router() *http.ServeMux {
 
 	// Typed Connect contract surface. These are the strong-typed RPC endpoints
 	// consumed by the Flutter client and the ext servers. They mount under
-	// /easylab.v1 and /agent.v1 (Connect/ gRPC-compatible).
-	labPath, labHandler := easylabv1connect.NewLabServiceHandler(&connLab{s})
-	opsPath, opsHandler := easylabv1connect.NewOpsServiceHandler(&connOps{s})
-	sbxPath, sbxHandler := easylabv1connect.NewSandboxServiceHandler(&connSandbox{s: s})
-	wfPath, wfHandler := easylabv1connect.NewWorkflowServiceHandler(NewWorkflowService(s))
-	regPath, regHandler := easylabv1connect.NewRegistryServiceHandler(&connRegistry{s})
-	tenantPath, tenantHandler := easylabv1connect.NewTenantServiceHandler(&connTenant{s: s})
-	mux.Handle(s.tenantCtx(labPath, labHandler))
-	mux.Handle(s.tenantCtx(opsPath, opsHandler))
-	mux.Handle(s.tenantCtx(sbxPath, sbxHandler))
-	mux.Handle(s.tenantCtx(wfPath, wfHandler))
-	mux.Handle(s.tenantCtx(regPath, regHandler))
-	mux.Handle(s.tenantCtx(tenantPath, tenantHandler))
+	// /easylab.v1 and /agent.v1 (Connect/ gRPC-compatible). Every handler is
+	// wrapped by the authentication interceptor; per-repo authorization is
+	// enforced inside each handler via requireRepoAction.
+	authOpt := connect.WithInterceptors(s.authInterceptor())
+	labPath, labHandler := easylabv1connect.NewLabServiceHandler(&connLab{s}, authOpt)
+	opsPath, opsHandler := easylabv1connect.NewOpsServiceHandler(&connOps{s}, authOpt)
+	sbxPath, sbxHandler := easylabv1connect.NewSandboxServiceHandler(&connSandbox{s: s}, authOpt)
+	wfPath, wfHandler := easylabv1connect.NewWorkflowServiceHandler(NewWorkflowService(s), authOpt)
+	regPath, regHandler := easylabv1connect.NewRegistryServiceHandler(&connRegistry{s}, authOpt)
+	userPath, userHandler := easylabv1connect.NewUserServiceHandler(&connUser{s: s}, authOpt)
+	mux.Handle(labPath, labHandler)
+	mux.Handle(opsPath, opsHandler)
+	mux.Handle(sbxPath, sbxHandler)
+	mux.Handle(wfPath, wfHandler)
+	mux.Handle(regPath, regHandler)
+	mux.Handle(userPath, userHandler)
 
 	// agent.v1 gateway: forwards to the real agent backend. Web/flutter talk
 	// to easylab (single entry); ext servers connect to the agent directly.
-	// The mounting middleware attaches the caller's tenant to the request
-	// context so the outbound interceptor picks the right per-tenant agent
-	// credential without touching every forwarding method.
+	// The auth interceptor establishes the caller's identity (used to pick the
+	// per-user agent credential) and enforces the repo-owner session rule.
 	if agentURL := os.Getenv("EASYLAB_AGENT_URL"); agentURL != "" {
 		ca := newConnAgent(s, agentURL)
-		path, handler := agentv1connect.NewAgentServiceHandler(ca)
-		mux.Handle(path, s.agentTenantMiddleware(handler))
+		path, handler := agentv1connect.NewAgentServiceHandler(ca, authOpt)
+		mux.Handle(path, handler)
 	}
 
 	return mux
@@ -482,7 +483,7 @@ func repoRef(w http.ResponseWriter, r *http.Request) (*store.Repo, bool) {
 func (s *server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 	ns := r.PathValue("ns")
 	name := r.PathValue("name")
-	_, err := s.cs.Create(s.repoRefR(r, ns, name))
+	_, err := s.cs.Create(store.RepoRef{Namespace: ns, Name: name})
 	if err != nil {
 		writeErr(w, http.StatusConflict, err)
 		return
@@ -491,7 +492,12 @@ func (s *server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleListRepos(w http.ResponseWriter, r *http.Request) {
-	repos, err := s.cs.ListForTenant(s.tenantOfRequest(r))
+	u, _ := s.labPrincipal(r)
+	var uid int64
+	if u != nil {
+		uid = u.ID
+	}
+	repos, err := s.cs.ListAccessible(uid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -502,7 +508,7 @@ func (s *server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 	ns := r.PathValue("ns")
 	name := r.PathValue("name")
-	if err := s.cs.Delete(s.repoRefR(r, ns, name)); err != nil {
+	if err := s.cs.Delete(store.RepoRef{Namespace: ns, Name: name}); err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
@@ -510,7 +516,7 @@ func (s *server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) repo(w http.ResponseWriter, r *http.Request) (*store.Repo, bool) {
-	repo, err := s.cs.OpenRepo(s.repoRefR(r, r.PathValue("ns"), r.PathValue("name")))
+	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: r.PathValue("ns"), Name: r.PathValue("name")})
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return nil, false

@@ -29,8 +29,10 @@ func TestOpsBuildEndToEnd(t *testing.T) {
 // TestOpsBuildMissingImage ensures a build without an image is rejected.
 func TestOpsBuildMissingImage(t *testing.T) {
 	s := newTestServer(t)
+	seedTestToken(t, s, "t")
 	body := strings.NewReader(`{"context":"/tmp","containerfile":"FROM scratch"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ops/builds", body)
+	req.Header.Set("Authorization", "Bearer t")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.router().ServeHTTP(rec, req)

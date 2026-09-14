@@ -66,10 +66,7 @@ func TestLabFullFlow(t *testing.T) {
 	// 2. Create tokens for alice.
 	c.ok("POST", "/api/v1/users/alice/tokens", map[string]any{"token": "alice-token", "level": "write"})
 
-	// 3. Namespace membership: alice is owner of team.
-	c.ok("POST", "/api/v1/namespaces/team/members", map[string]any{"username": "alice", "role": "owner"})
-
-	// 4. Create a repository in namespace team.
+	// 3. Create a repository in namespace team (owner = the authenticated user).
 	rep := c.ok("POST", "/api/v1/repo", map[string]any{
 		"namespace": "team", "name": "app", "description": "App repo",
 	})
@@ -261,22 +258,22 @@ func newLabServer(t *testing.T) *server {
 // instance has registered any users.
 func TestLabVisibilityEnforced(t *testing.T) {
 	s := newLabServer(t)
-	// Create alice with a real token; the "admin" legit token is no longer used.
-	anon := &labClient{t: t, s: s}
-	anon.ok("POST", "/api/v1/users", map[string]any{"username": "alice"})
-	anon.ok("POST", "/api/v1/users/alice/tokens", map[string]any{"token": "alice-token", "level": "write"})
-	admin := &labClient{t: t, s: s, token: "alice-token"}
-	admin.ok("POST", "/api/v1/namespaces/team/members", map[string]any{"username": "alice", "role": "owner"})
-	// Private repo.
-	admin.ok("POST", "/api/v1/repo", map[string]any{
+	// An admin credential bootstraps alice (who owns the repos she creates).
+	seedTestToken(t, s, "admin-token")
+	admin := &labClient{t: t, s: s, token: "admin-token"}
+	admin.ok("POST", "/api/v1/users", map[string]any{"username": "alice"})
+	admin.ok("POST", "/api/v1/users/alice/tokens", map[string]any{"token": "alice-token", "level": "write"})
+	alice := &labClient{t: t, s: s, token: "alice-token"}
+	// Private repo owned by alice.
+	alice.ok("POST", "/api/v1/repo", map[string]any{
 		"namespace": "team", "name": "secret", "visibility": "private",
 	})
-	// Public repo under a separate namespace (no members).
-	admin.ok("POST", "/api/v1/repo", map[string]any{
+	// Public repo owned by alice.
+	alice.ok("POST", "/api/v1/repo", map[string]any{
 		"namespace": "public", "name": "open", "visibility": "public",
 	})
 
-	// Create a token for bob (non-member of "team") so the instance is no longer
+	// Create a token for bob (non-owner of "team") so the instance is not
 	// "open": private repos must now be gated.
 	admin.ok("POST", "/api/v1/users", map[string]any{"username": "bob"})
 	admin.ok("POST", "/api/v1/users/bob/tokens", map[string]any{"token": "bob-token", "level": "read"})
@@ -303,11 +300,11 @@ func TestLabVisibilityEnforced(t *testing.T) {
 		t.Fatalf("bob should not read private repo revisions: %d", privRev.Code)
 	}
 
-	// alice (member) can read it.
-	admin.ok("GET", "/api/v1/repo/team/secret", nil)
+	// alice (owner) can read it.
+	alice.ok("GET", "/api/v1/repo/team/secret", nil)
 
 	// Make the private repo public -> now bob can see it.
-	admin.ok("PATCH", "/api/v1/repo/team/secret", map[string]any{"visibility": "public"})
+	alice.ok("PATCH", "/api/v1/repo/team/secret", map[string]any{"visibility": "public"})
 	publicList := bob.do("GET", "/api/v1/repo/team/secret/revisions", nil)
 	if publicList.Code != http.StatusOK {
 		t.Fatalf("bob should read public repo revisions after flip: %d", publicList.Code)

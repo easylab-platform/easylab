@@ -8,8 +8,9 @@ import (
 // credential extracts the bearer credential from an inbound request,
 // accepting every scheme the stack emits. The embedded ops extension sends
 // `Authorization: token <t>`; the SDK/gateway send `Bearer <t>`; some
-// protocol clients send the raw token. One helper keeps the gateway's three
-// auth entry points (authOK, labPrincipal, tenantOfHeader) consistent.
+// protocol clients send the raw token. One helper keeps every auth entry
+// point (REST labPrincipal, the Connect auth interceptor, the registry)
+// consistent.
 //
 // It returns the credential value and true when a recognizable scheme carried
 // a non-empty value; ("", false) otherwise.

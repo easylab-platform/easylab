@@ -17,6 +17,7 @@ import (
 // easylab (single entry) and never talk to the agent directly; ext servers
 // connect to the agent directly.
 type connAgent struct {
+	s      *server
 	client agentv1connect.AgentServiceClient
 }
 
@@ -35,42 +36,42 @@ func h2cClient() *http.Client {
 
 func newConnAgent(s *server, baseURL string) *connAgent {
 	return &connAgent{
+		s: s,
 		client: agentv1connect.NewAgentServiceClient(
 			h2cClient(),
 			baseURL,
-			connect.WithInterceptors(&tenantAgentBearer{s: s}),
+			connect.WithInterceptors(&agentUserBearer{s: s}),
 		),
 	}
 }
 
-// tenantAgentBearer picks the agent credential per REQUEST: the caller's
-// tenant was attached to the request context by the agent.v1 mounting
-// middleware (agentTenantMiddleware), and each tenant forwards with its own
-// bootstrap token. The default tenant uses the deployment-wide
-// EASYLAB_AGENT_TOKEN (phase-2 compatibility); a tenant without a stored
-// credential sends none and the agent rejects the call — fail closed.
-type tenantAgentBearer struct{ s *server }
+// agentUserBearer picks the agent credential per REQUEST: the authenticated
+// caller's user id is on the context (from the auth interceptor), and the user
+// may have their own bound agent tenant + credential (users.agent_tenant /
+// agent_token). When a user has no binding, the deployment-wide
+// EASYLAB_AGENT_TOKEN is used (the single-user / bootstrap deployment).
+type agentUserBearer struct{ s *server }
 
-func (b *tenantAgentBearer) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+func (b *agentUserBearer) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-		if tok := b.s.agentTokenForTenant(agentTenantOf(ctx)); tok != "" {
+		if tok := b.s.agentTokenForUser(principalOf(ctx).UserID); tok != "" {
 			req.Header().Set("Authorization", "Bearer "+tok)
 		}
 		return next(ctx, req)
 	}
 }
 
-func (b *tenantAgentBearer) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+func (b *agentUserBearer) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
 	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
 		conn := next(ctx, spec)
-		if tok := b.s.agentTokenForTenant(agentTenantOf(ctx)); tok != "" {
+		if tok := b.s.agentTokenForUser(principalOf(ctx).UserID); tok != "" {
 			conn.RequestHeader().Set("Authorization", "Bearer "+tok)
 		}
 		return conn
 	}
 }
 
-func (b *tenantAgentBearer) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+func (b *agentUserBearer) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return next
 }
 
@@ -92,21 +93,46 @@ func (c *connAgent) Health(ctx context.Context, req *connect.Request[agentv1.Hea
 	return c.client.Health(ctx, fwdReq(req))
 }
 func (c *connAgent) ListSessions(ctx context.Context, req *connect.Request[agentv1.ListSessionsRequest]) (*connect.Response[agentv1.ListSessionsResponse], error) {
+	if err := requireAuthenticated(ctx, "listing sessions"); err != nil {
+		return nil, err
+	}
 	return c.client.ListSessions(ctx, fwdReq(req))
 }
 func (c *connAgent) CreateSession(ctx context.Context, req *connect.Request[agentv1.CreateSessionRequest]) (*connect.Response[agentv1.CreateSessionResponse], error) {
+	if err := requireAuthenticated(ctx, "creating a session"); err != nil {
+		return nil, err
+	}
+	// A repository-bound session (org+repo) may only be created by the repo
+	// owner (the agent session drives that repo/branch).
+	if req.Msg.Org != "" || req.Msg.Repo != "" {
+		if err := c.s.requireRepoAction(ctx, req.Msg.Org, req.Msg.Repo, repoCanPush, "creating a repository session"); err != nil {
+			return nil, err
+		}
+	}
 	return c.client.CreateSession(ctx, fwdReq(req))
 }
 func (c *connAgent) GetSession(ctx context.Context, req *connect.Request[agentv1.GetSessionRequest]) (*connect.Response[agentv1.GetSessionResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.GetSession(ctx, fwdReq(req))
 }
 func (c *connAgent) DeleteSession(ctx context.Context, req *connect.Request[agentv1.DeleteSessionRequest]) (*connect.Response[agentv1.DeleteSessionResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.DeleteSession(ctx, fwdReq(req))
 }
 func (c *connAgent) ListMessages(ctx context.Context, req *connect.Request[agentv1.ListMessagesRequest]) (*connect.Response[agentv1.ListMessagesResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.ListMessages(ctx, fwdReq(req))
 }
 func (c *connAgent) Prompt(ctx context.Context, req *connect.Request[agentv1.PromptRequest], srv *connect.ServerStream[agentv1.PromptResponse]) error {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return err
+	}
 	stream, err := c.client.Prompt(ctx, fwdReq(req))
 	if err != nil {
 		return err
@@ -119,6 +145,9 @@ func (c *connAgent) Prompt(ctx context.Context, req *connect.Request[agentv1.Pro
 	return stream.Err()
 }
 func (c *connAgent) WatchSession(ctx context.Context, req *connect.Request[agentv1.WatchSessionRequest], srv *connect.ServerStream[agentv1.WatchSessionResponse]) error {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return err
+	}
 	stream, err := c.client.WatchSession(ctx, fwdReq(req))
 	if err != nil {
 		return err
@@ -132,6 +161,9 @@ func (c *connAgent) WatchSession(ctx context.Context, req *connect.Request[agent
 }
 
 func (c *connAgent) WatchSessions(ctx context.Context, req *connect.Request[agentv1.WatchSessionsRequest], srv *connect.ServerStream[agentv1.WatchSessionsResponse]) error {
+	if err := requireAuthenticated(ctx, "watching sessions"); err != nil {
+		return err
+	}
 	stream, err := c.client.WatchSessions(ctx, fwdReq(req))
 	if err != nil {
 		return err
@@ -145,30 +177,57 @@ func (c *connAgent) WatchSessions(ctx context.Context, req *connect.Request[agen
 }
 
 func (c *connAgent) Fork(ctx context.Context, req *connect.Request[agentv1.ForkRequest]) (*connect.Response[agentv1.ForkResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.Fork(ctx, fwdReq(req))
 }
 func (c *connAgent) Rename(ctx context.Context, req *connect.Request[agentv1.RenameRequest]) (*connect.Response[agentv1.RenameResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.Rename(ctx, fwdReq(req))
 }
 func (c *connAgent) SetModel(ctx context.Context, req *connect.Request[agentv1.SetModelRequest]) (*connect.Response[agentv1.SetModelResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.SetModel(ctx, fwdReq(req))
 }
 func (c *connAgent) Undo(ctx context.Context, req *connect.Request[agentv1.UndoRequest]) (*connect.Response[agentv1.UndoResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.Undo(ctx, fwdReq(req))
 }
 func (c *connAgent) State(ctx context.Context, req *connect.Request[agentv1.StateRequest]) (*connect.Response[agentv1.StateResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.State(ctx, fwdReq(req))
 }
 func (c *connAgent) Mailbox(ctx context.Context, req *connect.Request[agentv1.MailboxRequest]) (*connect.Response[agentv1.MailboxResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.Mailbox(ctx, fwdReq(req))
 }
 func (c *connAgent) UpdateSettings(ctx context.Context, req *connect.Request[agentv1.UpdateSettingsRequest]) (*connect.Response[agentv1.UpdateSettingsResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.UpdateSettings(ctx, fwdReq(req))
 }
 func (c *connAgent) Interrupt(ctx context.Context, req *connect.Request[agentv1.InterruptRequest]) (*connect.Response[agentv1.InterruptResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.Interrupt(ctx, fwdReq(req))
 }
 func (c *connAgent) Compact(ctx context.Context, req *connect.Request[agentv1.CompactRequest]) (*connect.Response[agentv1.CompactResponse], error) {
+	if err := c.s.authorizeSession(ctx, req.Msg.Id); err != nil {
+		return nil, err
+	}
 	return c.client.Compact(ctx, fwdReq(req))
 }
 func (c *connAgent) ListProviders(ctx context.Context, req *connect.Request[agentv1.ListProvidersRequest]) (*connect.Response[agentv1.ListProvidersResponse], error) {

@@ -52,18 +52,21 @@ spec:
               value: {{ .Values.gateway.enforceH2 | quote }}
             - name: EASYVCS_TOKEN
               value: {{ .Values.gateway.token | quote }}
-            # Bootstrap a default-tenant operator credential equal to the fixed
-            # token, so EASYVCS_TOKEN/EASYLAB_TOKEN/ARTIFACT_TOKEN are valid
-            # registered store tokens (not the retired flat-token realm). The
-            # embedded extensions authenticate with the same credential.
+            # Bootstrap the operator credential equal to the fixed token, so
+            # EASYVCS_TOKEN/EASYLAB_TOKEN/ARTIFACT_TOKEN are valid registered
+            # store tokens. The embedded extensions authenticate with the same
+            # credential.
             - name: EASYLAB_BOOTSTRAP_TOKEN
               value: {{ .Values.gateway.token | quote }}
             - name: EASYLAB_BOOTSTRAP_USER
               value: {{ .Values.gateway.bootstrapUser | default "operator" | quote }}
             - name: EASYLAB_TOKEN
               value: {{ .Values.gateway.token | quote }}
-            # Default tenant's bound abcp-agent tenant id (DB binding mirrors
-            # this at startup).
+            # Static admin credential for user administration (UserService).
+            - name: EASYLAB_ADMIN_TOKEN
+              value: {{ .Values.gateway.adminToken | default "admin-devtoken" | quote }}
+            # The operator's bound abcp-agent tenant id (DB binding mirrors this
+            # at startup).
             - name: EASYLAB_AGENT_TENANT
               value: {{ .Values.agent.bootstrapTenant | default "default" | quote }}
             - name: EASYLAB_ARTIFACT_URL

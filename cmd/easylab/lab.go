@@ -137,28 +137,18 @@ func (s *server) labRouter() *http.ServeMux {
 // ---- auth helpers ----
 
 // labPrincipal resolves the caller from the bearer token. It returns the user
-// (nil for anonymous) and an access level. When no users/tokens exist at all
-// the server behaves as an open Lab (anonymous is treated as admin) so a fresh
-// fixture works without a bootstrap token.
+// (nil for anonymous) and an access level ("write"/"read"). Write access is
+// granted by presenting a valid credential; anonymous callers are read-only.
 func (s *server) labPrincipal(r *http.Request) (*store.User, string) {
 	if token, ok := requestCredential(r); ok {
 		if tok, err := s.cs.LookupToken(token); err == nil {
-			u, _ := s.cs.GetUser(tok.UserID)
-			return u, tok.Level
+			u, err := s.cs.GetUser(tok.UserID)
+			if err == nil && !u.Disabled {
+				return u, "write"
+			}
 		}
 	}
-	if !s.labHasAuth() {
-		// No authentication in the Lab realm: open access for read; write also
-		// allowed when the server has no token records at all (dev/fixture).
-		return nil, "write"
-	}
 	return nil, "read"
-}
-
-// labHasAuth reports whether any users are registered, which gates whether
-// anonymous write is permitted.
-func (s *server) labHasAuth() bool {
-	return !s.cs.IsOpenInstance()
 }
 
 // labAdmin wraps a handler requiring an authenticated (non-anonymous) principal
@@ -186,14 +176,18 @@ func (s *server) labRequireWriteMirrorControl(next http.HandlerFunc) http.Handle
 }
 
 // requireWriteAuth validates the principal and calls fn on success.
+// requireWriteAuth validates the principal and the repository capability the
+// request needs, then calls fn. The capability is derived from the request
+// shape (merge/tag/release vs branch/repo write) and evaluated against the
+// caller's repository role.
 func (s *server) requireWriteAuth(w http.ResponseWriter, r *http.Request, fn func()) {
-	u, level := s.labPrincipal(r)
-	if u == nil && level != "write" {
-		labErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized"))
+	u, _ := s.labPrincipal(r)
+	if u == nil {
+		labErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized: a valid token is required to write"))
 		return
 	}
-	if u != nil && level != "write" && level != "admin" {
-		labErr(w, http.StatusForbidden, fmt.Errorf("forbidden: token has read-only level"))
+	if err := s.authorizeRepoRequest(r, u); err != nil {
+		labErr(w, http.StatusForbidden, err)
 		return
 	}
 	fn()
@@ -220,7 +214,7 @@ func (s *server) writeTargetsMirror(r *http.Request) bool {
 	if !strings.HasPrefix(r.URL.Path, "/api/v1/repo/"+ns+"/"+name+"/") {
 		return false
 	}
-	repo, err := s.cs.OpenRepo(s.repoRefR(r, ns, name))
+	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: ns, Name: name})
 	if err != nil {
 		return false
 	}
@@ -228,9 +222,10 @@ func (s *server) writeTargetsMirror(r *http.Request) bool {
 }
 
 // labRepo loads the repo-scoped handle and current principal, enforcing read
-// visibility. Private repositories are only readable by namespace members;
-// public repositories are readable by anyone. Write-protected callers should
-// rely on labRequireWrite in addition to a successful labRepo load.
+// visibility: a public repo is readable by anyone; a private repo requires a
+// role (owner / maintainer / developer on a public repo). Write-protected
+// callers should rely on labRequireWrite in addition to a successful labRepo
+// load.
 func (s *server) labRepo(w http.ResponseWriter, r *http.Request) (*store.Repo, *store.User, bool) {
 	ns := r.PathValue("namespace")
 	name := r.PathValue("repo")
@@ -244,18 +239,14 @@ func (s *server) labRepo(w http.ResponseWriter, r *http.Request) (*store.Repo, *
 		labErr(w, http.StatusNotFound, fmt.Errorf("repo not found"))
 		return nil, nil, false
 	}
-	rr := s.repoRef(r.Header, ns, name)
-	if _, err := s.cs.OpenRepo(rr); err != nil {
-		labErr(w, http.StatusNotFound, err)
-		return nil, nil, false
-	}
+	rr := store.RepoRef{Namespace: ns, Name: name}
 	u, _ := s.labPrincipal(r)
-	var userID *int64
+	var uid int64
 	if u != nil {
-		userID = &u.ID
+		uid = u.ID
 	}
-	// Enforce reading a private repo requires membership.
-	if !s.cs.UserCanReadRepo(rr, userID) {
+	role, err := s.cs.RoleOfRef(rr, uid)
+	if err != nil || !role.CanRead() {
 		labErr(w, http.StatusNotFound, fmt.Errorf("repo not found"))
 		return nil, nil, false
 	}
@@ -293,8 +284,8 @@ type labUserReq struct {
 }
 
 func (s *server) labCreateUser(w http.ResponseWriter, r *http.Request) {
-	if _, level := s.labPrincipal(r); level != "admin" && level != "write" {
-		labErr(w, http.StatusForbidden, fmt.Errorf("forbidden"))
+	if u, _ := s.labPrincipal(r); u == nil {
+		labErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized"))
 		return
 	}
 	var req labUserReq
@@ -391,47 +382,70 @@ func (s *server) labDeleteToken(w http.ResponseWriter, r *http.Request) {
 // ---- namespace members ----
 
 type labMemberReq struct {
+	Repo     string `json:"repo"`
 	Username string `json:"username"`
-	Role     string `json:"role,omitempty"`
+	Role     string `json:"role,omitempty"` // maintainer | developer
 }
 
+// labAddMember grants a collaborator role on a repository (owner only).
 func (s *server) labAddMember(w http.ResponseWriter, r *http.Request) {
-	if _, level := s.labPrincipal(r); level != "admin" && level != "write" {
-		labErr(w, http.StatusForbidden, fmt.Errorf("forbidden"))
-		return
-	}
+	ns := r.PathValue("namespace")
 	var req labMemberReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		labErr(w, http.StatusBadRequest, err)
 		return
 	}
-	u, err := s.cs.GetUserByUsername(req.Username)
+	u, _ := s.labPrincipal(r)
+	if u == nil {
+		labErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized"))
+		return
+	}
+	if err := s.authorizeRepo(r, u, ns, req.Repo, repoCanPush, "managing collaborators"); err != nil {
+		labErr(w, http.StatusForbidden, err)
+		return
+	}
+	target, err := s.cs.GetUserByUsername(req.Username)
+	if err != nil {
+		labErr(w, http.StatusNotFound, err)
+		return
+	}
+	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: ns, Name: req.Repo})
 	if err != nil {
 		labErr(w, http.StatusNotFound, err)
 		return
 	}
 	role := req.Role
 	if role == "" {
-		role = "member"
+		role = store.RoleDeveloper
 	}
-	if err := s.cs.AddNamespaceMember(r.PathValue("namespace"), u.ID, role); err != nil {
-		labErr(w, http.StatusInternalServerError, err)
+	if err := s.cs.SetRepoMember(repo.RepoID(), target.ID, role, &u.ID); err != nil {
+		labErr(w, http.StatusBadRequest, err)
 		return
 	}
-	labJSON(w, http.StatusOK, labResponse{"namespace": r.PathValue("namespace"), "username": req.Username, "role": role})
+	labJSON(w, http.StatusOK, labResponse{"namespace": ns, "repo": req.Repo, "username": req.Username, "role": role})
 }
 
+// labListMembers lists a repository's owner + collaborators.
 func (s *server) labListMembers(w http.ResponseWriter, r *http.Request) {
-	members, err := s.cs.ListNamespaceMembers(r.PathValue("namespace"))
+	ns := r.PathValue("namespace")
+	name := r.URL.Query().Get("repo")
+	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: ns, Name: name})
+	if err != nil {
+		labErr(w, http.StatusNotFound, err)
+		return
+	}
+	out := []labResponse{}
+	if owner, err := s.cs.GetUser(repo.OwnerUserID); err == nil {
+		out = append(out, labResponse{"username": owner.Username, "role": string(store.RoleOwner)})
+	}
+	members, err := s.cs.ListRepoMembers(repo.RepoID())
 	if err != nil {
 		labErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	var out []labResponse
 	for _, m := range members {
-		u, _ := s.cs.GetUser(m.UserID)
 		entry := labResponse{"user_id": m.UserID, "role": m.Role}
-		if u != nil {
+		if u, _ := s.cs.GetUser(m.UserID); u != nil {
 			entry["username"] = u.Username
 		}
 		out = append(out, entry)
@@ -439,17 +453,30 @@ func (s *server) labListMembers(w http.ResponseWriter, r *http.Request) {
 	labJSON(w, http.StatusOK, out)
 }
 
+// labRemoveMember revokes a collaborator role (owner only).
 func (s *server) labRemoveMember(w http.ResponseWriter, r *http.Request) {
-	if _, level := s.labPrincipal(r); level != "admin" && level != "write" {
-		labErr(w, http.StatusForbidden, fmt.Errorf("forbidden"))
+	ns := r.PathValue("namespace")
+	name := r.URL.Query().Get("repo")
+	u, _ := s.labPrincipal(r)
+	if u == nil {
+		labErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized"))
 		return
 	}
-	u, err := s.cs.GetUserByUsername(r.PathValue("username"))
+	if err := s.authorizeRepo(r, u, ns, name, repoCanPush, "managing collaborators"); err != nil {
+		labErr(w, http.StatusForbidden, err)
+		return
+	}
+	target, err := s.cs.GetUserByUsername(r.PathValue("username"))
 	if err != nil {
 		labErr(w, http.StatusNotFound, err)
 		return
 	}
-	if err := s.cs.RemoveNamespaceMember(r.PathValue("namespace"), u.ID); err != nil {
+	repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: ns, Name: name})
+	if err != nil {
+		labErr(w, http.StatusNotFound, err)
+		return
+	}
+	if err := s.cs.RemoveRepoMember(repo.RepoID(), target.ID); err != nil {
 		labErr(w, http.StatusNotFound, err)
 		return
 	}
@@ -477,20 +504,17 @@ type labRepoMeta struct {
 
 func (s *server) labListRepos(w http.ResponseWriter, r *http.Request) {
 	u, _ := s.labPrincipal(r)
-	var userID *int64
+	var uid int64
 	if u != nil {
-		userID = &u.ID
+		uid = u.ID
 	}
-	repos, err := s.cs.List()
+	repos, err := s.cs.ListAccessible(uid)
 	if err != nil {
 		labErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	var out []labRepoMeta
 	for _, rr := range repos {
-		if !s.cs.UserCanReadRepo(rr, userID) {
-			continue
-		}
 		rp, _ := s.cs.OpenRepo(rr)
 		if rp == nil {
 			continue
@@ -543,12 +567,17 @@ func (s *server) labCreateRepo(w http.ResponseWriter, r *http.Request) {
 			labErr(w, http.StatusBadRequest, fmt.Errorf("mirror_url required for mirror repository"))
 			return
 		}
-		_, err := s.cs.Create(s.repoRefR(r, req.Namespace, req.Name))
+		u, _ := s.labPrincipal(r)
+		if u == nil {
+			labErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized"))
+			return
+		}
+		_, err := s.cs.Create(store.RepoRef{Owner: u.ID, Namespace: req.Namespace, Name: req.Name})
 		if err != nil {
 			labErr(w, http.StatusConflict, err)
 			return
 		}
-		repo, err := s.cs.OpenRepo(s.repoRefR(r, req.Namespace, req.Name))
+		repo, err := s.cs.OpenRepo(store.RepoRef{Namespace: req.Namespace, Name: req.Name})
 		if err != nil {
 			labErr(w, http.StatusInternalServerError, err)
 			return
@@ -647,7 +676,7 @@ func (s *server) labUpdateRepo(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) labDeleteRepo(w http.ResponseWriter, r *http.Request) {
 	s.labRequireWrite(func(w http.ResponseWriter, r *http.Request) {
-		if err := s.cs.Delete(s.repoRefR(r, r.PathValue("namespace"), r.PathValue("repo"))); err != nil {
+		if err := s.cs.Delete(store.RepoRef{Namespace: r.PathValue("namespace"), Name: r.PathValue("repo")}); err != nil {
 			labErr(w, http.StatusNotFound, err)
 			return
 		}
@@ -1858,7 +1887,7 @@ func (s *server) labFork(w http.ResponseWriter, r *http.Request) {
 		if dstNS == "" {
 			dstNS = src.Namespace
 		}
-		dst, err := s.cs.Fork(src.RepoRef(), s.repoRefR(r, dstNS, req.Name))
+		dst, err := s.cs.Fork(src.RepoRef(), store.RepoRef{Namespace: dstNS, Name: req.Name})
 		if err != nil {
 			labErr(w, http.StatusConflict, err)
 			return
@@ -2285,12 +2314,23 @@ func (s *server) labUpdateMR(w http.ResponseWriter, r *http.Request) {
 	})(w, r)
 }
 
+// labMergeMR merges a change request. Maintainer+ on the target repository.
+// The source ref may live in another repository (fork→upstream MR).
 func (s *server) labMergeMR(w http.ResponseWriter, r *http.Request) {
-	s.labRequireWrite(func(w http.ResponseWriter, r *http.Request) {
-		repo, _, ok := s.labRepo(w, r)
-		if !ok {
-			return
-		}
+	u, _ := s.labPrincipal(r)
+	if u == nil {
+		labErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized"))
+		return
+	}
+	repo, _, ok := s.labRepo(w, r)
+	if !ok {
+		return
+	}
+	if err := s.authorizeRepo(r, u, repo.Namespace, repo.Name, repoCanMerge, "merging a change request"); err != nil {
+		labErr(w, http.StatusForbidden, err)
+		return
+	}
+	{
 		iid, err := parseIID(r)
 		if err != nil {
 			labErr(w, http.StatusBadRequest, err)
@@ -2302,11 +2342,27 @@ func (s *server) labMergeMR(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ws := revision.NewWorkspace(repo)
+		// The source tree may live in a DIFFERENT repository (fork→upstream):
+		// resolve the source repo when source_repo_id differs.
+		srcRepo := repo
+		if mr.SourceRepoID != 0 && mr.SourceRepoID != repo.RepoID() {
+			var srow store.RepoRef
+			srow, err = s.cs.RepoRefByID(mr.SourceRepoID)
+			if err != nil {
+				labErr(w, http.StatusBadRequest, fmt.Errorf("source repository missing: %w", err))
+				return
+			}
+			srcRepo, err = s.cs.OpenRepo(srow)
+			if err != nil {
+				labErr(w, http.StatusBadRequest, fmt.Errorf("source repository missing: %w", err))
+				return
+			}
+		}
 		// Single-parent (rebase) merge: fold the source tree into the target
 		// tree via a 3-way merge, then record the result as ONE new revision
 		// with the target as its sole parent (no merge node). Overlaps become
 		// first-class conflict objects.
-		srcTree, err := treeOf(ws, repo, mr.Source)
+		srcTree, err := treeOf(ws, srcRepo, mr.Source)
 		if err != nil {
 			labErr(w, http.StatusBadRequest, fmt.Errorf("source %s: %w", mr.Source, err))
 			return
@@ -2343,7 +2399,7 @@ func (s *server) labMergeMR(w http.ResponseWriter, r *http.Request) {
 			"iid": iid, "state": "merged", "revision_id": newSnap.RevisionID,
 			"snapshot": newSnap.RevisionHash.String(), "conflicts": len(atoms),
 		})
-	})(w, r)
+	}
 }
 
 type labReviewReq struct {
@@ -2352,37 +2408,39 @@ type labReviewReq struct {
 }
 
 func (s *server) labAddReview(w http.ResponseWriter, r *http.Request) {
-	s.labRequireWrite(func(w http.ResponseWriter, r *http.Request) {
-		repo, user, ok := s.labRepo(w, r)
-		if !ok {
-			return
-		}
-		iid, err := parseIID(r)
-		if err != nil {
-			labErr(w, http.StatusBadRequest, err)
-			return
-		}
-		mr, err := s.cs.GetMergeRequest(repo.RepoID(), iid)
-		if err != nil {
-			labErr(w, http.StatusNotFound, err)
-			return
-		}
-		var req labReviewReq
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			labErr(w, http.StatusBadRequest, err)
-			return
-		}
-		var reviewerID *int64
-		if user != nil {
-			reviewerID = &user.ID
-		}
-		rv, err := s.cs.AddReview(mr.ID, reviewerID, req.State, req.Body)
-		if err != nil {
-			labErr(w, http.StatusInternalServerError, err)
-			return
-		}
-		labJSON(w, http.StatusOK, labResponse{"review": rv.State})
-	})(w, r)
+	repo, user, ok := s.labRepo(w, r)
+	if !ok {
+		return
+	}
+	if _, err := s.repoRole(r.Context(), repo.Namespace, repo.Name); err != nil {
+		labErr(w, http.StatusForbidden, err)
+		return
+	}
+	if user == nil {
+		labErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized"))
+		return
+	}
+	iid, err := parseIID(r)
+	if err != nil {
+		labErr(w, http.StatusBadRequest, err)
+		return
+	}
+	mr, err := s.cs.GetMergeRequest(repo.RepoID(), iid)
+	if err != nil {
+		labErr(w, http.StatusNotFound, err)
+		return
+	}
+	var req labReviewReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		labErr(w, http.StatusBadRequest, err)
+		return
+	}
+	rv, err := s.cs.AddReview(mr.ID, &user.ID, req.State, req.Body)
+	if err != nil {
+		labErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	labJSON(w, http.StatusOK, labResponse{"review": rv.State})
 }
 
 func (s *server) labListReviews(w http.ResponseWriter, r *http.Request) {
@@ -2414,37 +2472,39 @@ type labCommentReq struct {
 }
 
 func (s *server) labAddComment(w http.ResponseWriter, r *http.Request) {
-	s.labRequireWrite(func(w http.ResponseWriter, r *http.Request) {
-		repo, user, ok := s.labRepo(w, r)
-		if !ok {
-			return
-		}
-		iid, err := parseIID(r)
-		if err != nil {
-			labErr(w, http.StatusBadRequest, err)
-			return
-		}
-		mr, err := s.cs.GetMergeRequest(repo.RepoID(), iid)
-		if err != nil {
-			labErr(w, http.StatusNotFound, err)
-			return
-		}
-		var req labCommentReq
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			labErr(w, http.StatusBadRequest, err)
-			return
-		}
-		var authorID *int64
-		if user != nil {
-			authorID = &user.ID
-		}
-		c, err := s.cs.AddComment(mr.ID, authorID, req.Body, req.Path)
-		if err != nil {
-			labErr(w, http.StatusInternalServerError, err)
-			return
-		}
-		labJSON(w, http.StatusOK, labResponse{"comment": c.ID, "body": c.Body})
-	})(w, r)
+	repo, user, ok := s.labRepo(w, r)
+	if !ok {
+		return
+	}
+	if _, err := s.repoRole(r.Context(), repo.Namespace, repo.Name); err != nil {
+		labErr(w, http.StatusForbidden, err)
+		return
+	}
+	if user == nil {
+		labErr(w, http.StatusUnauthorized, fmt.Errorf("unauthorized"))
+		return
+	}
+	iid, err := parseIID(r)
+	if err != nil {
+		labErr(w, http.StatusBadRequest, err)
+		return
+	}
+	mr, err := s.cs.GetMergeRequest(repo.RepoID(), iid)
+	if err != nil {
+		labErr(w, http.StatusNotFound, err)
+		return
+	}
+	var req labCommentReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		labErr(w, http.StatusBadRequest, err)
+		return
+	}
+	c, err := s.cs.AddComment(mr.ID, &user.ID, req.Body, req.Path)
+	if err != nil {
+		labErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	labJSON(w, http.StatusOK, labResponse{"comment": c.ID, "body": c.Body})
 }
 
 func (s *server) labListComments(w http.ResponseWriter, r *http.Request) {
