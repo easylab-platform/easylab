@@ -1,16 +1,11 @@
 package repoext
 
 import (
-	"bytes"
 	"connectrpc.com/connect"
 	"context"
 	"encoding/base64"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
@@ -267,125 +262,6 @@ func (c *easylabClient) commit(ctx context.Context, org, repo, branch, message s
 		"change_id":   res.Msg.GetChangeId(),
 		"sha":         res.Msg.GetChangeId(),
 	}, nil
-}
-
-// get/post/put/delete are retained for the few tool-specific endpoints that
-// have no proto RPC yet (graph / compare / search / rebase). They are the
-// thin REST facade; all repo/branch/blob operations above use the SDK.
-func (c *easylabClient) get(ctx context.Context, path string) (map[string]interface{}, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return nil, errDownstream("easylab", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, errNotFoundForHTTP
-	}
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("%s %s: HTTP %d: %s", req.Method, req.URL.Path, resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var raw json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
-	}
-	return wrapJSON(raw), nil
-}
-
-func (c *easylabClient) post(ctx context.Context, path string, body interface{}) (map[string]interface{}, error) {
-	b, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return nil, errDownstream("easylab", err)
-	}
-	defer resp.Body.Close()
-	var v map[string]interface{}
-	_ = json.NewDecoder(resp.Body).Decode(&v)
-	return v, nil
-}
-
-func (c *easylabClient) put(ctx context.Context, path string, body interface{}) (map[string]interface{}, error) {
-	b, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.base+path, bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return nil, errDownstream("easylab", err)
-	}
-	defer resp.Body.Close()
-	var v map[string]interface{}
-	_ = json.NewDecoder(resp.Body).Decode(&v)
-	return v, nil
-}
-
-func (c *easylabClient) delete(ctx context.Context, path string, body interface{}) (map[string]interface{}, error) {
-	b, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.base+path, bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return nil, errDownstream("easylab", err)
-	}
-	defer resp.Body.Close()
-	var v map[string]interface{}
-	_ = json.NewDecoder(resp.Body).Decode(&v)
-	return v, nil
-}
-
-// wrapJSON decodes a response; a top-level array is placed under "_arr".
-func wrapJSON(raw json.RawMessage) map[string]interface{} {
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" {
-		return map[string]interface{}{}
-	}
-	if strings.HasPrefix(trimmed, "[") {
-		var arr []interface{}
-		_ = json.Unmarshal(raw, &arr)
-		return map[string]interface{}{"_arr": arr}
-	}
-	var m map[string]interface{}
-	_ = json.Unmarshal(raw, &m)
-	return m
-}
-
-func errText(v map[string]interface{}) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v["error"].(string); ok {
-		return s
-	}
-	if s, ok := v["message"].(string); ok {
-		return s
-	}
-	return ""
 }
 
 var _ = easylabv1.BranchInfo{}
