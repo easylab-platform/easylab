@@ -147,7 +147,14 @@ func main() {
 	// Egress policy (easyproxy sidecar, default ON): CA material is
 	// generated once per deployment and persisted under EASYVCS_HOME so pod
 	// restarts and easyproxy leaves keep verifying against the same CA.
+	//
+	// Modes: redirect (iptables; needs kernel netfilter) or spoof (DNS-based;
+	// no netfilter/tun/NET_ADMIN — sandboxes and jobs default to it when a
+	// cluster resolver is configured; services stay on redirect because they
+	// may bind :443). EASYLAB_EGRESS_MODE forces one mode everywhere.
 	egressDisabled := envOrStr("EASYLAB_EGRESS_POLICY_DISABLED", "") != ""
+	egressMode := envOrStr("EASYLAB_EGRESS_MODE", "")
+	egressSpoofDNS := envOrStr("EASYLAB_EGRESS_SPOOF_DNS", "")
 	var egressCACert, egressCAKey string
 	if !egressDisabled {
 		cert, key, cerr := ensureEgressCA(filepath.Join(store.HomeDir(), "egress-ca"))
@@ -159,16 +166,20 @@ func main() {
 	}
 	var sK8s *k8s.Client
 	if kc, kerr := k8s.New(k8s.Config{
-		Namespace:            ns,
-		BuildkitImage:        envOrStr("EASYLAB_BUILDKIT_IMAGE", "easylab/buildkit-worker:latest"),
-		RegistryHost:         registryHost,
-		RegistryToken:        envOrStr("EASYVCS_TOKEN", "devtoken"),
-		Proxy:                envOrStr("EASYLAB_UPSTREAM_PROXY", ""),
-		EgressPolicyDisabled: egressDisabled,
-		EgressPolicyGateway:  envOrStr("EASYLAB_EGRESS_GATEWAY", registryHost),
-		EgressPolicyImage:    envOrStr("EASYLAB_EGRESS_IMAGE", ""),
-		EgressPolicyCACert:   egressCACert,
-		EgressPolicyCAKey:    egressCAKey,
+		Namespace:                 ns,
+		BuildkitImage:             envOrStr("EASYLAB_BUILDKIT_IMAGE", "easylab/buildkit-worker:latest"),
+		RegistryHost:              registryHost,
+		RegistryToken:             envOrStr("EASYVCS_TOKEN", "devtoken"),
+		Proxy:                     envOrStr("EASYLAB_UPSTREAM_PROXY", ""),
+		EgressPolicyDisabled:      egressDisabled,
+		EgressPolicyGateway:       envOrStr("EASYLAB_EGRESS_GATEWAY", registryHost),
+		EgressPolicyImage:         envOrStr("EASYLAB_EGRESS_IMAGE", ""),
+		EgressPolicyCACert:        egressCACert,
+		EgressPolicyCAKey:         egressCAKey,
+		EgressPolicyMode:          egressMode,
+		EgressPolicySpoofDNS:      egressSpoofDNS,
+		EgressPolicyUpstreamProxy: envOrStr("EASYLAB_EGRESS_UPSTREAM_PROXY", ""),
+		ClusterDomain:             envOrStr("EASYLAB_CLUSTER_DOMAIN", "cluster.local"),
 	}); kerr == nil {
 		opsState.services = ops.NewK8sServiceRunner(kc)
 		sK8s = kc

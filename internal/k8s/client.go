@@ -47,11 +47,15 @@ type Client struct {
 
 // egressPolicy carries the resolved easyproxy defaults for this client.
 type egressPolicy struct {
-	enabled bool
-	image   string
-	gateway string
-	caCert  string
-	caKey   string
+	enabled       bool
+	image         string
+	gateway       string
+	caCert        string
+	caKey         string
+	mode          string
+	spoofDNS      string
+	upstreamProxy string
+	clusterDomain string
 }
 
 // Config configures a Client.
@@ -74,6 +78,18 @@ type Config struct {
 	// (SSL_CERT_FILE / NODE_EXTRA_CA_CERTS) and easyproxy signs with the key.
 	EgressPolicyCACert string
 	EgressPolicyCAKey  string
+	// EgressPolicyMode: "" = redirect (iptables), "spoof" = DNS-spoof. When
+	// empty, sandbox/job use spoof (they do not bind 80/443) and services use
+	// redirect.
+	EgressPolicyMode string
+	// EgressPolicySpoofDNS is the cluster resolver the spoof sidecar
+	// forwards real queries to (CoreDNS service IP).
+	EgressPolicySpoofDNS string
+	// EgressPolicyUpstreamProxy is an optional egress proxy (mihomo) DIRECT
+	// traffic is sent through in spoof mode.
+	EgressPolicyUpstreamProxy string
+	// ClusterDomain is the cluster DNS domain (default cluster.local).
+	ClusterDomain string
 }
 
 // New builds a client from the in-cluster config (production) or, when
@@ -130,11 +146,15 @@ func newClient(cs kubernetes.Interface, cfg Config) *Client {
 		proxy:         cfg.Proxy,
 		runtimes:      loadRuntimes(),
 		egress: egressPolicy{
-			enabled: enabled,
-			image:   image,
-			gateway: gateway,
-			caCert:  cfg.EgressPolicyCACert,
-			caKey:   cfg.EgressPolicyCAKey,
+			enabled:       enabled,
+			image:         image,
+			gateway:       gateway,
+			caCert:        cfg.EgressPolicyCACert,
+			caKey:         cfg.EgressPolicyCAKey,
+			mode:          cfg.EgressPolicyMode,
+			spoofDNS:      cfg.EgressPolicySpoofDNS,
+			upstreamProxy: cfg.EgressPolicyUpstreamProxy,
+			clusterDomain: cfg.ClusterDomain,
 		},
 	}
 }
@@ -143,16 +163,44 @@ func newClient(cs kubernetes.Interface, cfg Config) *Client {
 // (nil when the policy is disabled). Workload specs that set their own
 // Proxy override this.
 func (c *Client) EgressPolicySpec() *ProxySpec {
+	return c.egressSpecFor(false)
+}
+
+// egressSpecFor builds the default spec. isService selects the redirect mode
+// for service deployments (they may bind 80/443, so spoof would conflict);
+// sandboxes and CI jobs use spoof when no explicit mode is configured.
+func (c *Client) egressSpecFor(isService bool) *ProxySpec {
 	if !c.egress.enabled {
 		return nil
 	}
-	return &ProxySpec{
-		Rules:        DefaultRulesYAML(c.egress.gateway),
-		Image:        c.egress.image,
-		CACertPEM:    c.egress.caCert,
-		CAKeyPEM:     c.egress.caKey,
-		ClusterCIDRs: c.egressClusterCIDRs(),
+	mode := c.egress.mode
+	if mode == "" {
+		if isService || c.egress.spoofDNS == "" {
+			mode = ProxyModeRedirect
+		} else {
+			mode = ProxyModeSpoof
+		}
 	}
+	spec := &ProxySpec{
+		Rules:            DefaultRulesYAML(c.egress.gateway),
+		Image:            c.egress.image,
+		CACertPEM:        c.egress.caCert,
+		CAKeyPEM:         c.egress.caKey,
+		Mode:             mode,
+		SpoofUpstreamDNS: c.egress.spoofDNS,
+		UpstreamProxy:    c.egress.upstreamProxy,
+		ClusterDomain:    c.egress.clusterDomain,
+	}
+	if mode != ProxyModeSpoof {
+		spec.ClusterCIDRs = c.egressClusterCIDRs()
+	}
+	return spec
+}
+
+// EgressPolicySpecService is the service-workload variant (redirect by
+// default so it never competes for :443).
+func (c *Client) EgressPolicySpecService() *ProxySpec {
+	return c.egressSpecFor(true)
 }
 
 // egressClusterCIDRs returns the bypass ranges. Overridable via

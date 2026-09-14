@@ -27,7 +27,7 @@ func TestWithProxyInjectsSidecar(t *testing.T) {
 		CAKeyPEM:     "-----BEGIN PRIVATE KEY-----\nY\n-----END PRIVATE KEY-----",
 		ClusterCIDRs: []string{"10.96.0.0/12", "172.20.0.0/16"},
 	}
-	if err := withProxy(&pod.Spec, pod.Name, proxy); err != nil {
+	if err := withProxy(&pod.Spec, pod.Name, "test", proxy); err != nil {
 		t.Fatal(err)
 	}
 
@@ -99,7 +99,7 @@ func TestWithProxyInjectsSidecar(t *testing.T) {
 func TestWithProxyRewriteRequiresCA(t *testing.T) {
 	pod := minimalPod("sbx-b")
 	proxy := &ProxySpec{Rules: testRules, Image: "img", ClusterCIDRs: []string{"10.0.0.0/8"}}
-	if err := withProxy(&pod.Spec, pod.Name, proxy); err == nil {
+	if err := withProxy(&pod.Spec, pod.Name, "test", proxy); err == nil {
 		t.Fatal("rewrite rules without CA must be rejected")
 	}
 }
@@ -107,7 +107,7 @@ func TestWithProxyRewriteRequiresCA(t *testing.T) {
 func TestWithProxyNilIsNoop(t *testing.T) {
 	pod := minimalPod("sbx-c")
 	before := len(pod.Spec.Containers)
-	if err := withProxy(&pod.Spec, pod.Name, nil); err != nil {
+	if err := withProxy(&pod.Spec, pod.Name, "test", nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(pod.Spec.Containers) != before {
@@ -152,7 +152,7 @@ func TestDefaultInjection(t *testing.T) {
 	// Default-on injection: LaunchSandbox path would inject; verify the
 	// injection helper produces the sidecar for the default spec.
 	pod := minimalPod("sbx-default")
-	if err := withProxy(&pod.Spec, pod.Name, def); err != nil {
+	if err := withProxy(&pod.Spec, pod.Name, "test", def); err != nil {
 		t.Fatal(err)
 	}
 	found := false
@@ -188,5 +188,118 @@ func TestDefaultRulesYAMLShape(t *testing.T) {
 	}
 	if strings.Count(y, "action: rewrite") != len(defaultUpstreams) {
 		t.Fatalf("rewrite rule count mismatch")
+	}
+}
+
+// TestSpoofModeInjection verifies dns-spoof mode: no init container, dnsConfig
+// pointed at the sidecar, spoof ports/env, and POD_IP wired via the downward
+// API.
+func TestSpoofModeInjection(t *testing.T) {
+	pod := minimalPod("sbx-spoof")
+	proxy := &ProxySpec{
+		Mode:             ProxyModeSpoof,
+		Rules:            testRules,
+		Image:            "registry/easyproxy:v0.2.0",
+		CACertPEM:        "-----BEGIN CERTIFICATE-----\nX\n-----END CERTIFICATE-----",
+		CAKeyPEM:         "-----BEGIN PRIVATE KEY-----\nY\n-----END PRIVATE KEY-----",
+		SpoofUpstreamDNS: "10.96.0.10",
+		UpstreamProxy:    "http://mihomo.develop.svc:7890",
+	}
+	if err := withProxy(&pod.Spec, pod.Name, "test", proxy); err != nil {
+		t.Fatal(err)
+	}
+
+	// No init container in spoof mode.
+	if len(pod.Spec.InitContainers) != 0 {
+		t.Fatalf("spoof mode must not add an init container, got %d", len(pod.Spec.InitContainers))
+	}
+	// dnsConfig points at the sidecar.
+	if pod.Spec.DNSConfig == nil || len(pod.Spec.DNSConfig.Nameservers) != 1 ||
+		pod.Spec.DNSConfig.Nameservers[0] != "127.0.0.1" {
+		t.Fatalf("dnsConfig = %+v", pod.Spec.DNSConfig)
+	}
+	// Sidecar args carry spoof + upstream dns + proxy; POD_IP env present.
+	var found bool
+	for i := range pod.Spec.Containers {
+		c := &pod.Spec.Containers[i]
+		if c.Name != "easyproxy" {
+			continue
+		}
+		found = true
+		joined := strings.Join(c.Args, " ")
+		for _, want := range []string{"--spoof", "--upstream-dns=10.96.0.10", "--upstream-proxy=http://mihomo.develop.svc:7890"} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("args missing %q: %v", want, c.Args)
+			}
+		}
+		var podIP bool
+		for _, e := range c.Env {
+			if e.Name == "POD_IP" && e.ValueFrom != nil && e.ValueFrom.FieldRef != nil &&
+				e.ValueFrom.FieldRef.FieldPath == "status.podIP" {
+				podIP = true
+			}
+		}
+		if !podIP {
+			t.Fatal("POD_IP downward-API env missing")
+		}
+	}
+	if !found {
+		t.Fatal("no easyproxy sidecar")
+	}
+
+	// Spoof mode without an upstream DNS is rejected.
+	pod2 := minimalPod("sbx-spoof-bad")
+	bad := &ProxySpec{Mode: ProxyModeSpoof, Rules: testRules, Image: "img"}
+	if err := withProxy(&pod2.Spec, pod2.Name, "test", bad); err == nil {
+		t.Fatal("spoof without SpoofUpstreamDNS must be rejected")
+	}
+}
+
+// TestRedirectModeKeepsInit confirms the default path is unchanged.
+func TestRedirectModeKeepsInit(t *testing.T) {
+	pod := minimalPod("sbx-redir")
+	proxy := &ProxySpec{
+		Rules: testRules, Image: "img",
+		CACertPEM:    "-----BEGIN CERTIFICATE-----\nX\n-----END CERTIFICATE-----",
+		CAKeyPEM:     "-----BEGIN PRIVATE KEY-----\nY\n-----END PRIVATE KEY-----",
+		ClusterCIDRs: []string{"10.0.0.0/8"},
+	}
+	if err := withProxy(&pod.Spec, pod.Name, "test", proxy); err != nil {
+		t.Fatal(err)
+	}
+	if len(pod.Spec.InitContainers) != 1 {
+		t.Fatalf("redirect mode must keep the init container, got %d", len(pod.Spec.InitContainers))
+	}
+	if pod.Spec.DNSConfig != nil {
+		t.Fatal("redirect mode must not set dnsConfig")
+	}
+}
+
+// TestEgressPolicyModeSelection verifies the auto mode: sandbox/job use spoof
+// (when a cluster DNS is configured), service uses redirect.
+func TestEgressPolicyModeSelection(t *testing.T) {
+	c := NewWithClientset(nil, Config{
+		Namespace:                 "test",
+		EgressPolicyGateway:       "gw:8080",
+		EgressPolicySpoofDNS:      "10.96.0.10",
+		EgressPolicyUpstreamProxy: "http://mihomo:7890",
+	})
+	if got := c.EgressPolicySpec(); got == nil || got.Mode != ProxyModeSpoof {
+		t.Fatalf("sandbox spec mode = %+v, want spoof", got)
+	} else if got.SpoofUpstreamDNS != "10.96.0.10" || got.UpstreamProxy != "http://mihomo:7890" {
+		t.Fatalf("spoof spec wiring: %+v", got)
+	}
+	if got := c.EgressPolicySpecService(); got == nil || got.Mode != ProxyModeRedirect {
+		t.Fatalf("service spec mode = %+v, want redirect", got)
+	}
+	// Without a cluster DNS, sandbox falls back to redirect too.
+	c2 := NewWithClientset(nil, Config{Namespace: "t", EgressPolicyGateway: "gw:8080"})
+	if got := c2.EgressPolicySpec(); got == nil || got.Mode != ProxyModeRedirect {
+		t.Fatalf("no-DNS sandbox mode = %+v, want redirect", got)
+	}
+	// Explicit mode wins.
+	c3 := NewWithClientset(nil, Config{Namespace: "t", EgressPolicyMode: ProxyModeSpoof, EgressPolicySpoofDNS: "1.2.3.4", EgressPolicyGateway: "gw"})
+	if got := c3.EgressPolicySpecService(); got == nil || got.Mode != ProxyModeSpoof {
+		t.Fatalf("explicit mode override = %+v", got)
 	}
 }

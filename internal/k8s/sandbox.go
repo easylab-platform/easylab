@@ -161,7 +161,7 @@ func (c *Client) LaunchSandbox(ctx context.Context, s SandboxSpec) (SandboxStatu
 				return SandboxStatus{}, fmt.Errorf("proxy CA secret: %w", err)
 			}
 		}
-		if err := withProxy(&pod.Spec, s.Name, proxy); err != nil {
+		if err := withProxy(&pod.Spec, s.Name, c.namespace, proxy); err != nil {
 			return SandboxStatus{}, err
 		}
 	}

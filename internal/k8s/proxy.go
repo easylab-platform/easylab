@@ -34,9 +34,35 @@ type ProxySpec struct {
 	// chart default wired by the caller.
 	Image string
 	// ClusterCIDRs are the RETURN (bypass) ranges — service/pod CIDRs, the
-	// internal registry, NATS. Required.
+	// internal registry, NATS. Required in redirect mode.
 	ClusterCIDRs []string
+
+	// Mode selects the interception mechanism:
+	//   ""|"redirect" -> iptables REDIRECT (init container, NET_ADMIN)
+	//   "spoof"       -> DNS-spoof (no netfilter/tun/NET_ADMIN); the Pod
+	//                    gets dnsConfig pointing at the sidecar and the
+	//                    sidecar listens on :53/:443/:80 directly.
+	// Service workloads (which may bind 80/443) must NOT use spoof.
+	Mode string
+	// SpoofUpstreamDNS is the cluster resolver (CoreDNS service IP) real
+	// queries are forwarded to in spoof mode.
+	SpoofUpstreamDNS string
+	// UpstreamProxy is an optional egress HTTP proxy (mihomo) used for
+	// DIRECT traffic in spoof mode.
+	UpstreamProxy string
+	// SelfIP optionally pins the address the sidecar answers for rewritten
+	// names (defaults to the Pod IP via the downward API).
+	SelfIP string
+	// ClusterDomain is the cluster DNS domain for the spoof-mode search path
+	// (default "cluster.local").
+	ClusterDomain string
 }
+
+// Proxy mode values.
+const (
+	ProxyModeRedirect = "redirect"
+	ProxyModeSpoof    = "spoof"
+)
 
 // proxyConstants are the well-known ports easyproxy listens on inside the Pod.
 const (
@@ -49,7 +75,7 @@ const (
 // withProxy injects the easyproxy init container, sidecar, volumes, and env
 // into a Pod spec. It appends to the existing containers; call it BEFORE the
 // pod is created. proxy == nil is a no-op.
-func withProxy(pod *corev1.PodSpec, workloadName string, proxy *ProxySpec) error {
+func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *ProxySpec) error {
 	if proxy == nil {
 		return nil
 	}
@@ -59,12 +85,17 @@ func withProxy(pod *corev1.PodSpec, workloadName string, proxy *ProxySpec) error
 	if strings.TrimSpace(proxy.Rules) == "" {
 		return fmt.Errorf("proxy: rules required")
 	}
-	if len(proxy.ClusterCIDRs) == 0 {
-		return fmt.Errorf("proxy: cluster CIDRs required (bypass ranges)")
-	}
 	rewriteRules := strings.Contains(proxy.Rules, "action: rewrite")
 	if rewriteRules && proxy.CACertPEM == "" {
 		return fmt.Errorf("proxy: rewrite rules require a CA certificate")
+	}
+	spoof := proxy.Mode == ProxyModeSpoof
+	if spoof {
+		if proxy.SpoofUpstreamDNS == "" {
+			return fmt.Errorf("proxy: spoof mode requires SpoofUpstreamDNS (cluster resolver)")
+		}
+	} else if len(proxy.ClusterCIDRs) == 0 {
+		return fmt.Errorf("proxy: cluster CIDRs required (bypass ranges)")
 	}
 
 	// The rule set rides in a ConfigMap built by the caller; here we mount
@@ -74,10 +105,25 @@ func withProxy(pod *corev1.PodSpec, workloadName string, proxy *ProxySpec) error
 
 	args := []string{"--mode=proxy",
 		"--rules=/etc/easyproxy/rules.yaml",
-		"--redir-addr=127.0.0.1:7893",
-		"--dns-addr=127.0.0.1:7894",
 		"--connect-addr=" + proxyConnectStr,
-		"--bypass-cidrs=" + strings.Join(proxy.ClusterCIDRs, ","),
+	}
+	if spoof {
+		args = append(args,
+			"--spoof",
+			"--spoof-dns-addr=0.0.0.0:53",
+			"--spoof-tls-addr=0.0.0.0:443",
+			"--spoof-http-addr=0.0.0.0:80",
+			"--upstream-dns="+proxy.SpoofUpstreamDNS,
+		)
+		if proxy.UpstreamProxy != "" {
+			args = append(args, "--upstream-proxy="+proxy.UpstreamProxy)
+		}
+	} else {
+		args = append(args,
+			"--redir-addr=127.0.0.1:7893",
+			"--dns-addr=127.0.0.1:7894",
+			"--bypass-cidrs="+strings.Join(proxy.ClusterCIDRs, ","),
+		)
 	}
 	if proxy.CACertPEM != "" {
 		args = append(args, "--ca-cert=/etc/easyproxy/ca/ca.crt", "--ca-key=/etc/easyproxy/ca/ca.key")
@@ -86,14 +132,25 @@ func withProxy(pod *corev1.PodSpec, workloadName string, proxy *ProxySpec) error
 		args = append(args, "--mitm-default")
 	}
 
+	var proxyPorts []corev1.ContainerPort
+	if spoof {
+		proxyPorts = []corev1.ContainerPort{
+			{Name: "dns", ContainerPort: 53, Protocol: corev1.ProtocolUDP},
+			{Name: "dns-tcp", ContainerPort: 53, Protocol: corev1.ProtocolTCP},
+			{Name: "tls", ContainerPort: 443},
+			{Name: "http", ContainerPort: 80},
+		}
+	} else {
+		proxyPorts = []corev1.ContainerPort{
+			{Name: "redir", ContainerPort: proxyRedirPort},
+			{Name: "dns", ContainerPort: proxyDNSPort},
+		}
+	}
 	proxyContainer := corev1.Container{
 		Name:  "easyproxy",
 		Image: proxy.Image,
 		Args:  args,
-		Ports: []corev1.ContainerPort{
-			{Name: "redir", ContainerPort: proxyRedirPort},
-			{Name: "dns", ContainerPort: proxyDNSPort},
-		},
+		Ports: proxyPorts,
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("50m"),
@@ -155,9 +212,39 @@ func withProxy(pod *corev1.PodSpec, workloadName string, proxy *ProxySpec) error
 			Secret: &corev1.SecretVolumeSource{SecretName: ProxyCASecretName(workloadName)}}})
 	}
 
-	pod.InitContainers = append(pod.InitContainers, initContainer)
+	if !spoof {
+		pod.InitContainers = append(pod.InitContainers, initContainer)
+	}
 	pod.Containers = append(pod.Containers, proxyContainer)
 	pod.Volumes = append(pod.Volumes, vols...)
+	if spoof {
+		// Point the Pod's resolver at the sidecar (dns-spoof). dnsPolicy=None
+		// is required: with a policy, kubelet APPENDS dnsConfig.nameservers to
+		// the cluster resolvers, so the client would use CoreDNS first and
+		// never reach the sidecar. With None, ONLY our list is used — so we
+		// must supply the search path and ndots ourselves.
+		pod.DNSPolicy = corev1.DNSNone
+		if pod.DNSConfig == nil {
+			pod.DNSConfig = &corev1.PodDNSConfig{}
+		}
+		domain := proxy.ClusterDomain
+		if domain == "" {
+			domain = "cluster.local"
+		}
+		pod.DNSConfig.Nameservers = []string{"127.0.0.1"}
+		pod.DNSConfig.Searches = []string{namespace + ".svc." + domain, "svc." + domain, domain}
+		ndots := "5"
+		pod.DNSConfig.Options = []corev1.PodDNSConfigOption{{Name: "ndots", Value: &ndots}}
+		// POD_IP for the sidecar's -self-ip.
+		for i := range pod.Containers {
+			if pod.Containers[i].Name == "easyproxy" {
+				pod.Containers[i].Env = append(pod.Containers[i].Env, corev1.EnvVar{
+					Name: "POD_IP", ValueFrom: &corev1.EnvVarSource{
+						FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"},
+					}})
+			}
+		}
+	}
 
 	// The workload container must trust the MITM CA and prefer the explicit
 	// proxy (same engine, better diagnostics than silent REDIRECT).

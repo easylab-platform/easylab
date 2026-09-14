@@ -64,7 +64,7 @@ func (c *Client) LaunchService(ctx context.Context, s ServiceSpec) (SandboxStatu
 	}
 	proxy := s.Proxy
 	if proxy == nil && !s.NoProxy {
-		proxy = c.EgressPolicySpec()
+		proxy = c.EgressPolicySpecService()
 	}
 	if proxy != nil {
 		if err := c.CreateProxyConfigMap(ctx, s.Name, proxy.Rules); err != nil {
@@ -75,7 +75,7 @@ func (c *Client) LaunchService(ctx context.Context, s ServiceSpec) (SandboxStatu
 				return SandboxStatus{}, fmt.Errorf("proxy CA secret: %w", err)
 			}
 		}
-		if err := withProxy(&dep.Spec.Template.Spec, s.Name, proxy); err != nil {
+		if err := withProxy(&dep.Spec.Template.Spec, s.Name, c.namespace, proxy); err != nil {
 			return SandboxStatus{}, err
 		}
 	}

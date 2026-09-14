@@ -88,6 +88,18 @@ spec:
             - name: EASYLAB_EGRESS_POLICY_DISABLED
               value: {{ .Values.backend.egressPolicyDisabled | quote }}
             {{- end }}
+            {{- if .Values.backend.egressMode }}
+            - name: EASYLAB_EGRESS_MODE
+              value: {{ .Values.backend.egressMode | quote }}
+            {{- end }}
+            {{- if .Values.backend.egressSpoofDNS }}
+            - name: EASYLAB_EGRESS_SPOOF_DNS
+              value: {{ .Values.backend.egressSpoofDNS | quote }}
+            {{- end }}
+            {{- if .Values.backend.egressUpstreamProxy }}
+            - name: EASYLAB_EGRESS_UPSTREAM_PROXY
+              value: {{ .Values.backend.egressUpstreamProxy | quote }}
+            {{- end }}
             - name: EASYLAB_REGISTRY_HOST
               value: {{ include "easylab.registryHost" . | quote }}
             {{- if .Values.sandboxes.runtimes }}
