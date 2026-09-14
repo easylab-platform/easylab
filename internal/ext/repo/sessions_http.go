@@ -108,7 +108,7 @@ func (s *server) adoptBranch(ctx context.Context, tenant, org, repo, branch stri
 		return "", false, errNotFound("branch %s/%s#%s does not exist", org, repo, branch)
 	}
 	name := namingSession(org, repo, branch)
-	if err := s.ag.EnsureSession(ctx, name); err != nil {
+	if err := s.ag.CreateRepoSession(ctx, org, repo, branch, "build"); err != nil {
 		return "", false, err
 	}
 	if err := s.store.InsertRow(ctx, tenant, org, repo, branch, name); err != nil {

@@ -42,25 +42,16 @@ func agentHTTPClient() *http.Client {
 	return &http.Client{Transport: &http.Transport{Protocols: protocols}}
 }
 
-// EnsureSession creates the session; already-exists is success.
-func (c *agentClient) EnsureSession(ctx context.Context, name string) error {
-	_, err := c.svc.CreateSession(ctx, connect.NewRequest(&agentv1.CreateSessionRequest{Name: name}))
-	if err == nil {
-		return nil
-	}
-	if connect.CodeOf(err) == connect.CodeAlreadyExists || connect.CodeOf(err) == connect.CodeInvalidArgument {
-		return nil
-	}
-	return err
-}
-
 // CreateRepoSession creates a repository-bound session (name "org:repo:branch")
-// with an explicit preset. `group` is left empty here — the easylab gateway
-// derives it ("org/repo") from the repo coordinates. already-exists is success.
+// with an explicit preset. The generic `group` is set to "org/repo" (the
+// repository key) so the session is grouped with every other session on the
+// same repo — repo-ext talks to the agent DIRECTLY, so it cannot rely on the
+// gateway's injection. already-exists is success.
 func (c *agentClient) CreateRepoSession(ctx context.Context, org, repo, branch, preset string) error {
 	name := namingSession(org, repo, branch)
 	_, err := c.svc.CreateSession(ctx, connect.NewRequest(&agentv1.CreateSessionRequest{
 		Name: name, Org: org, Repo: repo, Branch: branch, Preset: preset,
+		Group: org + "/" + repo,
 	}))
 	if err == nil {
 		return nil
