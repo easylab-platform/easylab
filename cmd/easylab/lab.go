@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -139,16 +140,50 @@ func (s *server) labRouter() *http.ServeMux {
 // labPrincipal resolves the caller from the bearer token. It returns the user
 // (nil for anonymous) and an access level ("write"/"read"). Write access is
 // granted by presenting a valid credential; anonymous callers are read-only.
+//
+// A loopback caller may additionally assert X-Agent-Tenant: the embedded agent
+// extensions forward the repository OWNER (a username, or the user's bound
+// agent tenant id) so agent-driven repo/branch operations act as that owner.
+// The header is trusted only from loopback.
 func (s *server) labPrincipal(r *http.Request) (*store.User, string) {
 	if token, ok := requestCredential(r); ok {
 		if tok, err := s.cs.LookupToken(token); err == nil {
 			u, err := s.cs.GetUser(tok.UserID)
 			if err == nil && !u.Disabled {
+				if owner := s.loopbackOwner(r); owner != nil {
+					return owner, "write"
+				}
 				return u, "write"
 			}
 		}
 	}
 	return nil, "read"
+}
+
+// loopbackOwner resolves a trusted X-Agent-Tenant assertion from a loopback
+// peer to a user (nil when absent/off-loopback/unknown).
+func (s *server) loopbackOwner(r *http.Request) *store.User {
+	v := strings.TrimSpace(r.Header.Get("X-Agent-Tenant"))
+	if v == "" || !isLoopback(r.RemoteAddr) {
+		return nil
+	}
+	if u, err := s.cs.GetUserByUsername(v); err == nil && !u.Disabled {
+		return u
+	}
+	if u, err := s.cs.GetUserByAgentTenant(v); err == nil && !u.Disabled {
+		return u
+	}
+	return nil
+}
+
+// isLoopback reports whether the peer address is this host.
+func isLoopback(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	host = strings.Trim(host, "[]")
+	return host == "" || host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
 // labAdmin wraps a handler requiring an authenticated (non-anonymous) principal

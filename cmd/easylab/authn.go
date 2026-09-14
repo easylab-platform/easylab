@@ -92,6 +92,9 @@ func (a *authnInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 		if !ok {
 			return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid or expired credential"))
 		}
+		// Loopback callers may assert repository ownership via X-Agent-Tenant
+		// (the embedded agent extensions forward the session's repo owner).
+		p = a.applyLoopbackOverride(p, req.Header(), req.Peer())
 		return next(withPrincipal(ctx, p), req)
 	}
 }
@@ -115,6 +118,42 @@ func (a *authnInterceptor) WrapStreamingClient(next connect.StreamingClientFunc)
 func (a *authnInterceptor) authenticate(h http.Header) (Principal, bool) {
 	token, _ := credential(h)
 	return a.s.authenticateCredential(token)
+}
+
+// applyLoopbackOverride honors a loopback-only X-Agent-Tenant header: the
+// embedded agent extensions call the gateway from the same pod and forward the
+// repository OWNER's identity (the users-as-tenants model names a user's agent
+// tenant after the user). The value may be a username (preferred) or the bound
+// agent tenant id. The header is ignored off loopback (trust boundary) and
+// never widens an admin principal.
+func (a *authnInterceptor) applyLoopbackOverride(p Principal, h http.Header, peer connect.Peer) Principal {
+	if p.Admin {
+		return p
+	}
+	owner := strings.TrimSpace(h.Get("X-Agent-Tenant"))
+	if owner == "" || !isLoopbackPeer(peer) {
+		return p
+	}
+	if u, err := a.s.cs.GetUserByUsername(owner); err == nil && !u.Disabled {
+		p.UserID = u.ID
+		p.Username = u.Username
+		return p
+	}
+	if u, err := a.s.cs.GetUserByAgentTenant(owner); err == nil && !u.Disabled {
+		p.UserID = u.ID
+		p.Username = u.Username
+	}
+	return p
+}
+
+// isLoopbackPeer reports whether the Connect peer is this host.
+func isLoopbackPeer(peer connect.Peer) bool {
+	host := peer.Addr
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = host[:i]
+	}
+	host = strings.Trim(host, "[]")
+	return host == "" || host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
 func isHealthRPC(procedure string) bool {
