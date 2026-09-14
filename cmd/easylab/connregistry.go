@@ -38,26 +38,38 @@ func (c *connRegistry) ListPackageTypes(ctx context.Context, req *connect.Reques
 
 func (c *connRegistry) ListPackages(ctx context.Context, req *connect.Request[easylabv1.ListPackagesRequest]) (*connect.Response[easylabv1.ListPackagesResponse], error) {
 	idx := c.s.registry.Meta
-	repos, err := idx.ListRepositories(ctx)
+	// The index summary carries Format and Repository SEPARATELY; the raw
+	// ListRepositories only returns repository names (no format), so splitting
+	// on "/" would mis-attribute scoped names (@scope/name) and OCI paths.
+	summaries, err := idx.ListPackages(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	type key struct{ format, repository string }
+	seen := map[key]bool{}
+	var order []key
+	for _, s := range summaries {
+		k := key{s.Format, s.Repository}
+		if !seen[k] {
+			seen[k] = true
+			order = append(order, k)
+		}
+	}
 	uid := userIDOf(ctx)
 	var out []*easylabv1.PackageInfo
-	for _, r := range repos {
-		format, name := splitRepo(r)
-		if req.Msg.Type != "" && format != req.Msg.Type {
+	for _, k := range order {
+		if req.Msg.Type != "" && k.format != req.Msg.Type {
 			continue
 		}
-		if !c.s.cs.CanRead(ctx, format, name, uid) {
+		if !c.s.cs.CanRead(ctx, k.format, k.repository, uid) {
 			continue
 		}
-		versions, verr := idx.ListVersions(ctx, format, name)
+		versions, verr := idx.ListVersions(ctx, k.format, k.repository)
 		if verr != nil {
 			continue
 		}
-		pi := &easylabv1.PackageInfo{Type: format, Name: name, Visibility: "public"}
-		if own, oerr := c.s.cs.GetPackageOwner(format, name); oerr == nil {
+		pi := &easylabv1.PackageInfo{Type: k.format, Name: k.repository, Visibility: "public"}
+		if own, oerr := c.s.cs.GetPackageOwner(k.format, k.repository); oerr == nil {
 			pi.Visibility = own.Visibility
 			if own.OwnerUserID != 0 {
 				pi.Owner = strconv.FormatInt(own.OwnerUserID, 10)

@@ -261,10 +261,14 @@ func (s *server) canSeeRepo(ctx context.Context, org, repo string) bool {
 // ---- service (service-deploy) authorization ----
 
 // canSeeService reports whether the caller may see/observe a deployed service:
-// any role on its owning repository, or its recorded owner, or an admin.
+// any role on its owning repository, or its recorded owner, or an admin. An
+// anonymous caller never sees services (the RPC surface requires auth anyway).
 func (s *server) canSeeService(ctx context.Context, owner, org, repo string) bool {
 	if principalOf(ctx).Admin {
 		return true
+	}
+	if principalOf(ctx).Anonymous {
+		return false
 	}
 	if org != "" || repo != "" {
 		if role, err := s.repoRole(ctx, org, repo); err == nil && role.CanRead() {

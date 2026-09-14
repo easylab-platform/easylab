@@ -2,7 +2,7 @@ module easyvcs-e2e
 
 go 1.26
 
-require github.com/abcp-sdk/abc-protocol-go v1.0.9
+require github.com/abcp-sdk/abc-protocol-go v1.2.0
 
 require (
 	github.com/klauspost/compress v1.18.5 // indirect

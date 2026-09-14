@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	artifactkit "github.com/easylab-platform/artifact/core"
+	"github.com/easylab-platform/easylab/internal/sbxreg"
 	"github.com/easylab-platform/easyvcs/object"
 	"github.com/easylab-platform/easyvcs/revision"
 	"github.com/easylab-platform/easyvcs/store"
@@ -29,7 +30,11 @@ func newTestServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &server{cs: cs, registry: reg, ops: opsState, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
+	sbx, err := sbxreg.Open(store.KindSQLite, store.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &server{cs: cs, registry: reg, ops: opsState, sbx: sbx, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
 }
 
 // newAuthServer returns a server with auth enabled for a single token.

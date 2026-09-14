@@ -191,7 +191,7 @@ func (c *connLab) ReadBlob(ctx context.Context, req *connect.Request[easylabv1.R
 
 func (c *connLab) WriteBlob(ctx context.Context, req *connect.Request[easylabv1.WriteBlobRequest]) (*connect.Response[easylabv1.WriteBlobResponse], error) {
 
-	if err := c.s.requireRepoAction(ctx, req.Msg.Org, req.Msg.Repo, repoCanPropose, "writing to a branch"); err != nil {
+	if err := c.s.requireRepoAction(ctx, req.Msg.Org, req.Msg.Repo, repoCanPush, "writing to a branch"); err != nil {
 		return nil, err
 	}
 	repo, err := c.s.openRepoAuthorized(ctx, req.Msg.Org, req.Msg.Repo, repoCanRead, "reading a repository")
