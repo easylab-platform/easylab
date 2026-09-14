@@ -13,6 +13,11 @@ rules:
   - apiGroups: [""]
     resources: ["services", "pods"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The egress-proxy sidecar is configured per workload via a ConfigMap the
+  # gateway creates/updates (k8s.CreateProxyConfigMap).
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

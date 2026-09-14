@@ -176,8 +176,9 @@ func main() {
 	run(ag, extRepo, "delete", 60*time.Second, map[string]any{"path": "e2e-tmp-del.txt", "message": "e2e delete"})
 
 	fmt.Println("\n===== repo management (vcs-* tools) =====")
+	e2eTag := fmt.Sprintf("e2e-tag-%d", time.Now().UnixNano()%1_000_000)
 	run(ag, extRepo, "vcs-tag-list", 30*time.Second, map[string]any{})
-	run(ag, extRepo, "vcs-tag-set", 30*time.Second, map[string]any{"name": "e2e-tag"})
+	run(ag, extRepo, "vcs-tag-set", 30*time.Second, map[string]any{"name": e2eTag})
 	_, mrData := run(ag, extRepo, "vcs-mr-create", 30*time.Second, map[string]any{"title": "e2e MR", "target": "main"})
 	run(ag, extRepo, "vcs-mr-list", 30*time.Second, map[string]any{})
 	mrIID := dataStr(mrData, "iid")
@@ -186,9 +187,20 @@ func main() {
 	}
 	run(ag, extRepo, "vcs-mr-comment", 30*time.Second, map[string]any{"iid": mrIID, "body": "e2e comment"})
 	run(ag, extRepo, "vcs-mr-merge", 30*time.Second, map[string]any{"iid": mrIID})
-	// subsession-create: missing 'prompt' is a deterministic tool error (the
-	// happy path spawns a real LLM turn + a branch, verified out of band).
+	// subsession-create error path: with a branch but no prompt, the tool must
+	// answer with a well-formed tool error.
 	runExpectErr(ag, extRepo, "subsession-create", 30*time.Second, map[string]any{"branch": "e2e-sub"})
+	// subsession-create happy path: creates a new branch + a session bound to
+	// it (preset=build) and prompts it. The child's own turn / MR is async and
+	// verified out of band; here we assert the launch succeeded.
+	subBranch := fmt.Sprintf("e2e-sub-%d", time.Now().UnixNano()%1_000_000)
+	_, subData := run(ag, extRepo, "subsession-create", 120*time.Second, map[string]any{
+		"branch": subBranch,
+		"prompt": "Say hello and stop. Do not open a change request.",
+	})
+	if child := dataStr(subData, "session"); child != "" {
+		fmt.Printf("NOTE subsession child = %s (branch %s)\n", child, subBranch)
+	}
 
 	fmt.Println("\n===== ops extension =====")
 	run(ag, extOps, "container-search", 30*time.Second, map[string]any{})
