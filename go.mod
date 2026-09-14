@@ -7,13 +7,13 @@ require (
 	github.com/abcp-sdk/abc-protocol-go v1.2.0
 	github.com/abcp-sdk/agent-proto v0.12.0
 	github.com/abcp-sdk/agent-sdk-go v0.14.0
-	github.com/easylab-platform/artifact/apk v0.2.0
+	github.com/easylab-platform/artifact/apk v0.3.0
 	github.com/easylab-platform/artifact/cargo v0.2.0
 	github.com/easylab-platform/artifact/composer v0.2.0
 	github.com/easylab-platform/artifact/conan v0.2.1
-	github.com/easylab-platform/artifact/conda v0.2.0
-	github.com/easylab-platform/artifact/core v0.7.0
-	github.com/easylab-platform/artifact/debian v0.2.0
+	github.com/easylab-platform/artifact/conda v0.3.0
+	github.com/easylab-platform/artifact/core v0.8.0
+	github.com/easylab-platform/artifact/debian v0.3.0
 	github.com/easylab-platform/artifact/generic v0.2.0
 	github.com/easylab-platform/artifact/gitlfs v0.2.0
 	github.com/easylab-platform/artifact/go v0.2.0
@@ -28,7 +28,7 @@ require (
 	github.com/easylab-platform/artifact/protobuf v0.2.0
 	github.com/easylab-platform/artifact/pub v0.2.0
 	github.com/easylab-platform/artifact/pypi v0.2.0
-	github.com/easylab-platform/artifact/rpm v0.2.0
+	github.com/easylab-platform/artifact/rpm v0.3.0
 	github.com/easylab-platform/artifact/rubygems v0.2.1
 	github.com/easylab-platform/artifact/swiftpm v0.2.0
 	github.com/easylab-platform/artifact/system v0.2.0
@@ -85,6 +85,7 @@ require (
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/stretchr/testify v1.12.1 // indirect
+	github.com/ulikunitz/xz v0.5.16 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
