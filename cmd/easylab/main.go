@@ -178,7 +178,7 @@ func main() {
 		EgressPolicyCAKey:         egressCAKey,
 		EgressPolicyMode:          egressMode,
 		EgressPolicySpoofDNS:      egressSpoofDNS,
-		EgressPolicyUpstreamProxy: envOrStr("EASYLAB_EGRESS_UPSTREAM_PROXY", ""),
+		EgressPolicyUpstreamProxy: envOrStr("EASYLAB_EGRESS_UPSTREAM_PROXY", envOrStr("EASYLAB_UPSTREAM_PROXY", "")),
 		ClusterDomain:             envOrStr("EASYLAB_CLUSTER_DOMAIN", "cluster.local"),
 	}); kerr == nil {
 		opsState.services = ops.NewK8sServiceRunner(kc)
