@@ -103,7 +103,7 @@ agent:
     # v2 (multi-tenant protocol). Phase 1 rollout: auth disabled, every
     # request pinned to the default tenant; flip to required (+ admin/bootstrap
     # tokens) in phase 2.
-    tag: "20260913184331"
+    tag: "20260914120814"
     pullPolicy: IfNotPresent
   # Service name published for the agent (repo extension defaults to this).
   serviceName: abcp-agent
