@@ -48,11 +48,11 @@ func httpJSON(token, procedure string, body map[string]any) (int, map[string]any
 func rbacCheck(name string, got, want int) {
 	if got == want {
 		pass++
-		fmt.Printf("PASS rbac/%-32s %d\\n", name, got)
+		fmt.Printf("PASS rbac/%-32s %d\n", name, got)
 		return
 	}
 	fail++
-	fmt.Printf("FAIL rbac/%-32s got %d want %d\\n", name, got, want)
+	fmt.Printf("FAIL rbac/%-32s got %d want %d\n", name, got, want)
 }
 
 // runRBAC exercises the unified owner/maintainer/developer authorization over
@@ -89,7 +89,7 @@ func runRBAC() {
 	// Owner creates a repo and grants maint/dev (owner name == username).
 	ns, repo := "team", su
 	if code, _ := httpJSON(ownerTok, "/easylab.v1.LabService/CreateRepo", map[string]any{"org": ns, "repo": repo}); code != 200 {
-		fmt.Printf("NOTE rbac: CreateRepo -> %d\\n", code)
+		fmt.Printf("NOTE rbac: CreateRepo -> %d\n", code)
 	}
 	addMember := func(user, role string) {
 		httpJSON(ownerTok, "/api/v1/namespaces/"+ns+"/members", map[string]any{"repo": repo, "username": user, "role": role})
