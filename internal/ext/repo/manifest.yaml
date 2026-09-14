@@ -304,46 +304,6 @@ tools:
           descriptions:
             zh: change ID。
       required: [rev]
-  - name: vcs-branch-list
-    description: List the current repository's branches (own repo only).
-    descriptions:
-      zh: 列出当前仓库的分支（仅限本仓库）。
-    input_schema:
-      type: object
-      properties: {}
-
-  - name: vcs-branch-create
-    description: "Create a branch in the current repository from `from` (default: the session branch). Own repo only."
-    descriptions:
-      zh: 在当前仓库中从 `from`（默认：会话分支）创建分支。仅限本仓库。
-    input_schema:
-      type: object
-      properties:
-        name:
-          type: string
-          description: New branch name.
-          descriptions:
-            zh: 新分支名。
-        from:
-          type: string
-          description: "Source branch/rev (default: the session branch)."
-          descriptions:
-            zh: 源分支/修订（默认：会话分支）。
-      required: [name]
-
-  - name: vcs-branch-delete
-    description: Delete a branch in the current repository. Own repo only.
-    descriptions:
-      zh: 删除当前仓库中的分支。仅限本仓库。
-    input_schema:
-      type: object
-      properties:
-        name:
-          type: string
-          description: Branch name to delete.
-          descriptions:
-            zh: 要删除的分支名。
-      required: [name]
 
   - name: vcs-tag-list
     description: List the current repository's tags.
@@ -372,24 +332,10 @@ tools:
             zh: 目标修订（默认：当前分支头）。
       required: [name]
 
-  - name: vcs-tag-delete
-    description: Delete a tag in the current repository.
-    descriptions:
-      zh: 删除当前仓库中的标签。
-    input_schema:
-      type: object
-      properties:
-        name:
-          type: string
-          description: Tag name.
-          descriptions:
-            zh: 标签名。
-      required: [name]
-
   - name: vcs-mr-create
-    description: Open a change request (merge request) in the current repository. Own repo only.
+    description: Open a change request (merge request) in the current repository. `source` defaults to this session's branch. Own repo only.
     descriptions:
-      zh: 在当前仓库创建合并请求。仅限本仓库。
+      zh: 在当前仓库创建合并请求。`source` 默认为本会话分支。仅限本仓库。
     input_schema:
       type: object
       properties:
@@ -398,22 +344,22 @@ tools:
           description: Title.
           descriptions:
             zh: 标题。
-        source:
-          type: string
-          description: Source branch.
-          descriptions:
-            zh: 源分支。
         target:
           type: string
           description: Target branch.
           descriptions:
             zh: 目标分支。
+        source:
+          type: string
+          description: "Source branch (default: this session's branch)."
+          descriptions:
+            zh: 源分支（默认：本会话分支）。
         description:
           type: string
           description: Optional description.
           descriptions:
             zh: 可选描述。
-      required: [title, source, target]
+      required: [title, target]
 
   - name: vcs-mr-list
     description: "List the current repository's change requests (optional state filter: open|merged|closed)."
@@ -427,58 +373,6 @@ tools:
           description: State filter.
           descriptions:
             zh: 状态过滤。
-
-  - name: vcs-mr-get
-    description: Show one change request by iid.
-    descriptions:
-      zh: 按 iid 展示某个合并请求。
-    input_schema:
-      type: object
-      properties:
-        iid:
-          type: string
-          description: Change-request iid.
-          descriptions:
-            zh: 合并请求 iid。
-      required: [iid]
-
-  - name: vcs-mr-review
-    description: "Submit a review (state: approved|request_changes|comment) on a change request."
-    descriptions:
-      zh: 提交评审（state：approved|request_changes|comment）。
-    input_schema:
-      type: object
-      properties:
-        iid:
-          type: string
-          description: Change-request iid.
-          descriptions:
-            zh: 合并请求 iid。
-        state:
-          type: string
-          description: Review state.
-          descriptions:
-            zh: 评审状态。
-        body:
-          type: string
-          description: Optional review body.
-          descriptions:
-            zh: 可选评审内容。
-      required: [iid, state]
-
-  - name: vcs-mr-review-list
-    description: List reviews on a change request.
-    descriptions:
-      zh: 列出某合并请求的评审。
-    input_schema:
-      type: object
-      properties:
-        iid:
-          type: string
-          description: Change-request iid.
-          descriptions:
-            zh: 合并请求 iid。
-      required: [iid]
 
   - name: vcs-mr-comment
     description: Comment on a change request (optional file path).
@@ -504,20 +398,6 @@ tools:
             zh: 可选文件路径。
       required: [iid, body]
 
-  - name: vcs-mr-comment-list
-    description: List comments on a change request.
-    descriptions:
-      zh: 列出某合并请求的评论。
-    input_schema:
-      type: object
-      properties:
-        iid:
-          type: string
-          description: Change-request iid.
-          descriptions:
-            zh: 合并请求 iid。
-      required: [iid]
-
   - name: vcs-mr-merge
     description: Merge a change request. ALLOWED ONLY FROM THE SESSION WHOSE BRANCH IS THE REPOSITORY'S DEFAULT BRANCH (e.g. main).
     descriptions:
@@ -531,160 +411,4 @@ tools:
           descriptions:
             zh: 合并请求 iid。
       required: [iid]
-
-  - name: vcs-repo-config
-    description: Update the repository's settings (visibility public|private, description, default-branch). Own repo only.
-    descriptions:
-      zh: 更新仓库设置（visibility public|private、description、default-branch）。仅限本仓库。
-    input_schema:
-      type: object
-      properties:
-        visibility:
-          type: string
-          description: public|private.
-          descriptions:
-            zh: public|private。
-        description:
-          type: string
-          description: Repository description.
-          descriptions:
-            zh: 仓库描述。
-        default-branch:
-          type: string
-          description: Default branch name.
-          descriptions:
-            zh: 默认分支名。
-
-  - name: vcs-release-create
-    description: Create a release (tag) in the current repository.
-    descriptions:
-      zh: 在当前仓库创建 release（tag）。
-    input_schema:
-      type: object
-      properties:
-        tag:
-          type: string
-          description: Release tag.
-          descriptions:
-            zh: Release 标签。
-        name:
-          type: string
-          description: Display name.
-          descriptions:
-            zh: 显示名。
-        description:
-          type: string
-          description: Description.
-          descriptions:
-            zh: 描述。
-        target:
-          type: string
-          description: Target revision.
-          descriptions:
-            zh: 目标修订。
-        draft:
-          type: string
-          description: Draft (true|false).
-          descriptions:
-            zh: 草稿（true|false）。
-        prerelease:
-          type: string
-          description: Prerelease (true|false).
-          descriptions:
-            zh: 预发布（true|false）。
-      required: [tag]
-
-  - name: vcs-release-list
-    description: List the current repository's releases.
-    descriptions:
-      zh: 列出当前仓库的 release。
-    input_schema:
-      type: object
-      properties: {}
-
-  - name: vcs-release-delete
-    description: Delete a release by tag.
-    descriptions:
-      zh: 按标签删除 release。
-    input_schema:
-      type: object
-      properties:
-        tag:
-          type: string
-          description: Release tag.
-          descriptions:
-            zh: Release 标签。
-      required: [tag]
-
-  - name: vcs-release-upload
-    description: Upload a text asset to a release.
-    descriptions:
-      zh: 向 release 上传文本资产。
-    input_schema:
-      type: object
-      properties:
-        tag:
-          type: string
-          description: Release tag.
-          descriptions:
-            zh: Release 标签。
-        name:
-          type: string
-          description: Asset file name.
-          descriptions:
-            zh: 资产文件名。
-        content:
-          type: string
-          description: Asset text content.
-          descriptions:
-            zh: 资产文本内容。
-        content-type:
-          type: string
-          description: Optional MIME type.
-          descriptions:
-            zh: 可选 MIME 类型。
-      required: [tag, name]
-
-  - name: vcs-release-download
-    description: Download a release asset into the shared /data downloads dir and return its path + size (bytes are never inlined).
-    descriptions:
-      zh: 下载 release 资产到共享 /data downloads 目录并返回路径与大小（不内联字节）。
-    input_schema:
-      type: object
-      properties:
-        tag:
-          type: string
-          description: Release tag.
-          descriptions:
-            zh: Release 标签。
-        name:
-          type: string
-          description: Asset name.
-          descriptions:
-            zh: 资产名。
-      required: [tag, name]
-
-  - name: vcs-package-visibility
-    description: Set a package's visibility (public|private); requires maintainer+ on the package's scope.
-    descriptions:
-      zh: 设置包的可见性（public|private）；需对包所属 scope 具备 maintainer+。
-    input_schema:
-      type: object
-      properties:
-        type:
-          type: string
-          description: Registry format (npm/oci/…).
-          descriptions:
-            zh: 注册表格式（npm/oci 等）。
-        name:
-          type: string
-          description: Package name.
-          descriptions:
-            zh: 包名。
-        visibility:
-          type: string
-          description: public|private.
-          descriptions:
-            zh: public|private。
-      required: [type, name, visibility]
 

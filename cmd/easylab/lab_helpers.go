@@ -47,7 +47,6 @@ func resolveSnapshotOf(ws *revision.Workspace, repo *store.Repo, ref string) (*s
 // resolveRefAny resolves a rev expression (branch / tag / sha / revision id /
 // "@") to a snapshot hash (object id). It mirrors the resolve semantics the
 // removed REST handler used.
-
 func resolveRefAny(ws *revision.Workspace, repo *store.Repo, ref string) (object.ID, error) {
 	if ref == "" || ref == "@" {
 		revs, err := ws.Log()
@@ -99,7 +98,6 @@ func resolveRefAny(ws *revision.Workspace, repo *store.Repo, ref string) (object
 }
 
 // resolveRevID resolves a rev expression to its stable revision id.
-
 func resolveRevID(ws *revision.Workspace, repo *store.Repo, ref string) (string, error) {
 	hash, err := resolveRefAny(ws, repo, ref)
 	if err != nil {
