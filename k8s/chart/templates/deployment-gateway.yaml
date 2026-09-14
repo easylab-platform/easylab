@@ -82,6 +82,8 @@ spec:
               value: {{ .Values.backend.hostDataDir | quote }}
             - name: EASYLAB_BUILDKIT_IMAGE
               value: {{ .Values.backend.buildkitImage | quote }}
+            - name: EASYLAB_EGRESS_IMAGE
+              value: {{ .Values.backend.egressImage | quote }}
             - name: EASYLAB_REGISTRY_HOST
               value: {{ include "easylab.registryHost" . | quote }}
             {{- if .Values.sandboxes.runtimes }}

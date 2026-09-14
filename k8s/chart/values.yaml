@@ -56,6 +56,10 @@ backend:
   # One-container buildkit-worker (buildkitd + easyworker); easylab runs
   # builds as worker jobs. Image ref is qualified with the registry host.
   buildkitImage: forgejo.develop.10.199.64.20.nip.io/easylab/buildkit-worker:20260912153825
+  # Egress-proxy (easyproxy) image injected as a sidecar+init into sandbox/
+  # service/job pods. Must be fully qualified so the NODE can pull it (a bare
+  # `easylab/...` name would be resolved against docker.io and fail).
+  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easyproxy:v0.1.0
   # Host path backing the /data hostPath mount (ephemeral build pods read the
   # build context + write logs there).
   hostDataDir: /home/develop/.easylab

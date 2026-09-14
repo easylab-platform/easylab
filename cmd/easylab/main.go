@@ -166,6 +166,7 @@ func main() {
 		Proxy:                envOrStr("EASYLAB_UPSTREAM_PROXY", ""),
 		EgressPolicyDisabled: egressDisabled,
 		EgressPolicyGateway:  envOrStr("EASYLAB_EGRESS_GATEWAY", registryHost),
+		EgressPolicyImage:    envOrStr("EASYLAB_EGRESS_IMAGE", ""),
 		EgressPolicyCACert:   egressCACert,
 		EgressPolicyCAKey:    egressCAKey,
 	}); kerr == nil {
