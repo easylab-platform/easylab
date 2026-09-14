@@ -91,8 +91,11 @@ func runRBAC() {
 	if code, _ := httpJSON(ownerTok, "/easylab.v1.LabService/CreateRepo", map[string]any{"org": ns, "repo": repo}); code != 200 {
 		fmt.Printf("NOTE rbac: CreateRepo -> %d\n", code)
 	}
+	// Grant collaborator roles via the SetRepoMember RPC (REST removed).
+	// org namespace == the owner's username, repo == the owner's username too.
 	addMember := func(user, role string) {
-		httpJSON(ownerTok, "/api/v1/namespaces/"+ns+"/members", map[string]any{"repo": repo, "username": user, "role": role})
+		httpJSON(ownerTok, "/easylab.v1.LabService/SetRepoMember", map[string]any{
+			"org": ns, "repo": repo, "username": user, "role": role})
 	}
 	addMember(su+"m", "maintainer")
 	addMember(su+"d", "developer")

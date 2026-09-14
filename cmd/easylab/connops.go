@@ -109,9 +109,9 @@ func (c *connOps) LaunchService(ctx context.Context, req *connect.Request[easyla
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	// k8s label VALUES must be RFC-1123 (no ':'), so the session id
-	// (org:repo:branch) is sanitized for storage; filtering compares against
-	// the sanitized form.
+	// k8s label VALUES must be RFC-1123 (no ':'), so any label value (incl.
+	// the ext-supplied easylab/session=org:repo:branch) is sanitized for
+	// storage; filtering compares against the sanitized form.
 	if req.Msg.Session != "" {
 		annotations["easylab/session"] = k8s.LabelKey(req.Msg.Session)
 	}
@@ -120,6 +120,12 @@ func (c *connOps) LaunchService(ctx context.Context, req *connect.Request[easyla
 	}
 	if req.Msg.Repo != "" {
 		annotations["easylab/repo"] = k8s.LabelKey(req.Msg.Repo)
+	}
+	for k, v := range annotations {
+		if k == "easylab/owner" {
+			continue
+		}
+		annotations[k] = k8s.LabelKey(v)
 	}
 	// Ownership label: the deploying user (used to filter list/get/delete).
 	annotations["easylab/owner"] = fmt.Sprintf("%d", principalOf(ctx).UserID)
