@@ -28,8 +28,8 @@ github.com/easylab-platform/artifact/core v0.9.0 h1:id0HPOVIsQGUddT9Mz+lZ4S5A6x4
 github.com/easylab-platform/artifact/core v0.9.0/go.mod h1:skG4oi1GjtsMunRO+nIIto9Gz56Vw8kJZO5lE6j37CY=
 github.com/easylab-platform/artifact/debian v0.3.1 h1:wE1JdWF5RyYRWYneLYM9SPSD18CrRCRxCtLikHK0ziM=
 github.com/easylab-platform/artifact/debian v0.3.1/go.mod h1:oCunHMVrCzN1nb6XHg4S/N3nbB8ipgB1VaWwr3METLk=
-github.com/easylab-platform/artifact/generic v0.2.1 h1:OdMiM9zdVqWi92KTZ6Fbpt6Nk7cM9pKlIR7dmY2KaDE=
-github.com/easylab-platform/artifact/generic v0.2.1/go.mod h1:81E9jWP8BAANoeGPcbevVmDANkF/0QrE2amOZ2NQfeQ=
+github.com/easylab-platform/artifact/generic v0.2.2 h1:7gd9lLoTw7Yo2s7UOuOZXi9IhYPFt2Nwvm5MpxW6DMw=
+github.com/easylab-platform/artifact/generic v0.2.2/go.mod h1:81E9jWP8BAANoeGPcbevVmDANkF/0QrE2amOZ2NQfeQ=
 github.com/easylab-platform/artifact/gitlfs v0.2.0 h1:ppsbpah7ththuwiclKx3URsYu0ACjUNjXoMm46T4KPI=
 github.com/easylab-platform/artifact/gitlfs v0.2.0/go.mod h1:hR2tc3b9fWt19QkA/3qRTKAgrbXxw79MAsARoEbrqos=
 github.com/easylab-platform/artifact/go v0.2.1 h1:bY3XIsNhnbRq/JugdVSyAR0JTuFP/06llJDMVrIFI5g=

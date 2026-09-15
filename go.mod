@@ -14,7 +14,7 @@ require (
 	github.com/easylab-platform/artifact/conda v0.3.1
 	github.com/easylab-platform/artifact/core v0.9.0
 	github.com/easylab-platform/artifact/debian v0.3.1
-	github.com/easylab-platform/artifact/generic v0.2.1
+	github.com/easylab-platform/artifact/generic v0.2.2
 	github.com/easylab-platform/artifact/gitlfs v0.2.0
 	github.com/easylab-platform/artifact/go v0.2.1
 	github.com/easylab-platform/artifact/helm v0.2.1
