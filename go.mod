@@ -8,29 +8,29 @@ require (
 	github.com/abcp-sdk/agent-proto v0.12.0
 	github.com/abcp-sdk/agent-sdk-go v0.14.0
 	github.com/easylab-platform/artifact/apk v0.3.0
-	github.com/easylab-platform/artifact/cargo v0.2.0
-	github.com/easylab-platform/artifact/composer v0.2.0
+	github.com/easylab-platform/artifact/cargo v0.2.1
+	github.com/easylab-platform/artifact/composer v0.2.1
 	github.com/easylab-platform/artifact/conan v0.2.1
 	github.com/easylab-platform/artifact/conda v0.3.0
-	github.com/easylab-platform/artifact/core v0.8.0
-	github.com/easylab-platform/artifact/debian v0.3.0
-	github.com/easylab-platform/artifact/generic v0.2.0
+	github.com/easylab-platform/artifact/core v0.9.0
+	github.com/easylab-platform/artifact/debian v0.3.1
+	github.com/easylab-platform/artifact/generic v0.2.1
 	github.com/easylab-platform/artifact/gitlfs v0.2.0
-	github.com/easylab-platform/artifact/go v0.2.0
-	github.com/easylab-platform/artifact/helm v0.2.0
-	github.com/easylab-platform/artifact/hex v0.2.1
+	github.com/easylab-platform/artifact/go v0.2.1
+	github.com/easylab-platform/artifact/helm v0.2.1
+	github.com/easylab-platform/artifact/hex v0.2.2
 	github.com/easylab-platform/artifact/huggingface v0.2.0
-	github.com/easylab-platform/artifact/maven v0.2.0
+	github.com/easylab-platform/artifact/maven v0.2.1
 	github.com/easylab-platform/artifact/nix v0.2.0
-	github.com/easylab-platform/artifact/npm v0.3.0
-	github.com/easylab-platform/artifact/nuget v0.2.0
-	github.com/easylab-platform/artifact/oci v0.2.4
-	github.com/easylab-platform/artifact/protobuf v0.2.0
-	github.com/easylab-platform/artifact/pub v0.2.0
-	github.com/easylab-platform/artifact/pypi v0.2.0
+	github.com/easylab-platform/artifact/npm v0.3.1
+	github.com/easylab-platform/artifact/nuget v0.2.1
+	github.com/easylab-platform/artifact/oci v0.2.5
+	github.com/easylab-platform/artifact/protobuf v0.2.1
+	github.com/easylab-platform/artifact/pub v0.2.1
+	github.com/easylab-platform/artifact/pypi v0.2.1
 	github.com/easylab-platform/artifact/rpm v0.3.0
-	github.com/easylab-platform/artifact/rubygems v0.2.1
-	github.com/easylab-platform/artifact/swiftpm v0.2.0
+	github.com/easylab-platform/artifact/rubygems v0.2.2
+	github.com/easylab-platform/artifact/swiftpm v0.2.1
 	github.com/easylab-platform/artifact/system v0.2.0
 	github.com/easylab-platform/easylab-proto v0.17.0
 	github.com/easylab-platform/easyvcs v0.9.4
