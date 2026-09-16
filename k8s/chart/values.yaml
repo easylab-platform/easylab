@@ -59,7 +59,7 @@ backend:
   # Egress-proxy (easyproxy) image injected as a sidecar+init into sandbox/
   # service/job pods. Must be fully qualified so the NODE can pull it (a bare
   # `easylab/...` name would be resolved against docker.io and fail).
-  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easyproxy:v0.5.1
+  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easyproxy:v0.5.3
   # When "1", the egress-proxy sidecar is NOT injected (workloads egress
   # directly). Prefer `egressMode` instead: disabling also loses the
   # env-proxy fallback.
