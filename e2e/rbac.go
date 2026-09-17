@@ -12,7 +12,7 @@ import (
 
 // Gateway base for the RBAC HTTP checks (loopback inside the easylab pod).
 var (
-	labHTTP = envOr("EASYLAB", "http://127.0.0.1:8080")
+	labHTTP  = envOr("EASYLAB", "http://127.0.0.1:8080")
 	adminTok = envOr("EASYLAB_ADMIN_TOKEN", "admin-devtoken")
 )
 

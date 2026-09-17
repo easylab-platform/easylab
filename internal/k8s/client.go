@@ -232,7 +232,11 @@ func (c *Client) WorkerHostDir() string { return workerHostDir() }
 // traffic is steered into the easylab gateway by the default egress policy.
 // Keep in sync with easyproxy's defaultrules.go and cmd/easylab/registry.go.
 var defaultUpstreams = []egressDomain{
-	{Match: []string{"registry-1.docker.io", "docker.io", "production.cloudflare.docker.com"}},
+	{Match: []string{"registry-1.docker.io", "docker.io", "index.docker.io"}},
+	{Match: []string{"ghcr.io", "quay.io", "gcr.io", "registry.k8s.io",
+		"mcr.microsoft.com", "public.ecr.aws", "nvcr.io"}},
+	// Container blob CDNs stay direct: adapters follow the 307 themselves.
+	{Match: []string{"production.cloudflare.docker.com", "*.cloudflarestorage.com"}},
 	{Match: []string{"registry.npmjs.org", "*.npmjs.org"}},
 	{Match: []string{"pypi.org", "files.pythonhosted.org"}},
 	{Match: []string{"proxy.golang.org", "sum.golang.org"}},
@@ -254,6 +258,9 @@ var defaultUpstreams = []egressDomain{
 	{Match: []string{"huggingface.co", "*.huggingface.co", "cdn-lfs.huggingface.co"}},
 	{Match: []string{"repo.anaconda.com", "conda.anaconda.org"}},
 	{Match: []string{"cache.nixos.org"}},
+	// Source mirrors: git smart-HTTP and Ivy repositories.
+	{Match: []string{"github.com", "codeload.github.com"}},
+	{Match: []string{"repo.scala-sbt.org", "scala.jfrog.io"}},
 }
 
 type egressDomain struct {

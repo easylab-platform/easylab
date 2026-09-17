@@ -260,7 +260,6 @@ func main() {
 	run(ag, extOps, "pull-git-repo", 300*time.Second, map[string]any{
 		"git-url": "http://forgejo.develop.10.199.64.20.nip.io/easylab/team/demo.git", "org": "e2etest"})
 
-
 	fmt.Println("\n===== rbac (HTTP through the real gateway) =====")
 	runRBAC()
 
