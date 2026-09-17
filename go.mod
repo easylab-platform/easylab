@@ -7,33 +7,33 @@ require (
 	github.com/abcp-sdk/abc-protocol-go v1.2.0
 	github.com/abcp-sdk/agent-proto v0.14.0
 	github.com/abcp-sdk/agent-sdk-go v0.16.0
-	github.com/easylab-platform/artifact/apk v0.5.0
-	github.com/easylab-platform/artifact/cargo v0.4.0
-	github.com/easylab-platform/artifact/composer v0.4.0
-	github.com/easylab-platform/artifact/conan v0.4.0
-	github.com/easylab-platform/artifact/conda v0.5.0
-	github.com/easylab-platform/artifact/core v0.11.0
-	github.com/easylab-platform/artifact/debian v0.5.0
-	github.com/easylab-platform/artifact/generic v0.4.0
-	github.com/easylab-platform/artifact/git v0.1.0
-	github.com/easylab-platform/artifact/gitlfs v0.4.0
-	github.com/easylab-platform/artifact/go v0.4.0
-	github.com/easylab-platform/artifact/helm v0.4.0
-	github.com/easylab-platform/artifact/hex v0.4.0
-	github.com/easylab-platform/artifact/huggingface v0.4.0
-	github.com/easylab-platform/artifact/ivy v0.1.0
-	github.com/easylab-platform/artifact/maven v0.4.0
-	github.com/easylab-platform/artifact/nix v0.4.0
-	github.com/easylab-platform/artifact/npm v0.5.0
-	github.com/easylab-platform/artifact/nuget v0.4.0
-	github.com/easylab-platform/artifact/oci v0.4.0
-	github.com/easylab-platform/artifact/protobuf v0.4.0
-	github.com/easylab-platform/artifact/pub v0.4.0
-	github.com/easylab-platform/artifact/pypi v0.4.0
-	github.com/easylab-platform/artifact/rpm v0.5.0
-	github.com/easylab-platform/artifact/rubygems v0.4.0
-	github.com/easylab-platform/artifact/swiftpm v0.4.0
-	github.com/easylab-platform/artifact/system v0.4.0
+	github.com/easylab-platform/artifact/apk v0.5.1
+	github.com/easylab-platform/artifact/cargo v0.4.1
+	github.com/easylab-platform/artifact/composer v0.4.1
+	github.com/easylab-platform/artifact/conan v0.4.1
+	github.com/easylab-platform/artifact/conda v0.5.1
+	github.com/easylab-platform/artifact/core v0.11.1
+	github.com/easylab-platform/artifact/debian v0.5.1
+	github.com/easylab-platform/artifact/generic v0.4.1
+	github.com/easylab-platform/artifact/git v0.1.1
+	github.com/easylab-platform/artifact/gitlfs v0.4.1
+	github.com/easylab-platform/artifact/go v0.4.1
+	github.com/easylab-platform/artifact/helm v0.4.1
+	github.com/easylab-platform/artifact/hex v0.4.1
+	github.com/easylab-platform/artifact/huggingface v0.4.1
+	github.com/easylab-platform/artifact/ivy v0.1.1
+	github.com/easylab-platform/artifact/maven v0.4.1
+	github.com/easylab-platform/artifact/nix v0.4.1
+	github.com/easylab-platform/artifact/npm v0.5.1
+	github.com/easylab-platform/artifact/nuget v0.4.1
+	github.com/easylab-platform/artifact/oci v0.4.1
+	github.com/easylab-platform/artifact/protobuf v0.4.1
+	github.com/easylab-platform/artifact/pub v0.4.1
+	github.com/easylab-platform/artifact/pypi v0.4.1
+	github.com/easylab-platform/artifact/rpm v0.5.1
+	github.com/easylab-platform/artifact/rubygems v0.4.1
+	github.com/easylab-platform/artifact/swiftpm v0.4.1
+	github.com/easylab-platform/artifact/system v0.4.1
 	github.com/easylab-platform/easylab-proto v0.17.0
 	github.com/easylab-platform/easyvcs v0.9.4
 	github.com/glebarez/sqlite v1.11.0
