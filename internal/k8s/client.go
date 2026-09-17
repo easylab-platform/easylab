@@ -261,6 +261,12 @@ var defaultUpstreams = []egressDomain{
 	// Source mirrors: git smart-HTTP and Ivy repositories.
 	{Match: []string{"github.com", "codeload.github.com"}},
 	{Match: []string{"repo.scala-sbt.org", "scala.jfrog.io"}},
+	// Plain-HTTP package trees (Haskell, R, Perl, Lua) + Julia's package server.
+	{Match: []string{"hackage.haskell.org"}},
+	{Match: []string{"cran.r-project.org"}},
+	{Match: []string{"cpan.metacpan.org"}},
+	{Match: []string{"luarocks.org"}},
+	{Match: []string{"pkg.julialang.org", "*.pkg.julialang.org"}},
 }
 
 type egressDomain struct {

@@ -35,6 +35,7 @@ import (
 	_ "github.com/easylab-platform/artifact/go"
 	_ "github.com/easylab-platform/artifact/helm"
 	_ "github.com/easylab-platform/artifact/hex"
+	_ "github.com/easylab-platform/artifact/httpcache"
 	_ "github.com/easylab-platform/artifact/huggingface"
 	_ "github.com/easylab-platform/artifact/ivy"
 	_ "github.com/easylab-platform/artifact/maven"
