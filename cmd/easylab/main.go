@@ -74,10 +74,13 @@ func envOrStr(k, def string) string {
 type server struct {
 	cs       *store.CentralStore
 	registry *artifactkit.Registry
-	selfBase string
-	ops      *opsState
-	sbx      *sbxreg.Registry
-	k8s      *k8s.Client
+	// registryDir is where the registry's stateful adapters keep data
+	// (OCI upload sessions, git bare mirrors); empty disables persistence.
+	registryDir string
+	selfBase    string
+	ops         *opsState
+	sbx         *sbxreg.Registry
+	k8s         *k8s.Client
 	// buildBackend is the shared CI produce backend (oci-build /
 	// publish-protocol) used for sandbox image derivation, container builds
 	// and package publishing.
@@ -189,7 +192,7 @@ func main() {
 		log.Printf("k8s backend disabled: %v", kerr)
 	}
 	reg.Owners = cs
-	s := &server{cs: cs, registry: reg, selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, sbx: sbxReg, k8s: sK8s, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
+	s := &server{cs: cs, registry: reg, registryDir: filepath.Join(store.HomeDir(), "registry"), selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, sbx: sbxReg, k8s: sK8s, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
 	if sK8s != nil {
 		s.buildBackend = ci.NewK8sBackend(sK8s)
 	}
@@ -400,6 +403,16 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 				cfg["self_base"] = s.selfBase
 			} else {
 				cfg["self_base"] = s.selfBase + "/pkgs/" + name
+			}
+		}
+		// Stateful adapters keep their data next to the registry so it
+		// survives a restart (OCI upload sessions, git bare mirrors).
+		if regDir := s.registryDir; regDir != "" {
+			switch name {
+			case "oci":
+				cfg["upload_dir"] = filepath.Join(regDir, "oci-uploads")
+			case "git":
+				cfg["dir"] = filepath.Join(regDir, "git")
 			}
 		}
 		h, err := artifactkit.Build(name, reg, cfg)
