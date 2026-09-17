@@ -46,11 +46,15 @@ func openRegistry(home string) (*artifactkit.Registry, error) {
 	airGap := os.Getenv("EASYVCS_AIRGAP") == "1"
 	return &artifactkit.Registry{
 		Blobs: blobs,
-		Meta:  idx,
+		// The scoped store applies the request's repository namespace to every
+		// metadata read/write. Handlers without a request scope (the Lab API's
+		// own listings, background jobs) pass through unchanged.
+		Meta: artifactkit.NewScopedStore(idx),
 		Upstreams: &artifactkit.Upstreams{
 			Defaults:  defaultUpstreams(),
 			Overrides: map[string]string{},
 			Proxy:     map[string]string{},
+			Repos:     map[string]artifactkit.RepoUpstream{},
 			AirGap:    airGap,
 		},
 	}, nil

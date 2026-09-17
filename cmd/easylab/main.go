@@ -406,6 +406,12 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 			continue
 		}
 		// OCI is special-cased to /v2; the rest mount under /pkgs/<name>.
+		// Every mount goes through the scope middleware, which resolves the
+		// request's repository (namespace: npm scope, OCI host, maven groupId,
+		// go module prefix, or an explicit /-/<repo>/ marker) into the request
+		// context. The registry's scoped metadata store turns that into content
+		// isolation and the upstream table turns it into per-repository
+		// pull-through, with no per-adapter code.
 		if name == "oci" {
 			// The OCI Bearer challenge points at a /token realm; expose it.
 			tokenH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -413,11 +419,13 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 			})
 			mux.Handle("/v2/token", tokenH)
 			mux.Handle("/token", tokenH)
-			mux.Handle("/v2", h)
-			mux.Handle("/v2/", h)
+			scoped := artifactkit.ScopeMiddlewareForFormat("oci", "/v2", h)
+			mux.Handle("/v2", scoped)
+			mux.Handle("/v2/", scoped)
 		} else {
-			mux.Handle("/pkgs/"+name+"/", h)
-			mux.Handle("/pkgs/"+name, h)
+			scoped := artifactkit.ScopeMiddleware("/pkgs", h)
+			mux.Handle("/pkgs/"+name+"/", scoped)
+			mux.Handle("/pkgs/"+name, scoped)
 		}
 	}
 }
