@@ -6,8 +6,12 @@ github.com/abcp-sdk/abc-protocol-go v1.2.0 h1:wPnYnHzOHy67EvlDLdHt/tzcy/RPsIHEtf
 github.com/abcp-sdk/abc-protocol-go v1.2.0/go.mod h1:Pj40eYsDYx1n8Gf2BiQU7Rf9IESUggv4JIaXJf9u01o=
 github.com/abcp-sdk/agent-proto v0.12.0 h1:gXENk+Ze3roQIGyLHE61qqKA3caekZ4efmHC1xfEwbc=
 github.com/abcp-sdk/agent-proto v0.12.0/go.mod h1:drrTDKXOWLDIc1xXIpuuOZxEeUKjvRgZ46Whdu6vZjk=
+github.com/abcp-sdk/agent-proto v0.14.0 h1:7vILws7FhrC41twvwqczE+iIs4+XLSXKEnOIlv/CAnI=
+github.com/abcp-sdk/agent-proto v0.14.0/go.mod h1:drrTDKXOWLDIc1xXIpuuOZxEeUKjvRgZ46Whdu6vZjk=
 github.com/abcp-sdk/agent-sdk-go v0.14.0 h1:Vxm3/0KZcPOR8rDusvWJKTu1+cbacj0knvVqDIOFEWk=
 github.com/abcp-sdk/agent-sdk-go v0.14.0/go.mod h1:kq8RNuXfuFJBAjnWTA/Hk7MF+pd8WWwwJt2XcVpLL5Q=
+github.com/abcp-sdk/agent-sdk-go v0.16.0 h1:jKyJGsRMZMVBm28Il3hZ10PkYdvagTHrvijiwu1LrCI=
+github.com/abcp-sdk/agent-sdk-go v0.16.0/go.mod h1:Nsrl7asw0Bwd7y/SZuAxuk/uTSzoLpR9MOol90czy0s=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

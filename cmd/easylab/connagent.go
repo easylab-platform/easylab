@@ -298,6 +298,3 @@ func (c *connAgent) GetFileMeta(ctx context.Context, req *connect.Request[agentv
 func (c *connAgent) GetAgentConfig(ctx context.Context, req *connect.Request[agentv1.GetAgentConfigRequest]) (*connect.Response[agentv1.GetAgentConfigResponse], error) {
 	return c.client.GetAgentConfig(ctx, fwdReq(req))
 }
-func (c *connAgent) DiscoverGatewayModels(ctx context.Context, req *connect.Request[agentv1.DiscoverGatewayModelsRequest]) (*connect.Response[agentv1.DiscoverGatewayModelsResponse], error) {
-	return c.client.DiscoverGatewayModels(ctx, fwdReq(req))
-}
