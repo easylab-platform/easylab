@@ -272,10 +272,17 @@ var defaultUpstreams = []egressDomain{
 	// Container blob CDNs stay direct: adapters follow the 307 themselves.
 	{Match: []string{"production.cloudflare.docker.com", "*.cloudflarestorage.com"}},
 	{Match: []string{"registry.npmjs.org", "*.npmjs.org"}},
+	{Match: []string{"npm.jsr.io"}, Add: "/pkgs/npm"},
 	{Match: []string{"pypi.org", "files.pythonhosted.org"}},
 	{Match: []string{"proxy.golang.org", "sum.golang.org"}},
 	{Match: []string{"crates.io", "index.crates.io", "static.crates.io"}},
 	{Match: []string{"repo.maven.apache.org"}},
+	// Maven-layout mirrors (host-driven maven adapter).
+	{Match: []string{"dl.google.com"}, Strip: "/dl/android/maven2", Add: "/pkgs/maven"},
+	{Match: []string{"plugins.gradle.org"}, Strip: "/m2", Add: "/pkgs/maven"},
+	{Match: []string{"repo.clojars.org"}, Add: "/pkgs/maven"},
+	{Match: []string{"repo.spring.io"}, Strip: "/release", Add: "/pkgs/maven"},
+	{Match: []string{"jitpack.io"}, Add: "/pkgs/maven"},
 	{Match: []string{"api.nuget.org", "azuresearch-usnc.nuget.org"}},
 	{Match: []string{"rubygems.org", "index.rubygems.org"}},
 	{Match: []string{"repo.packagist.org"}},
@@ -301,10 +308,22 @@ var defaultUpstreams = []egressDomain{
 	{Match: []string{"cpan.metacpan.org"}},
 	{Match: []string{"luarocks.org"}},
 	{Match: []string{"pkg.julialang.org", "*.pkg.julialang.org"}},
+	// Additional plain-HTTP trees.
+	{Match: []string{"jsr.io"}, Add: "/pkgs/jsr"},
+	{Match: []string{"opam.ocaml.org"}, Add: "/pkgs/opam"},
+	{Match: []string{"stackage.org"}, Add: "/pkgs/stackage"},
+	{Match: []string{"pecl.php.net"}, Add: "/pkgs/pecl"},
+	{Match: []string{"bcr.bazel.build"}, Add: "/pkgs/bazel"},
+	{Match: []string{"updates.jenkins.io"}, Add: "/pkgs/jenkins"},
 }
 
 type egressDomain struct {
 	Match []string
+	// Strip is a leading path prefix removed before Add is applied (mirrors
+	// whose path shape differs from the adapter's mount).
+	Strip string
+	// Add is the adapter mount prepended after Strip.
+	Add string
 }
 
 // DefaultRulesYAML renders the built-in egress policy: package-manager
@@ -322,6 +341,12 @@ func DefaultRulesYAML(gatewayHostPort string, mitmDefault bool) string {
 		b.WriteString("  - match: [" + strings.Join(quoted, ", ") + "]\n")
 		b.WriteString("    action: rewrite\n")
 		b.WriteString("    target: \"" + gatewayHostPort + "\"\n")
+		if u.Strip != "" {
+			b.WriteString("    strip_prefix: \"" + u.Strip + "\"\n")
+		}
+		if u.Add != "" {
+			b.WriteString("    add_prefix: \"" + u.Add + "\"\n")
+		}
 	}
 	b.WriteString("default: direct\n")
 	if mitmDefault {

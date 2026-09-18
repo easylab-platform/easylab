@@ -101,6 +101,21 @@ func defaultUpstreams() map[string]string {
 		"conda":              "https://repo.anaconda.com",
 		"protobuf":           "https://buf.build",
 		"gitlfs":             "",
+		// Additional plain-HTTP trees.
+		"jsr":      "https://jsr.io",
+		"opam":     "https://opam.ocaml.org",
+		"stackage": "https://stackage.org",
+		"pecl":     "https://pecl.php.net",
+		"bazel":    "https://bcr.bazel.build",
+		"jenkins":  "https://updates.jenkins.io",
+		// Maven-layout mirrors served host-driven by the maven adapter.
+		"maven.google":  "https://dl.google.com/dl/android/maven2",
+		"maven.gradle":  "https://plugins.gradle.org/m2",
+		"maven.clojars": "https://repo.clojars.org",
+		"maven.spring":  "https://repo.spring.io/release",
+		"maven.jitpack": "https://jitpack.io",
+		// JSR npm-compatibility registry.
+		"npm.jsr": "https://npm.jsr.io",
 		"cargo.index":        "https://index.crates.io",
 		"cargo.static":       "https://static.crates.io/crates",
 		"conan.center":       "https://center2.conan.io",
