@@ -150,9 +150,9 @@ func main() {
 	// derived from the namespace so it is portable across clusters/domains.
 	// Override with EASYLAB_REGISTRY_HOST (e.g. an external TLS ingress).
 	registryHost := envOrStr("EASYLAB_REGISTRY_HOST", fmt.Sprintf("easylab.%s.svc.cluster.local:80", ns))
-	// Egress policy (easyproxy sidecar, default ON): CA material is
+	// Egress policy (easysidecar, default ON): CA material is
 	// generated once per deployment and persisted under EASYVCS_HOME so pod
-	// restarts and easyproxy leaves keep verifying against the same CA.
+	// restarts and easysidecar leaves keep verifying against the same CA.
 	//
 	// Modes: redirect (iptables; needs kernel netfilter) or spoof (DNS-based;
 	// no netfilter/tun/NET_ADMIN — sandboxes and jobs default to it when a

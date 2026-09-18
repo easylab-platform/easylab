@@ -56,10 +56,10 @@ backend:
   # One-container buildkit-worker (buildkitd + easyworker); easylab runs
   # builds as worker jobs. Image ref is qualified with the registry host.
   buildkitImage: forgejo.develop.10.199.64.20.nip.io/easylab/buildkit-worker:20260912153825
-  # Egress-proxy (easyproxy) image injected as a sidecar+init into sandbox/
+  # Egress-proxy (easysidecar) image injected into sandbox/job/
   # service/job pods. Must be fully qualified so the NODE can pull it (a bare
   # `easylab/...` name would be resolved against docker.io and fail).
-  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easyproxy:v0.5.3
+  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.5.3
   # When "1", the egress-proxy sidecar is NOT injected (workloads egress
   # directly). Prefer `egressMode` instead: disabling also loses the
   # env-proxy fallback.

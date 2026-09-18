@@ -22,7 +22,7 @@ func TestWithProxyInjectsSidecar(t *testing.T) {
 	pod := minimalPod("sbx-a")
 	proxy := &ProxySpec{
 		Rules:            testRules,
-		Image:            "registry/easyproxy:v0.2.0",
+		Image:            "registry/easysidecar:v0.2.0",
 		CACertPEM:        "-----BEGIN CERTIFICATE-----\nX\n-----END CERTIFICATE-----",
 		CAKeyPEM:         "-----BEGIN PRIVATE KEY-----\nY\n-----END PRIVATE KEY-----",
 		SpoofUpstreamDNS: "10.96.0.10",
@@ -40,7 +40,7 @@ func TestWithProxyInjectsSidecar(t *testing.T) {
 	var found bool
 	for i := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[i]
-		if c.Name != "easyproxy" {
+		if c.Name != "easysidecar" {
 			continue
 		}
 		found = true
@@ -58,16 +58,16 @@ func TestWithProxyInjectsSidecar(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("no easyproxy sidecar")
+		t.Fatal("no easysidecar sidecar")
 	}
 
 	// volumes: rules ConfigMap + CA secret.
 	var cm, secret bool
 	for _, v := range pod.Spec.Volumes {
-		if v.ConfigMap != nil && v.Name == "easyproxy-rules" {
+		if v.ConfigMap != nil && v.Name == "easysidecar-rules" {
 			cm = true
 		}
-		if v.Secret != nil && v.Name == "easyproxy-ca" {
+		if v.Secret != nil && v.Name == "easysidecar-ca" {
 			secret = true
 		}
 	}
@@ -173,7 +173,7 @@ func TestDefaultInjection(t *testing.T) {
 	}
 	found := false
 	for i := range pod.Spec.Containers {
-		if pod.Spec.Containers[i].Name == "easyproxy" {
+		if pod.Spec.Containers[i].Name == "easysidecar" {
 			found = true
 		}
 	}
@@ -214,7 +214,7 @@ func TestSpoofModeInjection(t *testing.T) {
 	pod := minimalPod("sbx-spoof")
 	proxy := &ProxySpec{
 		Rules:            testRules,
-		Image:            "registry/easyproxy:v0.2.0",
+		Image:            "registry/easysidecar:v0.2.0",
 		CACertPEM:        "-----BEGIN CERTIFICATE-----\nX\n-----END CERTIFICATE-----",
 		CAKeyPEM:         "-----BEGIN PRIVATE KEY-----\nY\n-----END PRIVATE KEY-----",
 		SpoofUpstreamDNS: "10.96.0.10",
@@ -237,7 +237,7 @@ func TestSpoofModeInjection(t *testing.T) {
 	var found bool
 	for i := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[i]
-		if c.Name != "easyproxy" {
+		if c.Name != "easysidecar" {
 			continue
 		}
 		found = true
@@ -265,7 +265,7 @@ func TestSpoofModeInjection(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("no easyproxy sidecar")
+		t.Fatal("no easysidecar sidecar")
 	}
 
 	// Spoof mode without an upstream DNS is rejected.
@@ -342,7 +342,7 @@ func TestSpoofSkippedForVMRuntimes(t *testing.T) {
 	}
 	found := false
 	for i := range pod2.Spec.Containers {
-		if pod2.Spec.Containers[i].Name == "easyproxy" {
+		if pod2.Spec.Containers[i].Name == "easysidecar" {
 			found = true
 		}
 	}
@@ -352,17 +352,16 @@ func TestSpoofSkippedForVMRuntimes(t *testing.T) {
 }
 
 // TestInjectedProxyFlagsAreKnown pins the flag surface the injector emits to
-// the set EasyProxy actually defines. A mismatch used to make every injected
+// the set EasySidecar actually defines. A mismatch used to make every injected
 // sidecar exit at start-up with "flag provided but not defined"; this test
 // makes that class of drift impossible to reintroduce silently.
 func TestInjectedProxyFlagsAreKnown(t *testing.T) {
-	// Mirrors flags.go in the easyproxy repo (spoof mode is the only mode).
+	// Mirrors server/flags.go in the easysidecar repo (spoof mode is the only mode).
 	known := map[string]bool{
 		"mode":            true,
 		"rules":           true,
 		"ca-cert":         true,
 		"ca-key":          true,
-		"bypass-cidrs":    true,
 		"mitm-default":    true,
 		"spoof":           true,
 		"self-ip":         true,
@@ -376,7 +375,7 @@ func TestInjectedProxyFlagsAreKnown(t *testing.T) {
 	pod := minimalPod("sbx-flags")
 	proxy := &ProxySpec{
 		Rules:            testRules,
-		Image:            "registry/easyproxy:v0.2.0",
+		Image:            "registry/easysidecar:v0.2.0",
 		CACertPEM:        "cert",
 		CAKeyPEM:         "key",
 		SpoofUpstreamDNS: "10.96.0.10",
@@ -389,7 +388,7 @@ func TestInjectedProxyFlagsAreKnown(t *testing.T) {
 
 	var sidecar *corev1.Container
 	for i := range pod.Spec.Containers {
-		if pod.Spec.Containers[i].Name == "easyproxy" {
+		if pod.Spec.Containers[i].Name == "easysidecar" {
 			sidecar = &pod.Spec.Containers[i]
 		}
 	}
@@ -405,7 +404,7 @@ func TestInjectedProxyFlagsAreKnown(t *testing.T) {
 			name = name[:i]
 		}
 		if !known[name] {
-			t.Fatalf("injected --%s is not a defined EasyProxy flag (would crash the sidecar)", name)
+			t.Fatalf("injected --%s is not a defined EasySidecar flag (would crash the sidecar)", name)
 		}
 	}
 }

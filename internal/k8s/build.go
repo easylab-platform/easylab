@@ -59,7 +59,7 @@ func (c *Client) BuildImage(ctx context.Context, opt BuildOptions, logf func(str
 		"EASYLAB_REGISTRY_HOST":  c.registryHost,
 		"EASYLAB_REGISTRY_TOKEN": c.registryToken,
 	}
-	// No HTTP_PROXY here: egress policy is enforced by the easyproxy sidecar
+	// No HTTP_PROXY here: egress policy is enforced by the easysidecar sidecar
 	// (spoof mode intercepts registry + HTTP traffic at the DNS layer).
 
 	name := fmt.Sprintf("easylab-build-%d", time.Now().UnixNano())

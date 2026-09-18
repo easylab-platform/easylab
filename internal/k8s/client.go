@@ -41,11 +41,11 @@ type Client struct {
 	// runtimes are the sandbox execution profiles (linux/windows/macos/...).
 	runtimes map[string]RuntimeProfile
 
-	// egress is the resolved easyproxy sidecar policy.
+	// egress is the resolved easysidecar policy.
 	egress egressPolicy
 }
 
-// egressPolicy carries the resolved easyproxy defaults for this client.
+// egressPolicy carries the resolved easysidecar defaults for this client.
 type egressPolicy struct {
 	enabled       bool
 	image         string
@@ -65,16 +65,16 @@ type Config struct {
 	RegistryToken string
 	Proxy         string
 
-	// Egress policy (easyproxy sidecar): ENABLED by default. Every
-	// sandbox/job/service carries the easyproxy sidecar with the built-in
+	// Egress policy (easysidecar): ENABLED by default. Every
+	// sandbox/job/service carries the easysidecar sidecar with the built-in
 	// package-manager rewrite rules. EgressPolicyDisabled=true turns it off
 	// globally; a workload's ProxySpec=nil+NoProxy opts out per workload.
 	EgressPolicyDisabled bool
-	EgressPolicyImage    string // default easylab/easyproxy:v0.1.0
+	EgressPolicyImage    string // default easylab/easysidecar:v0.1.0
 	EgressPolicyGateway  string // rewrite target; default = RegistryHost
 	// EgressPolicyCACert/CAKey: the MITM CA PEMs. Generated per namespace by
 	// ensureEgressCA on first use when empty; workload pods trust the cert
-	// (SSL_CERT_FILE / NODE_EXTRA_CA_CERTS) and easyproxy signs with the key.
+	// (SSL_CERT_FILE / NODE_EXTRA_CA_CERTS) and easysidecar signs with the key.
 	EgressPolicyCACert string
 	EgressPolicyCAKey  string
 	// EgressPolicyMode: "" = redirect (iptables), "spoof" = DNS-spoof. When
@@ -131,7 +131,7 @@ func newClient(cs kubernetes.Interface, cfg Config) *Client {
 	}
 	image := cfg.EgressPolicyImage
 	if image == "" {
-		image = "easylab/easyproxy:v0.1.0"
+		image = "easylab/easysidecar:v0.1.0"
 	}
 	// EgressPolicy zero-value (false) must mean ENABLED: the Config is built
 	// without setting the field in most call sites. Callers that want the
@@ -214,7 +214,7 @@ func (c *Client) WorkerHostDir() string { return workerHostDir() }
 
 // defaultUpstreams mirrors the artifactkit ecosystem table: domains whose
 // traffic is steered into the easylab gateway by the default egress policy.
-// Keep in sync with easyproxy's defaultrules.go and cmd/easylab/registry.go.
+// Keep in sync with easysidecar's rule/defaultrules.go and cmd/easylab/registry.go.
 var defaultUpstreams = []egressDomain{
 	{Match: []string{"registry-1.docker.io", "docker.io", "index.docker.io"}},
 	{Match: []string{"ghcr.io", "quay.io", "gcr.io", "registry.k8s.io",
@@ -262,7 +262,7 @@ type egressDomain struct {
 // direct, MITM only for rewrite rules.
 func DefaultRulesYAML(gatewayHostPort string) string {
 	var b strings.Builder
-	b.WriteString("# easyproxy default egress policy (managed by easylab).\n")
+	b.WriteString("# easysidecar default egress policy (managed by easylab).\n")
 	b.WriteString("rules:\n")
 	for _, u := range defaultUpstreams {
 		quoted := make([]string, 0, len(u.Match))

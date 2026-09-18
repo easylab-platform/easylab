@@ -15,7 +15,7 @@ import (
 
 // ensureEgressCA returns the per-deployment egress MITM CA (cert PEM, key
 // PEM), generating and persisting it under dir on first use. The CA is the
-// trust root every easyproxy-injected workload gets (SSL_CERT_FILE etc.);
+// trust root every easysidecar-injected workload gets (SSL_CERT_FILE etc.);
 // losing it only invalidates future leaf certificates, so persistence is
 // best-effort (a regenerated CA is announced in the log).
 func ensureEgressCA(dir string) (string, string, error) {

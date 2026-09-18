@@ -11,11 +11,11 @@ import (
 )
 
 // ProxySpec describes an optional egress-policy sidecar for a workload:
-// EasyProxy intercepts the Pod's outbound 80/443 (plus DNS) and applies the
+// EasySidecar intercepts the Pod's outbound 80/443 (plus DNS) and applies the
 // block/direct/rewrite rule set. Nil on the workload spec means no proxy —
 // the Pod is generated exactly as before.
 type ProxySpec struct {
-	// Rules is the YAML rule set text (see easyproxy README for the schema).
+	// Rules is the YAML rule set text (see easysidecar README for the schema).
 	Rules string
 	// MitmDefault decrypts every intercepted TLS connection, not just
 	// rewrite rules. Off by default.
@@ -24,10 +24,10 @@ type ProxySpec struct {
 	// (SSL_CERT_FILE / NODE_EXTRA_CA_CERTS). Required when any rewrite rule
 	// is present.
 	CACertPEM string
-	// CAKeyPEM is the MITM CA private key (EasyProxy signs leaf certificates
+	// CAKeyPEM is the MITM CA private key (EasySidecar signs leaf certificates
 	// with it). Namespace-scoped secret material.
 	CAKeyPEM string
-	// Image is the EasyProxy image (single image, two roles). Empty uses the
+	// Image is the EasySidecar image. Empty uses the
 	// chart default wired by the caller.
 	Image string
 
@@ -52,10 +52,10 @@ type ProxySpec struct {
 // proxyCAPath is where the sidecar mounts the MITM CA and where it is handed
 // to the workload container's trust env.
 const (
-	proxyCAPath = "/etc/easyproxy/ca.crt"
+	proxyCAPath = "/etc/easysidecar/ca.crt"
 )
 
-// withProxy injects the EasyProxy sidecar, volumes, and env into a Pod spec.
+// withProxy injects the EasySidecar sidecar, volumes, and env into a Pod spec.
 // It appends to the existing containers; call it BEFORE the pod is created.
 // proxy == nil is a no-op.
 func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *ProxySpec) error {
@@ -82,7 +82,7 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 	cmName := ProxyConfigMapName(workloadName)
 
 	args := []string{"--mode=proxy",
-		"--rules=/etc/easyproxy/rules.yaml",
+		"--rules=/etc/easysidecar/rules.yaml",
 		"--spoof",
 		"--spoof-dns-addr=0.0.0.0:53",
 		"--spoof-tls-addr=0.0.0.0:443",
@@ -93,14 +93,14 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 		args = append(args, "--upstream-proxy="+proxy.UpstreamProxy)
 	}
 	if proxy.CACertPEM != "" {
-		args = append(args, "--ca-cert=/etc/easyproxy/ca/ca.crt", "--ca-key=/etc/easyproxy/ca/ca.key")
+		args = append(args, "--ca-cert=/etc/easysidecar/ca/ca.crt", "--ca-key=/etc/easysidecar/ca/ca.key")
 	}
 	if proxy.MitmDefault {
 		args = append(args, "--mitm-default")
 	}
 
 	proxyContainer := corev1.Container{
-		Name:  "easyproxy",
+		Name:  "easysidecar",
 		Image: proxy.Image,
 		Args:  args,
 		Ports: []corev1.ContainerPort{
@@ -120,21 +120,21 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 			},
 		},
 		VolumeMounts: []corev1.VolumeMount{
-			{Name: "easyproxy-rules", MountPath: "/etc/easyproxy", ReadOnly: true},
+			{Name: "easysidecar-rules", MountPath: "/etc/easysidecar", ReadOnly: true},
 		},
 	}
 
 	vols := []corev1.Volume{{
-		Name: "easyproxy-rules",
+		Name: "easysidecar-rules",
 		VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
 			LocalObjectReference: corev1.LocalObjectReference{Name: cmName},
 			Items:                []corev1.KeyToPath{{Key: "rules.yaml", Path: "rules.yaml"}},
 		}},
 	}}
 	proxyContainer.VolumeMounts = append(proxyContainer.VolumeMounts,
-		corev1.VolumeMount{Name: "easyproxy-ca", MountPath: "/etc/easyproxy/ca", ReadOnly: true})
+		corev1.VolumeMount{Name: "easysidecar-ca", MountPath: "/etc/easysidecar/ca", ReadOnly: true})
 	if proxy.CACertPEM != "" {
-		vols = append(vols, corev1.Volume{Name: "easyproxy-ca", VolumeSource: corev1.VolumeSource{
+		vols = append(vols, corev1.Volume{Name: "easysidecar-ca", VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{SecretName: ProxyCASecretName(workloadName)}}})
 	}
 
@@ -160,7 +160,7 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 	pod.DNSConfig.Options = []corev1.PodDNSConfigOption{{Name: "ndots", Value: &ndots}}
 	// POD_IP for the sidecar's -self-ip.
 	for i := range pod.Containers {
-		if pod.Containers[i].Name == "easyproxy" {
+		if pod.Containers[i].Name == "easysidecar" {
 			pod.Containers[i].Env = append(pod.Containers[i].Env, corev1.EnvVar{
 				Name: "POD_IP", ValueFrom: &corev1.EnvVarSource{
 					FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"},
@@ -172,7 +172,7 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 	// same engine, better diagnostics than silent REDIRECT.
 	for i := range pod.Containers {
 		c := &pod.Containers[i]
-		if c.Name == "easyproxy" {
+		if c.Name == "easysidecar" {
 			continue
 		}
 		if proxy.CACertPEM != "" {
@@ -182,17 +182,17 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 				corev1.EnvVar{Name: "REQUESTS_CA_BUNDLE", Value: proxyCAPath},
 			)
 			c.VolumeMounts = append(c.VolumeMounts,
-				corev1.VolumeMount{Name: "easyproxy-ca", MountPath: proxyCAPath, SubPath: "ca.crt", ReadOnly: true})
+				corev1.VolumeMount{Name: "easysidecar-ca", MountPath: proxyCAPath, SubPath: "ca.crt", ReadOnly: true})
 		}
 	}
 	return nil
 }
 
 // ProxyConfigMapName is the deterministic ConfigMap name for a pod's rules.
-func ProxyConfigMapName(podName string) string { return podName + "-easyproxy-rules" }
+func ProxyConfigMapName(podName string) string { return podName + "-easysidecar-rules" }
 
 // ProxyCASecretName is the deterministic CA Secret name for a pod.
-func ProxyCASecretName(podName string) string { return podName + "-easyproxy-ca" }
+func ProxyCASecretName(podName string) string { return podName + "-easysidecar-ca" }
 
 // CreateProxyConfigMap writes the rule set ConfigMap for a pod.
 func (c *Client) CreateProxyConfigMap(ctx context.Context, podName, rules string) error {
