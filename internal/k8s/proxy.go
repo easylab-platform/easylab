@@ -71,6 +71,9 @@ type ProxySpec struct {
 	// CaptureForward also serves forwarded (VM guest) traffic via
 	// PREROUTING/FORWARD and a second listener.
 	CaptureForward bool
+	// WebPorts are the destination ports proxied as web (HTTP/h2c) in capture
+	// mode. Empty uses the sidecar default (80,443).
+	WebPorts []int
 }
 
 // proxyCAPath is where the sidecar mounts the MITM CA and where it is handed
@@ -127,6 +130,13 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 		}
 		if proxy.CaptureForward {
 			args = append(args, "--capture-forward-addr=0.0.0.0:15006")
+		}
+		if len(proxy.WebPorts) > 0 {
+			ports := make([]string, 0, len(proxy.WebPorts))
+			for _, p := range proxy.WebPorts {
+				ports = append(ports, strconv.Itoa(p))
+			}
+			args = append(args, "--capture-tcp-ports="+strings.Join(ports, ","))
 		}
 	} else {
 		args = append(args,

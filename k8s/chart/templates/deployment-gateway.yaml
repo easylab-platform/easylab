@@ -124,6 +124,10 @@ spec:
             - name: EASYLAB_EGRESS_CAPTURE_FORWARD
               value: {{ .Values.backend.egressCaptureForward | quote }}
             {{- end }}
+            {{- if .Values.backend.egressWebPorts }}
+            - name: EASYLAB_EGRESS_WEB_PORTS
+              value: {{ .Values.backend.egressWebPorts | quote }}
+            {{- end }}
             - name: EASYLAB_REGISTRY_HOST
               value: {{ include "easylab.registryHost" . | quote }}
             {{- if .Values.sandboxes.runtimes }}

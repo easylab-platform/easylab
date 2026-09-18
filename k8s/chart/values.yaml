@@ -59,7 +59,7 @@ backend:
   # Egress-proxy (easysidecar) image injected into sandbox/job/
   # service/job pods. Must be fully qualified so the NODE can pull it (a bare
   # `easylab/...` name would be resolved against docker.io and fail).
-  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.9.0
+  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.10.0
   # When "1", the egress-proxy sidecar is NOT injected (workloads egress
   # directly). Prefer `egressMode` instead: disabling also loses the
   # env-proxy fallback.
@@ -91,6 +91,9 @@ backend:
   egressExemptCIDRs: ""
   # Serve forwarded (VM guest) traffic too (PREROUTING/FORWARD + :15006).
   egressCaptureForward: ""
+  # Destination ports proxied as web (HTTP/h2c) in capture mode. Empty uses
+  # the sidecar default (80,443). Other TCP is captured but only logged.
+  egressWebPorts: ""
   # Host path backing the /data hostPath mount (ephemeral build pods read the
   # build context + write logs there).
   hostDataDir: /home/develop/.easylab

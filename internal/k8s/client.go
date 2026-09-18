@@ -62,6 +62,7 @@ type egressPolicy struct {
 	udpMode        string
 	defaultMode    string
 	exemptCIDRs    []string
+	webPorts       []int
 }
 
 // Config configures a Client.
@@ -120,6 +121,9 @@ type Config struct {
 	EgressPolicyCaptureExemptCIDRs []string
 	// EgressPolicyCaptureForward also serves forwarded (VM guest) traffic.
 	EgressPolicyCaptureForward bool
+	// EgressPolicyCaptureTCPPorts are the destination ports proxied as web
+	// (HTTP/h2c) in capture mode; empty uses the sidecar default (80,443).
+	EgressPolicyCaptureTCPPorts []int
 }
 
 // New builds a client from the in-cluster config (production) or, when
@@ -224,6 +228,7 @@ func (c *Client) egressSpecFor(isService bool) *ProxySpec {
 		UDPMode:          c.egress.udpMode,
 		DefaultMode:      c.egress.defaultMode,
 		ExemptCIDRs:      c.egress.exemptCIDRs,
+		WebPorts:         c.egress.webPorts,
 	}
 }
 

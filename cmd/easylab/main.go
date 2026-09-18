@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -70,6 +71,17 @@ func envOrStr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// parseInts parses a comma-separated int list, dropping invalid entries.
+func parseInts(s string) []int {
+	var out []int
+	for _, p := range strings.Split(s, ",") {
+		if n, err := strconv.Atoi(strings.TrimSpace(p)); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // splitList parses a comma-separated env value, dropping blanks.
@@ -179,6 +191,7 @@ func main() {
 	egressDefaultMode := envOrStr("EASYLAB_EGRESS_DEFAULT_MODE", "log")
 	egressExemptCIDRs := splitList(envOrStr("EASYLAB_EGRESS_EXEMPT_CIDRS", ""))
 	egressCaptureForward := envOrStr("EASYLAB_EGRESS_CAPTURE_FORWARD", "") != ""
+	egressWebPorts := parseInts(envOrStr("EASYLAB_EGRESS_WEB_PORTS", ""))
 	var egressCACert, egressCAKey string
 	if !egressDisabled {
 		cert, key, cerr := ensureEgressCA(filepath.Join(store.HomeDir(), "egress-ca"))
@@ -211,6 +224,7 @@ func main() {
 		EgressPolicyCaptureDefaultMode: egressDefaultMode,
 		EgressPolicyCaptureExemptCIDRs: egressExemptCIDRs,
 		EgressPolicyCaptureForward:     egressCaptureForward,
+		EgressPolicyCaptureTCPPorts:    egressWebPorts,
 	}); kerr == nil {
 		opsState.services = ops.NewK8sServiceRunner(kc)
 		sK8s = kc
