@@ -415,12 +415,13 @@ func TestInjectedProxyFlagsAreKnown(t *testing.T) {
 func TestCaptureModeInjection(t *testing.T) {
 	pod := minimalPod("sbx-capture")
 	proxy := &ProxySpec{
-		Rules:       testRules,
-		Image:       "registry/easysidecar:v0.6.0",
-		CACertPEM:   "cert",
-		CAKeyPEM:    "key",
-		Capture:     true,
-		CaptureAddr: "0.0.0.0:15001",
+		Rules:            testRules,
+		Image:            "registry/easysidecar:v0.6.0",
+		CACertPEM:        "cert",
+		CAKeyPEM:         "key",
+		Capture:          true,
+		CaptureAddr:      "0.0.0.0:15001",
+		SpoofUpstreamDNS: "10.96.0.10",
 	}
 	if err := withProxy(&pod.Spec, pod.Name, "test", proxy); err != nil {
 		t.Fatal(err)
@@ -458,8 +459,16 @@ func TestCaptureModeInjection(t *testing.T) {
 	if !strings.Contains(sargs, "--mode=capture") {
 		t.Fatalf("sidecar args = %v", sidecar.Args)
 	}
-	if strings.Contains(sargs, "--spoof") || strings.Contains(sargs, "--upstream-dns") {
-		t.Fatalf("capture mode must not use the spoof face: %v", sidecar.Args)
+	// Capture runs the resolver + spoof :443/:80 faces as an assist (rewrite
+	// hosts that do not resolve publicly), but must NOT select the standalone
+	// spoof mode flag.
+	for _, a := range sidecar.Args {
+		if a == "--spoof" {
+			t.Fatalf("capture mode must not select the spoof mode: %v", sidecar.Args)
+		}
+	}
+	if !strings.Contains(sargs, "--capture-dns") || !strings.Contains(sargs, "--upstream-dns=10.96.0.10") {
+		t.Fatalf("capture must wire the dns assist: %v", sidecar.Args)
 	}
 	if sidecar.SecurityContext == nil || sidecar.SecurityContext.Capabilities == nil {
 		t.Fatal("sidecar needs NET_ADMIN for SO_MARK")
@@ -483,6 +492,16 @@ func TestCaptureModeInjection(t *testing.T) {
 	}
 	if sslFile == "" {
 		t.Fatal("workload must trust the CA in capture mode too")
+	}
+}
+
+// TestCaptureRequiresResolver verifies capture needs the cluster resolver for
+// its DNS assist.
+func TestCaptureRequiresResolver(t *testing.T) {
+	pod := minimalPod("sbx-capture-nodns")
+	proxy := &ProxySpec{Rules: testRules, Image: "img", Capture: true}
+	if err := withProxy(&pod.Spec, pod.Name, "test", proxy); err == nil {
+		t.Fatal("capture without SpoofUpstreamDNS must be rejected")
 	}
 }
 

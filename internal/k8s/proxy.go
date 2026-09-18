@@ -78,7 +78,7 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 	if strings.TrimSpace(proxy.Rules) == "" {
 		return fmt.Errorf("proxy: rules required")
 	}
-	if !proxy.Capture && strings.TrimSpace(proxy.SpoofUpstreamDNS) == "" {
+	if strings.TrimSpace(proxy.SpoofUpstreamDNS) == "" {
 		return fmt.Errorf("proxy: SpoofUpstreamDNS required (cluster resolver)")
 	}
 	rewriteRules := strings.Contains(proxy.Rules, "action: rewrite")
@@ -96,7 +96,13 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 
 	args := []string{"--rules=/etc/easysidecar/rules.yaml"}
 	if proxy.Capture {
-		args = append(args, "--mode=capture", "--capture-addr="+proxy.CaptureAddr)
+		args = append(args, "--mode=capture", "--capture-addr="+proxy.CaptureAddr,
+			// Rewrite hosts that do not resolve publicly need the resolver
+			// (it answers them with the Pod IP, which the spoof :443/:80
+			// faces then serve).
+			"--capture-dns",
+			"--spoof-dns-addr=0.0.0.0:53",
+			"--upstream-dns="+proxy.SpoofUpstreamDNS)
 	} else {
 		args = append(args,
 			"--mode=proxy",
