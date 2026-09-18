@@ -18,7 +18,7 @@ func TestPublishBuildArgsExplicit(t *testing.T) {
 func TestPublishBuildArgsNPMRCLine(t *testing.T) {
 	job := &Job{Produce: Produce{Action: ActionPublishProtocol, Protocol: "npm"}}
 	args := publishBuildArgsMap(job, "http://easylab:8080", "tok")
-	if args["NPMRC_LINE"] != "//easylab:8080/pkgs/npm/:_authToken=tok" {
+	if args["NPMRC_LINE"] != "//easylab:8080/artifacts/npm/:_authToken=tok" {
 		t.Fatalf("npmrc line wrong: %v", args)
 	}
 }

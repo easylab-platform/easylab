@@ -34,7 +34,7 @@ gateway:
   adminToken: admin-devtoken
   # User name of the bootstrapped operator (owns the fixed token above).
   bootstrapUser: operator
-  # Artifact (OCI + /pkgs) base URL used by builds. Empty derives
+  # Artifact (OCI + /artifacts) base URL used by builds. Empty derives
   # http://easylab.<ns>.svc.cluster.local:80.
   artifactURL: ""
   # Maximum upload body (bytes) for the package/OCI registry. Large VM images

@@ -40,7 +40,7 @@ var publishSpecs = map[string]publishSpec{
 		image: "node:22-alpine",
 		args:  []string{"NPMRC_LINE"},
 		steps: `RUN echo "$NPMRC_LINE" > .npmrc \
- && npm publish --registry "$ARTIFACT_URL/pkgs/npm/" \
+ && npm publish --registry "$ARTIFACT_URL/artifacts/npm/" \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"pypi": {
@@ -48,18 +48,18 @@ var publishSpecs = map[string]publishSpec{
 		// egress). trusted-host is required because the in-cluster base URL is
 		// plain HTTP.
 		image: "python:3.12-alpine",
-		steps: `RUN pip config set global.index-url "$ARTIFACT_URL/pkgs/pypi/simple" \
+		steps: `RUN pip config set global.index-url "$ARTIFACT_URL/artifacts/pypi/simple" \
  && pip config set global.trusted-host "$(echo "$ARTIFACT_URL" | sed 's|.*://||; s|[:/].*||')" \
  && pip install --no-cache-dir build twine \
  && { [ -d dist ] && [ -n "$(ls -A dist 2>/dev/null)" ] || python -m build; } \
- && twine upload --repository-url "$ARTIFACT_URL/pkgs/pypi/" -u agent -p "${ARTIFACT_TOKEN:-dummy}" --non-interactive dist/* \
+ && twine upload --repository-url "$ARTIFACT_URL/artifacts/pypi/" -u agent -p "${ARTIFACT_TOKEN:-dummy}" --non-interactive dist/* \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"cargo": {
 		// Cargo matches CARGO_REGISTRIES_<NAME>_* env vars by uppercasing the
 		// --registry name, so the env key must be uppercase (EASYLAB registry alias).
 		image: "rust:1-alpine",
-		steps: `RUN export CARGO_REGISTRIES_EASYLAB_INDEX="sparse+$ARTIFACT_URL/pkgs/cargo/index/" \
+		steps: `RUN export CARGO_REGISTRIES_EASYLAB_INDEX="sparse+$ARTIFACT_URL/artifacts/cargo/index/" \
  && export CARGO_REGISTRIES_EASYLAB_TOKEN="${ARTIFACT_TOKEN:-dummy}" \
  && cargo publish --registry easylab --allow-dirty \
  && echo "$PUBLISH_TS" > /dev/null`,
@@ -72,7 +72,7 @@ var publishSpecs = map[string]publishSpec{
  && mkdir -p "$HOME/.gem" \
  && printf ':rubygems_api_key: %s\n' "$ARTIFACT_TOKEN" > "$HOME/.gem/credentials" \
  && chmod 0600 "$HOME/.gem/credentials" \
- && gem push "$GEM" --host "$ARTIFACT_URL/pkgs/rubygems" \
+ && gem push "$GEM" --host "$ARTIFACT_URL/artifacts/rubygems" \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"helm": {
@@ -89,7 +89,7 @@ ARG ARTIFACT_URL
 ARG ARTIFACT_TOKEN
 ARG PUBLISH_TS
 COPY --from=pkg /pkg/*.tgz .
-RUN curl -sSf -H "Authorization: Bearer $ARTIFACT_TOKEN" -F "chart=@$(ls *.tgz | head -n1)" "$ARTIFACT_URL/pkgs/helm/api/charts" \
+RUN curl -sSf -H "Authorization: Bearer $ARTIFACT_TOKEN" -F "chart=@$(ls *.tgz | head -n1)" "$ARTIFACT_URL/artifacts/helm/api/charts" \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"nuget": {
@@ -98,19 +98,19 @@ RUN curl -sSf -H "Authorization: Bearer $ARTIFACT_TOKEN" -F "chart=@$(ls *.tgz |
 		image: "curlimages/curl:8.11.1",
 		steps: `RUN NUPKG="$(find . -name '*.nupkg' | head -n1)" \
  && [ -n "$NUPKG" ] || { echo 'no *.nupkg found; build the project first (dotnet pack) and commit/port the artifact'; exit 1; } \
- && curl -sSf -X PUT -H "X-NuGet-ApiKey: $ARTIFACT_TOKEN" --data-binary @"$NUPKG" "$ARTIFACT_URL/pkgs/nuget/v3/package" \
+ && curl -sSf -X PUT -H "X-NuGet-ApiKey: $ARTIFACT_TOKEN" --data-binary @"$NUPKG" "$ARTIFACT_URL/artifacts/nuget/v3/package" \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"maven": {
 		// Assumes the jar was already built; PUTs it at the proper coordinates:
-		// /pkgs/maven/<groupId dots-as-slashes>/<version>/<file>.
+		// /artifacts/maven/<groupId dots-as-slashes>/<version>/<file>.
 		image:    "curlimages/curl:8.11.1",
 		args:     []string{"NAME", "VERSION"},
 		required: []string{"NAME", "VERSION"},
 		steps: `RUN JAR="$(find . -name '*.jar' -not -path './.m2/*' | head -n1)" \
  && [ -n "$JAR" ] || { echo 'no *.jar found; build the project first (mvn package) and commit/port the artifact'; exit 1; } \
  && curl -sSf -X PUT -H "Authorization: Bearer $ARTIFACT_TOKEN" --data-binary @"$JAR" \
-    "$ARTIFACT_URL/pkgs/maven/$(echo "$NAME" | tr '.' '/')/$VERSION/$(basename "$JAR")" \
+    "$ARTIFACT_URL/artifacts/maven/$(echo "$NAME" | tr '.' '/')/$VERSION/$(basename "$JAR")" \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"go": {
@@ -131,7 +131,7 @@ with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             p = os.path.join(root, f)
             z.write(p, "%s@%s/%s" % (name, ver, os.path.relpath(p, ".")))
 q = urllib.parse.urlencode({"name": name, "version": ver})
-req = urllib.request.Request(base + "/pkgs/go/upload?" + q, data=buf.getvalue(), method="PUT")
+req = urllib.request.Request(base + "/artifacts/go/upload?" + q, data=buf.getvalue(), method="PUT")
 if tok:
     req.add_header("Authorization", "Bearer " + tok)
 print("go publish", name, ver, "->", urllib.request.urlopen(req).status, os.environ["PUBLISH_TS"])
@@ -155,7 +155,7 @@ with tarfile.open(fileobj=buf, mode="w:gz") as t:
             p = os.path.join(root, f)
             t.add(p, arcname=os.path.relpath(p, "."))
 q = urllib.parse.urlencode({"name": name, "version": ver})
-req = urllib.request.Request(base + "/pkgs/hex/publish?" + q, data=buf.getvalue(), method="POST")
+req = urllib.request.Request(base + "/artifacts/hex/publish?" + q, data=buf.getvalue(), method="POST")
 if tok:
     req.add_header("Authorization", "Bearer " + tok)
 print("hex publish", name, ver, "->", urllib.request.urlopen(req).status, os.environ["PUBLISH_TS"])
@@ -179,30 +179,30 @@ with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             p = os.path.join(root, f)
             z.write(p, os.path.relpath(p, "."))
 q = urllib.parse.urlencode({"name": name, "version": ver})
-req = urllib.request.Request(base + "/pkgs/composer/api/packages?" + q, data=buf.getvalue(), method="PUT")
+req = urllib.request.Request(base + "/artifacts/composer/api/packages?" + q, data=buf.getvalue(), method="PUT")
 if tok:
     req.add_header("Authorization", "Bearer " + tok)
 print("composer publish", name, ver, "->", urllib.request.urlopen(req).status, os.environ["PUBLISH_TS"])
 EOF`,
 	},
 	"generic": {
-		// Uploads one arbitrary file from the repo at /pkgs/generic/<name>/<version>/<file>.
+		// Uploads one arbitrary file from the repo at /artifacts/generic/<name>/<version>/<file>.
 		image:    "curlimages/curl:8.11.1",
 		args:     []string{"NAME", "VERSION", "FILE"},
 		required: []string{"NAME", "VERSION", "FILE"},
 		steps: `RUN [ -f "$FILE" ] || { echo "file not found in repo: $FILE"; exit 1; } \
  && curl -sSf -X PUT -H "Authorization: Bearer $ARTIFACT_TOKEN" --data-binary @"$FILE" \
-    "$ARTIFACT_URL/pkgs/generic/$NAME/$VERSION/$(basename "$FILE")" \
+    "$ARTIFACT_URL/artifacts/generic/$NAME/$VERSION/$(basename "$FILE")" \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"conan": {
 		// conan 2 via pip (pypi proxied through artifact); create + upload.
 		image: "python:3.12-alpine",
-		steps: `RUN pip config set global.index-url "$ARTIFACT_URL/pkgs/pypi/simple" \
+		steps: `RUN pip config set global.index-url "$ARTIFACT_URL/artifacts/pypi/simple" \
  && pip config set global.trusted-host "$(echo "$ARTIFACT_URL" | sed 's|.*://||; s|[:/].*||')" \
  && pip install --no-cache-dir 'conan>=2' \
  && conan profile detect --force \
- && conan remote add easylab "$ARTIFACT_URL/pkgs/conan" --force \
+ && conan remote add easylab "$ARTIFACT_URL/artifacts/conan" --force \
  && { [ -z "$ARTIFACT_TOKEN" ] || conan remote login easylab agent -p "$ARTIFACT_TOKEN"; } \
  && conan create . \
  && conan upload '*' -r easylab -c \
@@ -214,13 +214,13 @@ EOF`,
 		// repo has none.
 		image: "dart:stable",
 		steps: `RUN [ -f LICENSE ] || printf 'MIT License\n' > LICENSE \
- && { [ -z "$ARTIFACT_TOKEN" ] || dart pub token add "$ARTIFACT_URL/pkgs/pub" "$ARTIFACT_TOKEN"; } \
- && dart pub publish --force --server "$ARTIFACT_URL/pkgs/pub" \
+ && { [ -z "$ARTIFACT_TOKEN" ] || dart pub token add "$ARTIFACT_URL/artifacts/pub" "$ARTIFACT_TOKEN"; } \
+ && dart pub publish --force --server "$ARTIFACT_URL/artifacts/pub" \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"swift": {
 		// swift package archive-source produces the SE-0321 source zip; PUT it
-		// at /pkgs/swift/<scope.name>/<version>. NAME must be "scope.pkgname".
+		// at /artifacts/swift/<scope.name>/<version>. NAME must be "scope.pkgname".
 		// (docker.io has no floating "swift:6" tag — pin a real one.)
 		image:    "swift:6.1",
 		args:     []string{"NAME", "VERSION"},
@@ -228,7 +228,7 @@ EOF`,
 		steps: `RUN if ! command -v zip >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq zip curl; fi
 RUN swift package archive-source --output /tmp/src.zip \
  && curl -sSf -X PUT -H "Authorization: Bearer $ARTIFACT_TOKEN" --data-binary @/tmp/src.zip \
-    "$ARTIFACT_URL/pkgs/swift/$(echo "$NAME" | tr '.' '/')/$VERSION" \
+    "$ARTIFACT_URL/artifacts/swift/$(echo "$NAME" | tr '.' '/')/$VERSION" \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 }

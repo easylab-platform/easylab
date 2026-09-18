@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/easylab-platform/artifact/targets"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -205,7 +206,7 @@ func TestDefaultRulesYAMLShape(t *testing.T) {
 	if !strings.Contains(DefaultRulesYAML("gw:80", true), "mitm_default: true") {
 		t.Fatal("mitm_default must be true when requested")
 	}
-	if strings.Count(y, "action: rewrite") != len(defaultUpstreams) {
+	if strings.Count(y, "action: rewrite") != len(targets.EgressPolicy()) {
 		t.Fatalf("rewrite rule count mismatch")
 	}
 }

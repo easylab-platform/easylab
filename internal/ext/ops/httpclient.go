@@ -12,10 +12,10 @@ import (
 )
 
 // artifactClient is the h1-native HTTP client for the artifact registry
-// (/v2, /pkgs): podman/skopeo/npm ecosystems are h1-native.
+// (/v2, /artifacts): podman/skopeo/npm ecosystems are h1-native.
 var artifactClient = &http.Client{Timeout: 60 * time.Second}
 
-// httpGetJSONArtifact fetches from the artifact registry (/v2, /pkgs) over
+// httpGetJSONArtifact fetches from the artifact registry (/v2, /artifacts) over
 // HTTP/1.1 and returns the pretty-printed JSON body.
 func (s *server) httpGetJSONArtifact(ctx context.Context, url string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

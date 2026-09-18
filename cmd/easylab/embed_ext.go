@@ -41,7 +41,7 @@ func embedExtensions(ctx context.Context, registryHost string) {
 			EasyLabURL:    base,
 			NATSURL:       natsURL,
 			Token:         token,
-			ArtifactURL:   base, // gateway serves /v2 + /pkgs itself (loopback)
+			ArtifactURL:   base, // gateway serves /v2 + /artifacts itself (loopback)
 			ArtifactHost:  registryHost,
 			ArtifactToken: token,
 		}); err != nil {

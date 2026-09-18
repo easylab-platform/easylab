@@ -268,7 +268,7 @@ func main() {
 
 	// Dual-stack listener: accepts cleartext HTTP/2 (prior knowledge) for the
 	// Connect/rest surface AND HTTP/1.1 for the h1-native registry face
-	// (/v2, /pkgs, git smart protocol). A middleware on the Connect paths
+	// (/v2, /artifacts, git smart protocol). A middleware on the Connect paths
 	// enforces HTTP/2-only when EASYVCS_ENFORCE_H2=1.
 	var handler http.Handler = mux
 	if enforce := os.Getenv("EASYVCS_ENFORCE_H2"); enforce == "1" {
@@ -287,7 +287,7 @@ func main() {
 }
 
 // enforceH2 rejects HTTP/1.x requests to the Connect surface so the RPC
-// contract stays HTTP/2-only. The legacy face (/v2, /pkgs, git smart
+// contract stays HTTP/2-only. The legacy face (/v2, /artifacts, git smart
 // protocol, /api/v1) is intentionally exempt — those ecosystems are
 // h1-native. Returns 505 HTTP Version Not Supported for the offending paths.
 func (s *server) enforceH2(next http.Handler) http.Handler {
@@ -418,7 +418,7 @@ func (s *server) mountOps(mux *http.ServeMux) {
 
 // mountPackageRegistry mounts every enabled artifactkit protocol. The generic
 // protocol (raw artifacts, used by Lab releases) is always mounted; the OCI
-// registry is mounted at /v2 and each language protocol at /pkgs/<name>.
+// registry is mounted at /v2 and each language protocol at /artifacts/<name>.
 //
 // A StoreAuth (over the easyvcs credential store) is always supplied to the
 // registry so write authentication is decided live against the store: when the
@@ -434,15 +434,16 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 	if auth == nil {
 		auth = artifactkit.NewStoreAuth(newEasyvcsTokenStore(s.cs))
 	}
+	handlers := map[string]http.Handler{}
 	for _, name := range artifactkit.Registered() {
 		// Build per-protocol config with the correct self_base: OCI uses the
-		// origin root (its /token realm), everything else prefixes /pkgs/<name>.
+		// origin root (its /token realm), everything else prefixes /artifacts/<name>.
 		cfg := map[string]any{"auth": auth}
 		if s.selfBase != "" {
 			if name == "oci" {
 				cfg["self_base"] = s.selfBase
 			} else {
-				cfg["self_base"] = s.selfBase + "/pkgs/" + name
+				cfg["self_base"] = s.selfBase + "/artifacts/" + name
 			}
 		}
 		// Stateful adapters keep their data next to the registry so it
@@ -460,13 +461,10 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 			log.Printf("registry: skip %s: %v", name, err)
 			continue
 		}
-		// OCI is special-cased to /v2; the rest mount under /pkgs/<name>.
-		// Every mount goes through the scope middleware, which resolves the
-		// request's repository (namespace: npm scope, OCI host, maven groupId,
-		// go module prefix, or an explicit /-/<repo>/ marker) into the request
-		// context. The registry's scoped metadata store turns that into content
-		// isolation and the upstream table turns it into per-repository
-		// pull-through, with no per-adapter code.
+		// OCI is special-cased to /v2; the rest are collected into one
+		// dispatcher that serves every target under /artifacts/<target-id>/...
+		// and resolves the target per request (a target created through the
+		// admin API is reachable immediately).
 		if name == "oci" {
 			// The OCI Bearer challenge points at a /token realm; expose it.
 			tokenH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -477,11 +475,14 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 			scoped := artifactkit.ScopeMiddlewareForFormat("oci", "/v2", h)
 			mux.Handle("/v2", scoped)
 			mux.Handle("/v2/", scoped)
-		} else {
-			scoped := artifactkit.ScopeMiddleware("/pkgs", h)
-			mux.Handle("/pkgs/"+name+"/", scoped)
-			mux.Handle("/pkgs/"+name, scoped)
+			continue
 		}
+		handlers[name] = h
+	}
+	if len(handlers) > 0 {
+		d := artifactkit.NewTargetDispatcher(artifactkit.MountBase, reg, handlers)
+		mux.Handle(artifactkit.MountBase+"/", d)
+		mux.Handle(artifactkit.MountBase, d)
 	}
 }
 

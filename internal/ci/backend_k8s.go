@@ -280,7 +280,7 @@ func hostOf(ref string) string {
 }
 
 // npmrcLine builds the .npmrc auth line npm needs (registry URL sans scheme,
-// INCLUDING the /pkgs/npm path; a host-only key never matches).
+// INCLUDING the /artifacts/npm path; a host-only key never matches).
 func npmrcLine(artifactURL, token string) string {
 	host := strings.TrimPrefix(strings.TrimPrefix(artifactURL, "https://"), "http://")
 	host = strings.TrimSuffix(host, "/")
@@ -289,5 +289,5 @@ func npmrcLine(artifactURL, token string) string {
 	} else {
 		host = strings.TrimSuffix(host, ":80")
 	}
-	return "//" + host + "/pkgs/npm/:_authToken=" + token
+	return "//" + host + "/artifacts/npm/:_authToken=" + token
 }

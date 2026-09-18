@@ -12,8 +12,8 @@ package k8s
 import (
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/easylab-platform/artifact/targets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -262,97 +262,11 @@ func (c *Client) ServiceDNS(name string) string {
 // worker binary (empty when the host data dir is unknown).
 func (c *Client) WorkerHostDir() string { return workerHostDir() }
 
-// defaultUpstreams mirrors the artifactkit ecosystem table: domains whose
-// traffic is steered into the easylab gateway by the default egress policy.
-// Keep in sync with easysidecar's rule/defaultrules.go and cmd/easylab/registry.go.
-var defaultUpstreams = []egressDomain{
-	{Match: []string{"registry-1.docker.io", "docker.io", "index.docker.io"}},
-	{Match: []string{"ghcr.io", "quay.io", "gcr.io", "registry.k8s.io",
-		"mcr.microsoft.com", "public.ecr.aws", "nvcr.io"}},
-	// Container blob CDNs stay direct: adapters follow the 307 themselves.
-	{Match: []string{"production.cloudflare.docker.com", "*.cloudflarestorage.com"}},
-	{Match: []string{"registry.npmjs.org", "*.npmjs.org"}},
-	{Match: []string{"npm.jsr.io"}, Add: "/pkgs/npm"},
-	{Match: []string{"pypi.org", "files.pythonhosted.org"}},
-	{Match: []string{"proxy.golang.org", "sum.golang.org"}},
-	{Match: []string{"crates.io", "index.crates.io", "static.crates.io"}},
-	{Match: []string{"repo.maven.apache.org"}},
-	// Maven-layout mirrors (host-driven maven adapter).
-	{Match: []string{"dl.google.com"}, Strip: "/dl/android/maven2", Add: "/pkgs/maven"},
-	{Match: []string{"plugins.gradle.org"}, Strip: "/m2", Add: "/pkgs/maven"},
-	{Match: []string{"repo.clojars.org"}, Add: "/pkgs/maven"},
-	{Match: []string{"repo.spring.io"}, Strip: "/release", Add: "/pkgs/maven"},
-	{Match: []string{"jitpack.io"}, Add: "/pkgs/maven"},
-	{Match: []string{"api.nuget.org", "azuresearch-usnc.nuget.org"}},
-	{Match: []string{"rubygems.org", "index.rubygems.org"}},
-	{Match: []string{"repo.packagist.org"}},
-	{Match: []string{"repo.hex.pm"}},
-	{Match: []string{"hex.pm", "api.hex.pm"}},
-	{Match: []string{"pub.dev"}},
-	{Match: []string{"charts.helm.sh"}},
-	{Match: []string{"center.conan.io", "center2.conan.io"}},
-	{Match: []string{"api.spm.swift.org"}},
-	{Match: []string{"dl-cdn.alpinelinux.org"}},
-	{Match: []string{"deb.debian.org", "security.debian.org"}},
-	{Match: []string{"archive.ubuntu.com", "security.ubuntu.com"}},
-	{Match: []string{"*.elrepo.org", "mirror.stream.centos.org", "dl.fedoraproject.org"}},
-	{Match: []string{"huggingface.co", "*.huggingface.co", "cdn-lfs.huggingface.co"}},
-	{Match: []string{"repo.anaconda.com", "conda.anaconda.org"}},
-	{Match: []string{"cache.nixos.org"}},
-	// Source mirrors: git smart-HTTP and Ivy repositories.
-	{Match: []string{"github.com", "codeload.github.com"}},
-	{Match: []string{"repo.scala-sbt.org", "scala.jfrog.io"}},
-	// Plain-HTTP package trees (Haskell, R, Perl, Lua) + Julia's package server.
-	{Match: []string{"hackage.haskell.org"}},
-	{Match: []string{"cran.r-project.org"}},
-	{Match: []string{"cpan.metacpan.org"}},
-	{Match: []string{"luarocks.org"}},
-	{Match: []string{"pkg.julialang.org", "*.pkg.julialang.org"}},
-	// Additional plain-HTTP trees.
-	{Match: []string{"jsr.io"}, Add: "/pkgs/jsr"},
-	{Match: []string{"opam.ocaml.org"}, Add: "/pkgs/opam"},
-	{Match: []string{"stackage.org"}, Add: "/pkgs/stackage"},
-	{Match: []string{"pecl.php.net"}, Add: "/pkgs/pecl"},
-	{Match: []string{"bcr.bazel.build"}, Add: "/pkgs/bazel"},
-	{Match: []string{"updates.jenkins.io"}, Add: "/pkgs/jenkins"},
-}
 
-type egressDomain struct {
-	Match []string
-	// Strip is a leading path prefix removed before Add is applied (mirrors
-	// whose path shape differs from the adapter's mount).
-	Strip string
-	// Add is the adapter mount prepended after Strip.
-	Add string
-}
-
-// DefaultRulesYAML renders the built-in egress policy: package-manager
-// upstreams rewritten to the gateway (routing by preserved Host), default
-// direct, MITM only for rewrite rules.
+// DefaultRulesYAML renders the built-in egress policy from the shared target
+// table (artifact/targets), which is the single source formerly duplicated
+// here and in easysidecar's rule/defaultrules.go. see targets.EgressPolicy.
 func DefaultRulesYAML(gatewayHostPort string, mitmDefault bool) string {
-	var b strings.Builder
-	b.WriteString("# easysidecar default egress policy (managed by easylab).\n")
-	b.WriteString("rules:\n")
-	for _, u := range defaultUpstreams {
-		quoted := make([]string, 0, len(u.Match))
-		for _, m := range u.Match {
-			quoted = append(quoted, fmt.Sprintf("%q", m))
-		}
-		b.WriteString("  - match: [" + strings.Join(quoted, ", ") + "]\n")
-		b.WriteString("    action: rewrite\n")
-		b.WriteString("    target: \"" + gatewayHostPort + "\"\n")
-		if u.Strip != "" {
-			b.WriteString("    strip_prefix: \"" + u.Strip + "\"\n")
-		}
-		if u.Add != "" {
-			b.WriteString("    add_prefix: \"" + u.Add + "\"\n")
-		}
-	}
-	b.WriteString("default: direct\n")
-	if mitmDefault {
-		b.WriteString("mitm_default: true\n")
-	} else {
-		b.WriteString("mitm_default: false\n")
-	}
-	return b.String()
+	return targets.RenderEgressYAML(gatewayHostPort, mitmDefault,
+		"easysidecar default egress policy (managed by easylab).")
 }
