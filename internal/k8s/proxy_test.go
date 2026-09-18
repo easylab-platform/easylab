@@ -195,12 +195,15 @@ func TestDefaultInjection(t *testing.T) {
 
 // TestDefaultRulesYAMLShape verifies the embedded rule set.
 func TestDefaultRulesYAMLShape(t *testing.T) {
-	y := DefaultRulesYAML("gw:80")
+	y := DefaultRulesYAML("gw:80", false)
 	if !strings.Contains(y, `target: "gw:80"`) {
 		t.Fatalf("target missing:\n%s", y)
 	}
 	if strings.Contains(y, "mitm_default: true") {
-		t.Fatal("mitm_default must be false")
+		t.Fatal("mitm_default must be false by default")
+	}
+	if !strings.Contains(DefaultRulesYAML("gw:80", true), "mitm_default: true") {
+		t.Fatal("mitm_default must be true when requested")
 	}
 	if strings.Count(y, "action: rewrite") != len(defaultUpstreams) {
 		t.Fatalf("rewrite rule count mismatch")
@@ -422,6 +425,10 @@ func TestCaptureModeInjection(t *testing.T) {
 		Capture:          true,
 		CaptureAddr:      "0.0.0.0:15001",
 		SpoofUpstreamDNS: "10.96.0.10",
+		UDPMode:          "log",
+		DefaultMode:      "log",
+		UDPAllow:         []string{"1.2.3.4:123"},
+		ExemptCIDRs:      []string{"172.18.0.0/16"},
 	}
 	if err := withProxy(&pod.Spec, pod.Name, "test", proxy); err != nil {
 		t.Fatal(err)
@@ -470,17 +477,23 @@ func TestCaptureModeInjection(t *testing.T) {
 	if !strings.Contains(sargs, "--capture-dns") || !strings.Contains(sargs, "--upstream-dns=10.96.0.10") {
 		t.Fatalf("capture must wire the dns assist: %v", sidecar.Args)
 	}
+	for _, want := range []string{"--capture-udp-mode=log", "--capture-default-mode=log",
+		"--capture-udp-allow=1.2.3.4:123", "--capture-exempt-cidrs=172.18.0.0/16"} {
+		if !strings.Contains(sargs, want) {
+			t.Fatalf("capture args missing %q: %v", want, sidecar.Args)
+		}
+	}
 	if sidecar.SecurityContext == nil || sidecar.SecurityContext.Capabilities == nil {
 		t.Fatal("sidecar needs NET_ADMIN for SO_MARK")
 	}
 
-	// DNS is NOT hijacked: the cluster resolver stays in charge.
-	if pod.Spec.DNSPolicy == corev1.DNSNone {
-		t.Fatal("capture mode must not set dnsPolicy=None")
+	// DNS IS forced to the sidecar (capture owns all egress, including DNS).
+	if pod.Spec.DNSPolicy != corev1.DNSNone {
+		t.Fatalf("capture must set dnsPolicy=None, got %q", pod.Spec.DNSPolicy)
 	}
-	if pod.Spec.DNSConfig != nil && len(pod.Spec.DNSConfig.Nameservers) > 0 &&
-		pod.Spec.DNSConfig.Nameservers[0] == "127.0.0.1" {
-		t.Fatal("capture mode must not point DNS at the sidecar")
+	if pod.Spec.DNSConfig == nil || len(pod.Spec.DNSConfig.Nameservers) == 0 ||
+		pod.Spec.DNSConfig.Nameservers[0] != "127.0.0.1" {
+		t.Fatalf("capture must point DNS at the sidecar: %+v", pod.Spec.DNSConfig)
 	}
 
 	// Workload still trusts the MITM CA.

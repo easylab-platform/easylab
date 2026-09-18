@@ -100,6 +100,30 @@ spec:
             - name: EASYLAB_EGRESS_UPSTREAM_PROXY
               value: {{ .Values.backend.egressUpstreamProxy | quote }}
             {{- end }}
+            {{- if .Values.backend.egressMitmDefault }}
+            - name: EASYLAB_EGRESS_MITM_DEFAULT
+              value: {{ .Values.backend.egressMitmDefault | quote }}
+            {{- end }}
+            {{- if .Values.backend.egressUDPAllow }}
+            - name: EASYLAB_EGRESS_UDP_ALLOW
+              value: {{ .Values.backend.egressUDPAllow | quote }}
+            {{- end }}
+            {{- if .Values.backend.egressUDPMode }}
+            - name: EASYLAB_EGRESS_UDP_MODE
+              value: {{ .Values.backend.egressUDPMode | quote }}
+            {{- end }}
+            {{- if .Values.backend.egressDefaultMode }}
+            - name: EASYLAB_EGRESS_DEFAULT_MODE
+              value: {{ .Values.backend.egressDefaultMode | quote }}
+            {{- end }}
+            {{- if .Values.backend.egressExemptCIDRs }}
+            - name: EASYLAB_EGRESS_EXEMPT_CIDRS
+              value: {{ .Values.backend.egressExemptCIDRs | quote }}
+            {{- end }}
+            {{- if .Values.backend.egressCaptureForward }}
+            - name: EASYLAB_EGRESS_CAPTURE_FORWARD
+              value: {{ .Values.backend.egressCaptureForward | quote }}
+            {{- end }}
             - name: EASYLAB_REGISTRY_HOST
               value: {{ include "easylab.registryHost" . | quote }}
             {{- if .Values.sandboxes.runtimes }}

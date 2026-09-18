@@ -52,11 +52,25 @@ type ProxySpec struct {
 	// Capture selects the privileged all-port interception mode instead of
 	// DNS-spoof: an init container installs iptables rules that redirect every
 	// outbound TCP connection to the sidecar, which recovers the real
-	// destination via SO_ORIGINAL_DST. DNS is NOT intercepted, so the workload
-	// keeps the cluster resolver and every port (not just 80/443) is covered.
+	// destination via SO_ORIGINAL_DST. DNS is forced to the sidecar resolver,
+	// so every port (not just 80/443) is covered.
 	Capture bool
 	// CaptureAddr is the sidecar's capture listener (default 0.0.0.0:15001).
 	CaptureAddr string
+	// UDPAllow lists UDP endpoints that always pass in capture mode
+	// (host[:port] or cidr[:port]).
+	UDPAllow []string
+	// UDPMode is "log" (default) or "reject" for UDP that is neither DNS, h3
+	// nor allowed.
+	UDPMode string
+	// DefaultMode is "log" (default) or "reject" for other egress
+	// (ICMP/raw/uncaptured).
+	DefaultMode string
+	// ExemptCIDRs always pass (resolver/apiserver/node/pod/service CIDRs).
+	ExemptCIDRs []string
+	// CaptureForward also serves forwarded (VM guest) traffic via
+	// PREROUTING/FORWARD and a second listener.
+	CaptureForward bool
 }
 
 // proxyCAPath is where the sidecar mounts the MITM CA and where it is handed
@@ -102,7 +116,18 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 			// faces then serve).
 			"--capture-dns",
 			"--spoof-dns-addr=0.0.0.0:53",
-			"--upstream-dns="+proxy.SpoofUpstreamDNS)
+			"--upstream-dns="+proxy.SpoofUpstreamDNS,
+			"--capture-udp-mode="+modeOr(proxy.UDPMode, "log"),
+			"--capture-default-mode="+modeOr(proxy.DefaultMode, "log"))
+		if len(proxy.UDPAllow) > 0 {
+			args = append(args, "--capture-udp-allow="+strings.Join(proxy.UDPAllow, ","))
+		}
+		if len(proxy.ExemptCIDRs) > 0 {
+			args = append(args, "--capture-exempt-cidrs="+strings.Join(proxy.ExemptCIDRs, ","))
+		}
+		if proxy.CaptureForward {
+			args = append(args, "--capture-forward-addr=0.0.0.0:15006")
+		}
 	} else {
 		args = append(args,
 			"--mode=proxy",
@@ -195,31 +220,28 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 	pod.Containers = append(pod.Containers, proxyContainer)
 	pod.Volumes = append(pod.Volumes, vols...)
 
-	if !proxy.Capture {
-		// Point the Pod's resolver at the sidecar (dns-spoof). dnsPolicy=None
-		// is required: with a policy, kubelet APPENDS dnsConfig.nameservers to
-		// the cluster resolvers, so the client would use CoreDNS first and
-		// never reach the sidecar. With None, ONLY our list is used — so we
-		// must supply the search path and ndots ourselves.
-		//
-		// Capture mode needs none of this: DNS stays with the cluster and the
-		// real destination is recovered from the socket.
-		pod.DNSPolicy = corev1.DNSNone
-		if pod.DNSConfig == nil {
-			pod.DNSConfig = &corev1.PodDNSConfig{}
-		}
-		domain := proxy.ClusterDomain
-		if domain == "" {
-			domain = "cluster.local"
-		}
-		pod.DNSConfig.Nameservers = []string{"127.0.0.1"}
-		pod.DNSConfig.Searches = []string{namespace + ".svc." + domain, "svc." + domain, domain}
-		ndots := "5"
-		pod.DNSConfig.Options = []corev1.PodDNSConfigOption{{Name: "ndots", Value: &ndots}}
+	// Point the Pod's resolver at the sidecar. Both modes do this: spoof needs
+	// it to steer names, capture needs it because it owns all egress and forces
+	// DNS. dnsPolicy=None is required: with a policy, kubelet APPENDS
+	// dnsConfig.nameservers to the cluster resolvers, so the client would use
+	// CoreDNS first and never reach the sidecar. With None, ONLY our list is
+	// used — so we must supply the search path and ndots ourselves.
+	pod.DNSPolicy = corev1.DNSNone
+	if pod.DNSConfig == nil {
+		pod.DNSConfig = &corev1.PodDNSConfig{}
 	}
-	// POD_IP for the sidecar's -self-ip (spoof mode only).
+	domain := proxy.ClusterDomain
+	if domain == "" {
+		domain = "cluster.local"
+	}
+	pod.DNSConfig.Nameservers = []string{"127.0.0.1"}
+	pod.DNSConfig.Searches = []string{namespace + ".svc." + domain, "svc." + domain, domain}
+	ndots := "5"
+	pod.DNSConfig.Options = []corev1.PodDNSConfigOption{{Name: "ndots", Value: &ndots}}
+	// POD_IP for the sidecar's -self-ip (the address it answers rewrite names
+	// with, and the capture DNAT target).
 	for i := range pod.Containers {
-		if pod.Containers[i].Name == "easysidecar" && !proxy.Capture {
+		if pod.Containers[i].Name == "easysidecar" {
 			pod.Containers[i].Env = append(pod.Containers[i].Env, corev1.EnvVar{
 				Name: "POD_IP", ValueFrom: &corev1.EnvVarSource{
 					FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"},
@@ -245,6 +267,14 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 		}
 	}
 	return nil
+}
+
+// modeOr returns v when set, else def (the sidecar defaults to log).
+func modeOr(v, def string) string {
+	if strings.TrimSpace(v) == "" {
+		return def
+	}
+	return v
 }
 
 // capturePort extracts the numeric port from a capture listen address.

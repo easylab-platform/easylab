@@ -47,15 +47,21 @@ type Client struct {
 
 // egressPolicy carries the resolved easysidecar defaults for this client.
 type egressPolicy struct {
-	enabled       bool
-	image         string
-	gateway       string
-	caCert        string
-	caKey         string
-	spoofDNS      string
-	upstreamProxy string
-	clusterDomain string
-	capture       bool
+	enabled        bool
+	image          string
+	gateway        string
+	caCert         string
+	caKey          string
+	spoofDNS       string
+	upstreamProxy  string
+	clusterDomain  string
+	capture        bool
+	captureForward bool
+	mitmDefault    bool
+	udpAllow       []string
+	udpMode        string
+	defaultMode    string
+	exemptCIDRs    []string
 }
 
 // Config configures a Client.
@@ -95,6 +101,25 @@ type Config struct {
 	EgressPolicyUpstreamProxy string
 	// ClusterDomain is the cluster DNS domain (default cluster.local).
 	ClusterDomain string
+
+	// EgressPolicyMitmDefault decrypts EVERY intercepted TLS connection, not
+	// just rewrite rules. It is a strong posture: clients with pinned
+	// certificates or their own trust store will fail. Off by default.
+	EgressPolicyMitmDefault bool
+	// EgressPolicyCaptureUDPAllow lists UDP endpoints that always pass
+	// (host[:port] or cidr[:port]) when capture mode is on.
+	EgressPolicyCaptureUDPAllow []string
+	// EgressPolicyCaptureUDPMode is "log" (default) or "reject" for UDP that is
+	// neither DNS, h3 nor allowed.
+	EgressPolicyCaptureUDPMode string
+	// EgressPolicyCaptureDefaultMode is "log" (default) or "reject" for other
+	// egress (ICMP/raw/uncaptured).
+	EgressPolicyCaptureDefaultMode string
+	// EgressPolicyCaptureExemptCIDRs always pass (resolver/apiserver/node/pod/
+	// service CIDRs).
+	EgressPolicyCaptureExemptCIDRs []string
+	// EgressPolicyCaptureForward also serves forwarded (VM guest) traffic.
+	EgressPolicyCaptureForward bool
 }
 
 // New builds a client from the in-cluster config (production) or, when
@@ -151,15 +176,21 @@ func newClient(cs kubernetes.Interface, cfg Config) *Client {
 		proxy:         cfg.Proxy,
 		runtimes:      loadRuntimes(),
 		egress: egressPolicy{
-			enabled:       enabled,
-			image:         image,
-			gateway:       gateway,
-			caCert:        cfg.EgressPolicyCACert,
-			caKey:         cfg.EgressPolicyCAKey,
-			spoofDNS:      cfg.EgressPolicySpoofDNS,
-			upstreamProxy: cfg.EgressPolicyUpstreamProxy,
-			clusterDomain: cfg.ClusterDomain,
-			capture:       cfg.EgressPolicyMode == "capture",
+			enabled:        enabled,
+			image:          image,
+			gateway:        gateway,
+			caCert:         cfg.EgressPolicyCACert,
+			caKey:          cfg.EgressPolicyCAKey,
+			spoofDNS:       cfg.EgressPolicySpoofDNS,
+			upstreamProxy:  cfg.EgressPolicyUpstreamProxy,
+			clusterDomain:  cfg.ClusterDomain,
+			capture:        cfg.EgressPolicyMode == "capture",
+			captureForward: cfg.EgressPolicyCaptureForward,
+			mitmDefault:    cfg.EgressPolicyMitmDefault,
+			udpAllow:       cfg.EgressPolicyCaptureUDPAllow,
+			udpMode:        cfg.EgressPolicyCaptureUDPMode,
+			defaultMode:    cfg.EgressPolicyCaptureDefaultMode,
+			exemptCIDRs:    cfg.EgressPolicyCaptureExemptCIDRs,
 		},
 	}
 }
@@ -179,7 +210,7 @@ func (c *Client) egressSpecFor(isService bool) *ProxySpec {
 		return nil
 	}
 	return &ProxySpec{
-		Rules:            DefaultRulesYAML(c.egress.gateway),
+		Rules:            DefaultRulesYAML(c.egress.gateway, c.egress.mitmDefault),
 		Image:            c.egress.image,
 		CACertPEM:        c.egress.caCert,
 		CAKeyPEM:         c.egress.caKey,
@@ -187,6 +218,12 @@ func (c *Client) egressSpecFor(isService bool) *ProxySpec {
 		UpstreamProxy:    c.egress.upstreamProxy,
 		ClusterDomain:    c.egress.clusterDomain,
 		Capture:          c.egress.capture,
+		CaptureForward:   c.egress.captureForward,
+		MitmDefault:      c.egress.mitmDefault,
+		UDPAllow:         c.egress.udpAllow,
+		UDPMode:          c.egress.udpMode,
+		DefaultMode:      c.egress.defaultMode,
+		ExemptCIDRs:      c.egress.exemptCIDRs,
 	}
 }
 
@@ -268,7 +305,7 @@ type egressDomain struct {
 // DefaultRulesYAML renders the built-in egress policy: package-manager
 // upstreams rewritten to the gateway (routing by preserved Host), default
 // direct, MITM only for rewrite rules.
-func DefaultRulesYAML(gatewayHostPort string) string {
+func DefaultRulesYAML(gatewayHostPort string, mitmDefault bool) string {
 	var b strings.Builder
 	b.WriteString("# easysidecar default egress policy (managed by easylab).\n")
 	b.WriteString("rules:\n")
@@ -282,6 +319,10 @@ func DefaultRulesYAML(gatewayHostPort string) string {
 		b.WriteString("    target: \"" + gatewayHostPort + "\"\n")
 	}
 	b.WriteString("default: direct\n")
-	b.WriteString("mitm_default: false\n")
+	if mitmDefault {
+		b.WriteString("mitm_default: true\n")
+	} else {
+		b.WriteString("mitm_default: false\n")
+	}
 	return b.String()
 }

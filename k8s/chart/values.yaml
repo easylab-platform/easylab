@@ -59,24 +59,38 @@ backend:
   # Egress-proxy (easysidecar) image injected into sandbox/job/
   # service/job pods. Must be fully qualified so the NODE can pull it (a bare
   # `easylab/...` name would be resolved against docker.io and fail).
-  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.7.1
+  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.8.0
   # When "1", the egress-proxy sidecar is NOT injected (workloads egress
   # directly). Prefer `egressMode` instead: disabling also loses the
   # env-proxy fallback.
   egressPolicyDisabled: ""
   # Interception mode:
-  #   ""/"spoof"  DNS-based, no netfilter/NET_ADMIN (default)
-  #   "capture"   privileged all-port interception: an init container
-  #               redirects every outbound TCP connection to the sidecar,
-  #               which recovers the destination via SO_ORIGINAL_DST. Needs
-  #               NET_ADMIN on the sidecar + init container.
-  egressMode: ""
-  # Cluster resolver the spoof sidecar forwards real queries to (CoreDNS
-  # service IP). Required for auto/spoof mode.
-  egressSpoofDNS: ""
-  # Optional egress HTTP proxy (mihomo) that spoof DIRECT traffic is sent
-  # through, so cluster egress policy still applies.
+  #   "capture"   privileged all-port interception (default): an init container
+  #               redirects every outbound TCP connection to the sidecar, which
+  #               recovers the destination via SO_ORIGINAL_DST, forces DNS to
+  #               the sidecar resolver and applies a UDP/default egress policy.
+  #               Needs NET_ADMIN on the sidecar + init container.
+  #   "spoof"     DNS-based, no netfilter/NET_ADMIN (legacy).
+  egressMode: capture
+  # Decrypt EVERY intercepted TLS connection, not just rewrite rules. Strong
+  # posture: clients with pinned certs / own trust stores will fail.
+  egressMitmDefault: "1"
+  # Cluster resolver the sidecar forwards real DNS to (CoreDNS service IP).
+  # Required for capture and spoof.
+  egressSpoofDNS: 172.18.0.10
+  # Optional egress HTTP proxy (mihomo) that DIRECT traffic is sent through.
   egressUpstreamProxy: ""
+  # Capture egress policy:
+  #   egressUDPAllow      UDP endpoints that always pass (host[:port] or cidr[:port])
+  #   egressUDPMode       "log" (default; observe) or "reject" for non-DNS/h3 UDP
+  #   egressDefaultMode   "log" (default) or "reject" for ICMP/raw/uncaptured
+  #   egressExemptCIDRs   destinations that always pass (apiserver/node/pod/service)
+  egressUDPAllow: ""
+  egressUDPMode: log
+  egressDefaultMode: log
+  egressExemptCIDRs: ""
+  # Serve forwarded (VM guest) traffic too (PREROUTING/FORWARD + :15006).
+  egressCaptureForward: ""
   # Host path backing the /data hostPath mount (ephemeral build pods read the
   # build context + write logs there).
   hostDataDir: /home/develop/.easylab

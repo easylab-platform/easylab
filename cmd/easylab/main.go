@@ -72,6 +72,17 @@ func envOrStr(k, def string) string {
 	return def
 }
 
+// splitList parses a comma-separated env value, dropping blanks.
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 type server struct {
 	cs       *store.CentralStore
 	registry *artifactkit.Registry
@@ -162,6 +173,12 @@ func main() {
 	egressDisabled := envOrStr("EASYLAB_EGRESS_POLICY_DISABLED", "") != ""
 	egressMode := envOrStr("EASYLAB_EGRESS_MODE", "")
 	egressSpoofDNS := envOrStr("EASYLAB_EGRESS_SPOOF_DNS", "")
+	egressMitmDefault := envOrStr("EASYLAB_EGRESS_MITM_DEFAULT", "") != ""
+	egressUDPAllow := splitList(envOrStr("EASYLAB_EGRESS_UDP_ALLOW", ""))
+	egressUDPMode := envOrStr("EASYLAB_EGRESS_UDP_MODE", "log")
+	egressDefaultMode := envOrStr("EASYLAB_EGRESS_DEFAULT_MODE", "log")
+	egressExemptCIDRs := splitList(envOrStr("EASYLAB_EGRESS_EXEMPT_CIDRS", ""))
+	egressCaptureForward := envOrStr("EASYLAB_EGRESS_CAPTURE_FORWARD", "") != ""
 	var egressCACert, egressCAKey string
 	if !egressDisabled {
 		cert, key, cerr := ensureEgressCA(filepath.Join(store.HomeDir(), "egress-ca"))
@@ -187,6 +204,13 @@ func main() {
 		EgressPolicySpoofDNS:      egressSpoofDNS,
 		EgressPolicyUpstreamProxy: envOrStr("EASYLAB_EGRESS_UPSTREAM_PROXY", envOrStr("EASYLAB_UPSTREAM_PROXY", "")),
 		ClusterDomain:             envOrStr("EASYLAB_CLUSTER_DOMAIN", "cluster.local"),
+
+		EgressPolicyMitmDefault:        egressMitmDefault,
+		EgressPolicyCaptureUDPAllow:    egressUDPAllow,
+		EgressPolicyCaptureUDPMode:     egressUDPMode,
+		EgressPolicyCaptureDefaultMode: egressDefaultMode,
+		EgressPolicyCaptureExemptCIDRs: egressExemptCIDRs,
+		EgressPolicyCaptureForward:     egressCaptureForward,
 	}); kerr == nil {
 		opsState.services = ops.NewK8sServiceRunner(kc)
 		sK8s = kc
