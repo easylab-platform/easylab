@@ -188,22 +188,6 @@ func (c *Client) EgressPolicySpecService() *ProxySpec {
 	return c.egressSpecFor(true)
 }
 
-// egressClusterCIDRs returns the bypass ranges. Overridable via
-// EASYLAB_EGRESS_BYPASS_CIDRS; the defaults cover private ranges (cluster
-// service/pod networks in typical deployments).
-func (c *Client) egressClusterCIDRs() []string {
-	if v := os.Getenv("EASYLAB_EGRESS_BYPASS_CIDRS"); v != "" {
-		var out []string
-		for _, s := range strings.Split(v, ",") {
-			if s = strings.TrimSpace(s); s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	return []string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
-}
-
 // Namespace returns the namespace easylab operates in.
 func (c *Client) Namespace() string { return c.namespace }
 

@@ -350,3 +350,62 @@ func TestSpoofSkippedForVMRuntimes(t *testing.T) {
 		t.Fatal("VM pod must not get the sidecar")
 	}
 }
+
+// TestInjectedProxyFlagsAreKnown pins the flag surface the injector emits to
+// the set EasyProxy actually defines. A mismatch used to make every injected
+// sidecar exit at start-up with "flag provided but not defined"; this test
+// makes that class of drift impossible to reintroduce silently.
+func TestInjectedProxyFlagsAreKnown(t *testing.T) {
+	// Mirrors flags.go in the easyproxy repo (spoof mode is the only mode).
+	known := map[string]bool{
+		"mode":            true,
+		"rules":           true,
+		"ca-cert":         true,
+		"ca-key":          true,
+		"bypass-cidrs":    true,
+		"mitm-default":    true,
+		"spoof":           true,
+		"self-ip":         true,
+		"upstream-dns":    true,
+		"upstream-proxy":  true,
+		"spoof-dns-addr":  true,
+		"spoof-tls-addr":  true,
+		"spoof-http-addr": true,
+	}
+
+	pod := minimalPod("sbx-flags")
+	proxy := &ProxySpec{
+		Rules:            testRules,
+		Image:            "registry/easyproxy:v0.2.0",
+		CACertPEM:        "cert",
+		CAKeyPEM:         "key",
+		SpoofUpstreamDNS: "10.96.0.10",
+		UpstreamProxy:    "http://mihomo:7890",
+		MitmDefault:      true,
+	}
+	if err := withProxy(&pod.Spec, pod.Name, "test", proxy); err != nil {
+		t.Fatal(err)
+	}
+
+	var sidecar *corev1.Container
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == "easyproxy" {
+			sidecar = &pod.Spec.Containers[i]
+		}
+	}
+	if sidecar == nil {
+		t.Fatal("sidecar not injected")
+	}
+	for _, arg := range sidecar.Args {
+		if !strings.HasPrefix(arg, "--") {
+			t.Fatalf("unexpected non-flag arg %q", arg)
+		}
+		name := strings.TrimPrefix(arg, "--")
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i]
+		}
+		if !known[name] {
+			t.Fatalf("injected --%s is not a defined EasyProxy flag (would crash the sidecar)", name)
+		}
+	}
+}
