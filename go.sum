@@ -68,8 +68,8 @@ github.com/easylab-platform/artifact/rubygems v0.5.0 h1:As4L44qrnF0J4OMmjcMkaq3P
 github.com/easylab-platform/artifact/rubygems v0.5.0/go.mod h1:p0+Xs28Dv363z5TAglU9XSwQn1gWjQBiKv5T9viUvh4=
 github.com/easylab-platform/artifact/swiftpm v0.5.0 h1:8mqi+r9yFyKmtJ2fhN23ZBkkxcZsbjhlxAgmaes4RMA=
 github.com/easylab-platform/artifact/swiftpm v0.5.0/go.mod h1:yfxuS8h948ZmIDnXEvtJxQlA0113vfqyExS2JVucm8w=
-github.com/easylab-platform/artifact/system v0.5.0 h1:HcfnbfrZuuVpBpqc/P1x1xPzWNpH1fHiHUJPfllPJXY=
-github.com/easylab-platform/artifact/system v0.5.0/go.mod h1:kdqs+oj0pKIY/EbTBiRLGWs/JGBMarGanZ+13jcQchc=
+github.com/easylab-platform/artifact/system v0.5.1 h1:EBpRyga7gTxke6iXPBU/98+LBg/XcBBd6nPSl0xAIaw=
+github.com/easylab-platform/artifact/system v0.5.1/go.mod h1:kdqs+oj0pKIY/EbTBiRLGWs/JGBMarGanZ+13jcQchc=
 github.com/easylab-platform/artifact/targets v0.1.0 h1:WGOv8wPJOyM+TtzVto3ZOZj5xUYSxU3AyepNo78vIIU=
 github.com/easylab-platform/artifact/targets v0.1.0/go.mod h1:9u0bZ+ReqyeB9J72pDOu7qWVeiiDxECDGYQZ4zAJ2k0=
 github.com/easylab-platform/easylab-proto v0.17.0 h1:Zope/n6Qu8bl4yHQMTeEO2IP+iua/fVBWxJ++4sZBzE=
