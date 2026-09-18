@@ -20,7 +20,7 @@ registry:
 gateway:
   image:
     repository: forgejo.develop.10.199.64.20.nip.io/easylab/easylab
-    tag: "20260915130000"
+    tag: "v0.14.0"
     pullPolicy: IfNotPresent
   # External base URL advertised to clients (OCI /token realm, git, ...).
   # Empty derives it from the install namespace: the in-cluster Service URL
@@ -59,7 +59,7 @@ backend:
   # Egress-proxy (easysidecar) image injected into sandbox/job/
   # service/job pods. Must be fully qualified so the NODE can pull it (a bare
   # `easylab/...` name would be resolved against docker.io and fail).
-  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.10.1
+  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.11.0
   # When "1", the egress-proxy sidecar is NOT injected (workloads egress
   # directly). Prefer `egressMode` instead: disabling also loses the
   # env-proxy fallback.

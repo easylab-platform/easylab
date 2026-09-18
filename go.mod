@@ -12,7 +12,7 @@ require (
 	github.com/easylab-platform/artifact/composer v0.5.0
 	github.com/easylab-platform/artifact/conan v0.5.0
 	github.com/easylab-platform/artifact/conda v0.6.0
-	github.com/easylab-platform/artifact/core v0.13.0
+	github.com/easylab-platform/artifact/core v0.13.1
 	github.com/easylab-platform/artifact/debian v0.6.0
 	github.com/easylab-platform/artifact/generic v0.5.0
 	github.com/easylab-platform/artifact/git v0.2.0
@@ -25,7 +25,7 @@ require (
 	github.com/easylab-platform/artifact/ivy v0.2.0
 	github.com/easylab-platform/artifact/maven v0.5.0
 	github.com/easylab-platform/artifact/nix v0.5.0
-	github.com/easylab-platform/artifact/npm v0.6.0
+	github.com/easylab-platform/artifact/npm v0.6.1
 	github.com/easylab-platform/artifact/nuget v0.5.0
 	github.com/easylab-platform/artifact/oci v0.4.2
 	github.com/easylab-platform/artifact/protobuf v0.5.0

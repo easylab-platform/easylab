@@ -24,8 +24,8 @@ github.com/easylab-platform/artifact/conan v0.5.0 h1:mrXLNJVdujdnGM3OCHwxL/T7NfL
 github.com/easylab-platform/artifact/conan v0.5.0/go.mod h1:ksIv9Ux5E6cCkA80jsNpWryxxNB1Ie8ZINepyo+PLAk=
 github.com/easylab-platform/artifact/conda v0.6.0 h1:f3Emk2fPN+3xWcQjTh7bAZF7emKZflF9J7OnatTTxNs=
 github.com/easylab-platform/artifact/conda v0.6.0/go.mod h1:KhrB2cTKeN2ZkWsqr/9huVNZMQiFbjuXaG9C9EfxkQs=
-github.com/easylab-platform/artifact/core v0.13.0 h1:85OuSXgfiWG4F6tIWpcdH3lwnw/LyViHwj16A/BPzLc=
-github.com/easylab-platform/artifact/core v0.13.0/go.mod h1:BilsM6w+4+CFe43dDt/6Miq5Zp4O56YyQNodI99l4fo=
+github.com/easylab-platform/artifact/core v0.13.1 h1:1BNgeNltj9P89L5ufv3UyQsb9wsj97NG/07kb3pHzFs=
+github.com/easylab-platform/artifact/core v0.13.1/go.mod h1:BilsM6w+4+CFe43dDt/6Miq5Zp4O56YyQNodI99l4fo=
 github.com/easylab-platform/artifact/debian v0.6.0 h1:CQbv03Zyj6Mk7YEPO/E2miciqW6IuqAY63hKK0cE+IQ=
 github.com/easylab-platform/artifact/debian v0.6.0/go.mod h1:oCunHMVrCzN1nb6XHg4S/N3nbB8ipgB1VaWwr3METLk=
 github.com/easylab-platform/artifact/generic v0.5.0 h1:5CSWeFgpVyLkYS1Cs18A6w/TWO3VtrvR2eij5UN63+s=
@@ -50,8 +50,8 @@ github.com/easylab-platform/artifact/maven v0.5.0 h1:Mh7p85wHbI/CXix8BUogrR4rf1N
 github.com/easylab-platform/artifact/maven v0.5.0/go.mod h1:ZIGs4JUqDaTSRkSpWqIWe7Ug0fJW4zZ1xEGSPatzeA4=
 github.com/easylab-platform/artifact/nix v0.5.0 h1:Wo1Q58ERwIVMMX6UZfYTimnesq7P5eCqjSMfiC6b8jo=
 github.com/easylab-platform/artifact/nix v0.5.0/go.mod h1:FvsTIClig2Zm6oPPQlS9v3PjHEusMQk0I/evQ+TUfg8=
-github.com/easylab-platform/artifact/npm v0.6.0 h1:mibtR3WFh5jxbUmqrL6fxPPKOnuuOWkTtY6ZAozTuFY=
-github.com/easylab-platform/artifact/npm v0.6.0/go.mod h1:0QftlfuRlipAHbKV0zHe5v0cE4Naw9eKOEhouvqFnTs=
+github.com/easylab-platform/artifact/npm v0.6.1 h1:l+BBYlUCTCzFN7EF9WlNikCp9qOKnPEKbIUh7L0s+HU=
+github.com/easylab-platform/artifact/npm v0.6.1/go.mod h1:0QftlfuRlipAHbKV0zHe5v0cE4Naw9eKOEhouvqFnTs=
 github.com/easylab-platform/artifact/nuget v0.5.0 h1:2M/webdXUbgqESTxq6EXEpJeWqKJ3shAPuOJPt6UMSI=
 github.com/easylab-platform/artifact/nuget v0.5.0/go.mod h1:80WpfjssQkvahN5Kj3nALLCysD5c4uyvA3c7b98XbqI=
 github.com/easylab-platform/artifact/oci v0.4.2 h1:KgNwslt7UuwbUh1u9AZvYS7NVW/7/qSjFjmhQghsbrA=
