@@ -154,10 +154,11 @@ func main() {
 	// generated once per deployment and persisted under EASYVCS_HOME so pod
 	// restarts and easysidecar leaves keep verifying against the same CA.
 	//
-	// Modes: redirect (iptables; needs kernel netfilter) or spoof (DNS-based;
-	// no netfilter/tun/NET_ADMIN — sandboxes and jobs default to it when a
-	// cluster resolver is configured; services stay on redirect because they
-	// may bind :443). EASYLAB_EGRESS_MODE forces one mode everywhere.
+	// Modes: "spoof" (DNS-based; no netfilter/NET_ADMIN — the default) or
+	// "capture" (privileged all-port interception: an init container redirects
+	// every outbound TCP connection to the sidecar via iptables, which
+	// recovers the destination with SO_ORIGINAL_DST). Capture covers arbitrary
+	// ports and non-DNS-aware clients; EASYLAB_EGRESS_MODE selects it.
 	egressDisabled := envOrStr("EASYLAB_EGRESS_POLICY_DISABLED", "") != ""
 	egressMode := envOrStr("EASYLAB_EGRESS_MODE", "")
 	egressSpoofDNS := envOrStr("EASYLAB_EGRESS_SPOOF_DNS", "")

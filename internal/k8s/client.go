@@ -55,6 +55,7 @@ type egressPolicy struct {
 	spoofDNS      string
 	upstreamProxy string
 	clusterDomain string
+	capture       bool
 }
 
 // Config configures a Client.
@@ -77,9 +78,14 @@ type Config struct {
 	// (SSL_CERT_FILE / NODE_EXTRA_CA_CERTS) and easysidecar signs with the key.
 	EgressPolicyCACert string
 	EgressPolicyCAKey  string
-	// EgressPolicyMode: "" = redirect (iptables), "spoof" = DNS-spoof. When
-	// empty, sandbox/job use spoof (they do not bind 80/443) and services use
-	// redirect.
+	// EgressPolicyMode selects the interception mechanism:
+	//   ""/"spoof"  DNS-spoof (default): the sidecar is the Pod's resolver and
+	//               its :443/:80 listener; no privileges.
+	//   "capture"   privileged all-port interception: an init container
+	//               redirects every outbound TCP connection to the sidecar,
+	//               which recovers the destination via SO_ORIGINAL_DST. Covers
+	//               arbitrary ports and non-DNS-aware clients at the cost of
+	//               NET_ADMIN on the sidecar and init container.
 	EgressPolicyMode string
 	// EgressPolicySpoofDNS is the cluster resolver the spoof sidecar
 	// forwards real queries to (CoreDNS service IP).
@@ -153,6 +159,7 @@ func newClient(cs kubernetes.Interface, cfg Config) *Client {
 			spoofDNS:      cfg.EgressPolicySpoofDNS,
 			upstreamProxy: cfg.EgressPolicyUpstreamProxy,
 			clusterDomain: cfg.ClusterDomain,
+			capture:       cfg.EgressPolicyMode == "capture",
 		},
 	}
 }
@@ -179,6 +186,7 @@ func (c *Client) egressSpecFor(isService bool) *ProxySpec {
 		SpoofUpstreamDNS: c.egress.spoofDNS,
 		UpstreamProxy:    c.egress.upstreamProxy,
 		ClusterDomain:    c.egress.clusterDomain,
+		Capture:          c.egress.capture,
 	}
 }
 

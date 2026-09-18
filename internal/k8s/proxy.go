@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -47,6 +48,15 @@ type ProxySpec struct {
 	// ClusterDomain is the cluster DNS domain for the search path
 	// (default "cluster.local").
 	ClusterDomain string
+
+	// Capture selects the privileged all-port interception mode instead of
+	// DNS-spoof: an init container installs iptables rules that redirect every
+	// outbound TCP connection to the sidecar, which recovers the real
+	// destination via SO_ORIGINAL_DST. DNS is NOT intercepted, so the workload
+	// keeps the cluster resolver and every port (not just 80/443) is covered.
+	Capture bool
+	// CaptureAddr is the sidecar's capture listener (default 0.0.0.0:15001).
+	CaptureAddr string
 }
 
 // proxyCAPath is where the sidecar mounts the MITM CA and where it is handed
@@ -68,12 +78,15 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 	if strings.TrimSpace(proxy.Rules) == "" {
 		return fmt.Errorf("proxy: rules required")
 	}
-	if strings.TrimSpace(proxy.SpoofUpstreamDNS) == "" {
+	if !proxy.Capture && strings.TrimSpace(proxy.SpoofUpstreamDNS) == "" {
 		return fmt.Errorf("proxy: SpoofUpstreamDNS required (cluster resolver)")
 	}
 	rewriteRules := strings.Contains(proxy.Rules, "action: rewrite")
 	if rewriteRules && proxy.CACertPEM == "" {
 		return fmt.Errorf("proxy: rewrite rules require a CA certificate")
+	}
+	if proxy.Capture && proxy.CaptureAddr == "" {
+		proxy.CaptureAddr = "0.0.0.0:15001"
 	}
 
 	// The rule set rides in a ConfigMap built by the caller; here we mount
@@ -81,13 +94,18 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 	// via ProxyConfigMap.
 	cmName := ProxyConfigMapName(workloadName)
 
-	args := []string{"--mode=proxy",
-		"--rules=/etc/easysidecar/rules.yaml",
-		"--spoof",
-		"--spoof-dns-addr=0.0.0.0:53",
-		"--spoof-tls-addr=0.0.0.0:443",
-		"--spoof-http-addr=0.0.0.0:80",
-		"--upstream-dns=" + proxy.SpoofUpstreamDNS,
+	args := []string{"--rules=/etc/easysidecar/rules.yaml"}
+	if proxy.Capture {
+		args = append(args, "--mode=capture", "--capture-addr="+proxy.CaptureAddr)
+	} else {
+		args = append(args,
+			"--mode=proxy",
+			"--spoof",
+			"--spoof-dns-addr=0.0.0.0:53",
+			"--spoof-tls-addr=0.0.0.0:443",
+			"--spoof-http-addr=0.0.0.0:80",
+			"--upstream-dns="+proxy.SpoofUpstreamDNS,
+		)
 	}
 	if proxy.UpstreamProxy != "" {
 		args = append(args, "--upstream-proxy="+proxy.UpstreamProxy)
@@ -138,29 +156,64 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 			Secret: &corev1.SecretVolumeSource{SecretName: ProxyCASecretName(workloadName)}}})
 	}
 
+	if proxy.Capture {
+		// The sidecar stamps SO_MARK on its own egress sockets so the redirect
+		// cannot loop; that needs NET_ADMIN. The init container needs it to
+		// install the iptables rules.
+		proxyContainer.Ports = []corev1.ContainerPort{{Name: "capture", ContainerPort: capturePort(proxy.CaptureAddr)}}
+		proxyContainer.SecurityContext = &corev1.SecurityContext{
+			Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}},
+		}
+		init := corev1.Container{
+			Name:  "easysidecar-capture-init",
+			Image: proxy.Image,
+			Args: []string{"--mode=capture", "--capture-init",
+				"--capture-addr=" + proxy.CaptureAddr},
+			SecurityContext: &corev1.SecurityContext{
+				Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}},
+			},
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("20m"),
+					corev1.ResourceMemory: resource.MustParse("32Mi"),
+				},
+				Limits: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("200m"),
+					corev1.ResourceMemory: resource.MustParse("128Mi"),
+				},
+			},
+		}
+		pod.InitContainers = append(pod.InitContainers, init)
+	}
+
 	pod.Containers = append(pod.Containers, proxyContainer)
 	pod.Volumes = append(pod.Volumes, vols...)
 
-	// Point the Pod's resolver at the sidecar (dns-spoof). dnsPolicy=None
-	// is required: with a policy, kubelet APPENDS dnsConfig.nameservers to
-	// the cluster resolvers, so the client would use CoreDNS first and
-	// never reach the sidecar. With None, ONLY our list is used — so we
-	// must supply the search path and ndots ourselves.
-	pod.DNSPolicy = corev1.DNSNone
-	if pod.DNSConfig == nil {
-		pod.DNSConfig = &corev1.PodDNSConfig{}
+	if !proxy.Capture {
+		// Point the Pod's resolver at the sidecar (dns-spoof). dnsPolicy=None
+		// is required: with a policy, kubelet APPENDS dnsConfig.nameservers to
+		// the cluster resolvers, so the client would use CoreDNS first and
+		// never reach the sidecar. With None, ONLY our list is used — so we
+		// must supply the search path and ndots ourselves.
+		//
+		// Capture mode needs none of this: DNS stays with the cluster and the
+		// real destination is recovered from the socket.
+		pod.DNSPolicy = corev1.DNSNone
+		if pod.DNSConfig == nil {
+			pod.DNSConfig = &corev1.PodDNSConfig{}
+		}
+		domain := proxy.ClusterDomain
+		if domain == "" {
+			domain = "cluster.local"
+		}
+		pod.DNSConfig.Nameservers = []string{"127.0.0.1"}
+		pod.DNSConfig.Searches = []string{namespace + ".svc." + domain, "svc." + domain, domain}
+		ndots := "5"
+		pod.DNSConfig.Options = []corev1.PodDNSConfigOption{{Name: "ndots", Value: &ndots}}
 	}
-	domain := proxy.ClusterDomain
-	if domain == "" {
-		domain = "cluster.local"
-	}
-	pod.DNSConfig.Nameservers = []string{"127.0.0.1"}
-	pod.DNSConfig.Searches = []string{namespace + ".svc." + domain, "svc." + domain, domain}
-	ndots := "5"
-	pod.DNSConfig.Options = []corev1.PodDNSConfigOption{{Name: "ndots", Value: &ndots}}
-	// POD_IP for the sidecar's -self-ip.
+	// POD_IP for the sidecar's -self-ip (spoof mode only).
 	for i := range pod.Containers {
-		if pod.Containers[i].Name == "easysidecar" {
+		if pod.Containers[i].Name == "easysidecar" && !proxy.Capture {
 			pod.Containers[i].Env = append(pod.Containers[i].Env, corev1.EnvVar{
 				Name: "POD_IP", ValueFrom: &corev1.EnvVarSource{
 					FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"},
@@ -186,6 +239,16 @@ func withProxy(pod *corev1.PodSpec, workloadName, namespace string, proxy *Proxy
 		}
 	}
 	return nil
+}
+
+// capturePort extracts the numeric port from a capture listen address.
+func capturePort(addr string) int32 {
+	if i := strings.LastIndexByte(addr, ':'); i >= 0 {
+		if p, err := strconv.Atoi(addr[i+1:]); err == nil {
+			return int32(p)
+		}
+	}
+	return 15001
 }
 
 // ProxyConfigMapName is the deterministic ConfigMap name for a pod's rules.

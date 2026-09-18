@@ -408,3 +408,94 @@ func TestInjectedProxyFlagsAreKnown(t *testing.T) {
 		}
 	}
 }
+
+// TestCaptureModeInjection verifies the privileged all-port capture shape:
+// an init container installs the redirect, the sidecar gets NET_ADMIN (for
+// SO_MARK), DNS is left to the cluster, and the workload still trusts the CA.
+func TestCaptureModeInjection(t *testing.T) {
+	pod := minimalPod("sbx-capture")
+	proxy := &ProxySpec{
+		Rules:       testRules,
+		Image:       "registry/easysidecar:v0.6.0",
+		CACertPEM:   "cert",
+		CAKeyPEM:    "key",
+		Capture:     true,
+		CaptureAddr: "0.0.0.0:15001",
+	}
+	if err := withProxy(&pod.Spec, pod.Name, "test", proxy); err != nil {
+		t.Fatal(err)
+	}
+
+	// Init container installs the rules.
+	if len(pod.Spec.InitContainers) != 1 {
+		t.Fatalf("init containers = %d, want 1", len(pod.Spec.InitContainers))
+	}
+	init := pod.Spec.InitContainers[0]
+	if init.Name != "easysidecar-capture-init" {
+		t.Fatalf("init name = %q", init.Name)
+	}
+	joined := strings.Join(init.Args, " ")
+	if !strings.Contains(joined, "--mode=capture") || !strings.Contains(joined, "--capture-init") {
+		t.Fatalf("init args = %v", init.Args)
+	}
+	if init.SecurityContext == nil || init.SecurityContext.Capabilities == nil ||
+		len(init.SecurityContext.Capabilities.Add) == 0 ||
+		init.SecurityContext.Capabilities.Add[0] != "NET_ADMIN" {
+		t.Fatalf("init must have NET_ADMIN: %+v", init.SecurityContext)
+	}
+
+	// Sidecar: capture mode, NET_ADMIN, no DNS listener, no spoof args.
+	var sidecar *corev1.Container
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == "easysidecar" {
+			sidecar = &pod.Spec.Containers[i]
+		}
+	}
+	if sidecar == nil {
+		t.Fatal("no sidecar")
+	}
+	sargs := strings.Join(sidecar.Args, " ")
+	if !strings.Contains(sargs, "--mode=capture") {
+		t.Fatalf("sidecar args = %v", sidecar.Args)
+	}
+	if strings.Contains(sargs, "--spoof") || strings.Contains(sargs, "--upstream-dns") {
+		t.Fatalf("capture mode must not use the spoof face: %v", sidecar.Args)
+	}
+	if sidecar.SecurityContext == nil || sidecar.SecurityContext.Capabilities == nil {
+		t.Fatal("sidecar needs NET_ADMIN for SO_MARK")
+	}
+
+	// DNS is NOT hijacked: the cluster resolver stays in charge.
+	if pod.Spec.DNSPolicy == corev1.DNSNone {
+		t.Fatal("capture mode must not set dnsPolicy=None")
+	}
+	if pod.Spec.DNSConfig != nil && len(pod.Spec.DNSConfig.Nameservers) > 0 &&
+		pod.Spec.DNSConfig.Nameservers[0] == "127.0.0.1" {
+		t.Fatal("capture mode must not point DNS at the sidecar")
+	}
+
+	// Workload still trusts the MITM CA.
+	var sslFile string
+	for _, e := range pod.Spec.Containers[0].Env {
+		if e.Name == "SSL_CERT_FILE" {
+			sslFile = e.Value
+		}
+	}
+	if sslFile == "" {
+		t.Fatal("workload must trust the CA in capture mode too")
+	}
+}
+
+// TestCapturePort pins the address parser used for the container port.
+func TestCapturePort(t *testing.T) {
+	cases := map[string]int32{
+		"0.0.0.0:15001": 15001,
+		":15006":        15006,
+		"garbage":       15001,
+	}
+	for in, want := range cases {
+		if got := capturePort(in); got != want {
+			t.Errorf("capturePort(%q) = %d want %d", in, got, want)
+		}
+	}
+}

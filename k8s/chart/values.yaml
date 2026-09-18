@@ -59,15 +59,17 @@ backend:
   # Egress-proxy (easysidecar) image injected into sandbox/job/
   # service/job pods. Must be fully qualified so the NODE can pull it (a bare
   # `easylab/...` name would be resolved against docker.io and fail).
-  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.6.0
+  egressImage: forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.7.0
   # When "1", the egress-proxy sidecar is NOT injected (workloads egress
   # directly). Prefer `egressMode` instead: disabling also loses the
   # env-proxy fallback.
   egressPolicyDisabled: ""
-  # Interception mode: "redirect" (iptables; needs kernel netfilter),
-  # "spoof" (DNS-based; no netfilter/tun/NET_ADMIN), or "" (auto: sandboxes
-  # and CI jobs use spoof, service deployments use redirect because they may
-  # bind :443).
+  # Interception mode:
+  #   ""/"spoof"  DNS-based, no netfilter/NET_ADMIN (default)
+  #   "capture"   privileged all-port interception: an init container
+  #               redirects every outbound TCP connection to the sidecar,
+  #               which recovers the destination via SO_ORIGINAL_DST. Needs
+  #               NET_ADMIN on the sidecar + init container.
   egressMode: ""
   # Cluster resolver the spoof sidecar forwards real queries to (CoreDNS
   # service IP). Required for auto/spoof mode.
