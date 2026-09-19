@@ -139,7 +139,7 @@ spec:
       securityContext: {}
       containers:
         - name: playwright-extension
-          image: forgejo.develop.10.199.64.20.nip.io/abcp/playwright-extension:20260919095319
+          image: forgejo.develop.10.199.64.20.nip.io/abcp/playwright-extension:20260919103318
           imagePullPolicy: IfNotPresent
           env:
             - name: NATS_URL
