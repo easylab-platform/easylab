@@ -295,6 +295,23 @@ func (c *connAgent) GetFile(ctx context.Context, req *connect.Request[agentv1.Ge
 func (c *connAgent) GetFileMeta(ctx context.Context, req *connect.Request[agentv1.GetFileMetaRequest]) (*connect.Response[agentv1.GetFileMetaResponse], error) {
 	return c.client.GetFileMeta(ctx, fwdReq(req))
 }
+
+// GetFileStream is a server-streaming forward: open the upstream stream and
+// relay each chunk in order. fwdReq cannot be used (the client method takes a
+// HandlerConn-style stream), so the message is rebuilt explicitly.
+func (c *connAgent) GetFileStream(ctx context.Context, req *connect.Request[agentv1.GetFileRequest], stream *connect.ServerStream[agentv1.FileChunk]) error {
+	up, err := c.client.GetFileStream(ctx, connect.NewRequest(req.Msg))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = up.Close() }()
+	for up.Receive() {
+		if err := stream.Send(up.Msg()); err != nil {
+			return err
+		}
+	}
+	return up.Err()
+}
 func (c *connAgent) GetAgentConfig(ctx context.Context, req *connect.Request[agentv1.GetAgentConfigRequest]) (*connect.Response[agentv1.GetAgentConfigResponse], error) {
 	return c.client.GetAgentConfig(ctx, fwdReq(req))
 }
