@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/easylab-platform/artifact/core"
 	artifactstore "github.com/easylab-platform/artifact/core/store"
@@ -56,6 +57,11 @@ func openRegistry(home string) (*artifactkit.Registry, error) {
 	if err := targetReg.Load(context.Background(), idx); err != nil {
 		log.Printf("targets: load user targets: %v", err)
 	}
+	// Reclaim storage in the background (expired negative cache entries and
+	// orphan blobs). Interval/grace come from the environment; 0 disables.
+	gcInterval := envDuration("EASYVCS_GC_INTERVAL", time.Hour)
+	gcGrace := envDuration("EASYVCS_GC_GRACE", time.Hour)
+	go artifactstore.RunReaper(context.Background(), idx, blobs, gcInterval, gcGrace, log.Printf)
 	return &artifactkit.Registry{
 		Blobs: blobs,
 		// The scoped store applies the request's repository namespace to every
@@ -82,4 +88,3 @@ func dbDSNOr(def string) string {
 	}
 	return def
 }
-
