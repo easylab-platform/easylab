@@ -11,7 +11,7 @@ require (
 	github.com/easylab-platform/artifact/composer v0.7.0
 	github.com/easylab-platform/artifact/conan v0.6.0
 	github.com/easylab-platform/artifact/conda v0.9.0
-	github.com/easylab-platform/artifact/core v0.20.0
+	github.com/easylab-platform/artifact/core v0.21.0
 	github.com/easylab-platform/artifact/debian v0.9.0
 	github.com/easylab-platform/artifact/generic v0.5.0
 	github.com/easylab-platform/artifact/git v0.2.0
@@ -33,7 +33,7 @@ require (
 	github.com/easylab-platform/artifact/rpm v0.9.0
 	github.com/easylab-platform/artifact/rubygems v0.5.0
 	github.com/easylab-platform/artifact/swiftpm v0.7.0
-	github.com/easylab-platform/artifact/system v0.5.1
+	github.com/easylab-platform/artifact/system v0.6.0
 	github.com/easylab-platform/artifact/targets v0.1.3
 	github.com/easylab-platform/easylab-proto v0.17.0
 	github.com/easylab-platform/easyvcs v0.9.4
