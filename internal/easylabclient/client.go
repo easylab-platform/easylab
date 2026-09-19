@@ -13,7 +13,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
+	"github.com/abcp-sdk/agent-sdk-go/agent/v1/agentv1connect"
 	"github.com/easylab-platform/easylab-proto/easylab/v1/easylabv1connect"
 )
 

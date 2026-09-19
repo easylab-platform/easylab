@@ -52,7 +52,7 @@ import (
 	_ "github.com/easylab-platform/artifact/swiftpm"
 	_ "github.com/easylab-platform/artifact/system"
 
-	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
+	"github.com/abcp-sdk/agent-sdk-go/agent/v1/agentv1connect"
 	"github.com/easylab-platform/easylab-proto/easylab/v1/easylabv1connect"
 
 	"github.com/easylab-platform/easylab/internal/ci"

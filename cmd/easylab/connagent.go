@@ -6,9 +6,9 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/abcp-sdk/agent-proto/agent/v1"
+	agentv1 "github.com/abcp-sdk/agent-sdk-go/agent/v1"
 
-	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
+	"github.com/abcp-sdk/agent-sdk-go/agent/v1/agentv1connect"
 )
 
 // connAgent is the easylab-side gateway implementation of the agent.v1

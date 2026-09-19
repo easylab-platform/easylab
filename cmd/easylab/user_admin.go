@@ -9,8 +9,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/abcp-sdk/agent-proto/agent/v1"
-	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
+	agentv1 "github.com/abcp-sdk/agent-sdk-go/agent/v1"
+	"github.com/abcp-sdk/agent-sdk-go/agent/v1/agentv1connect"
 )
 
 // User administration: one call provisions a user END TO END across every

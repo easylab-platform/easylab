@@ -6,9 +6,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/abcp-sdk/agent-proto/agent/v1"
-	"github.com/abcp-sdk/agent-proto/agent/v1/agentv1connect"
-	agentsdk "github.com/abcp-sdk/agent-sdk-go"
+	agentv1 "github.com/abcp-sdk/agent-sdk-go/agent/v1"
+	"github.com/abcp-sdk/agent-sdk-go/agent/v1/agentv1connect"
 	"github.com/easylab-platform/easylab/internal/connectauth"
 )
 
@@ -25,7 +24,7 @@ type agentClient struct {
 func newAgentClient(base string) *agentClient {
 	return &agentClient{
 		base: base,
-		svc: agentsdk.NewAgentServiceClient(
+		svc: agentv1connect.NewAgentServiceClient(
 			agentHTTPClient(),
 			base,
 			connect.WithInterceptors(connectauth.Bearer(envOr("AGENT_API_KEY", ""))),
