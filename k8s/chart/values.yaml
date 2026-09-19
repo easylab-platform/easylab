@@ -134,6 +134,33 @@ nats:
     requests: { cpu: 100m, memory: 64Mi }
     limits: { cpu: 500m, memory: 512Mi }
 
+# ---- Selenium standalone-chrome (browser host for the playwright extension) ----
+# A single Chrome node exposing the WebDriver + se:cdp endpoints. The
+# playwright extension creates one WebDriver session per browser context and
+# attaches Playwright over CDP. Disable when an external Selenium/Chrome exists.
+selenium:
+  enabled: true
+  image:
+    repository: forgejo.develop.10.199.64.20.nip.io/abcp/selenium-standalone-chrome
+    tag: "4.49.0"
+    pullPolicy: IfNotPresent
+  # Service name the playwright extension addresses
+  # (http://<name>.<ns>.svc.cluster.local:4444).
+  service:
+    name: selenium
+    type: ClusterIP
+  port: 4444
+  # Max concurrent browser sessions (grid slots); the extension's
+  # PLAYWRIGHT_MAX_CONTEXTS should be <= this.
+  maxSessions: 8
+  # Reap a WebDriver session this many seconds after its last command.
+  sessionTimeoutSecs: 900
+  # Chrome needs a large /dev/shm; back it with a memory emptyDir.
+  shmSizeLimit: 1Gi
+  resources:
+    requests: { cpu: 500m, memory: 2Gi }
+    limits: { cpu: "2", memory: 4Gi }
+
 # ---- abc agent (session/model/turn engine, h2c) ----
 agent:
   image:
