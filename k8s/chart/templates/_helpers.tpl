@@ -47,6 +47,31 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s:%s" .Values.agent.image.repository (.Values.agent.image.tag | toString) -}}
 {{- end -}}
 
+{{/* S3 object-store env for the AGENT only. Durable file bytes move out of
+   NATS into an S3-compatible bucket; file metadata moves to the agent's
+   `agent_files` DB table. Extensions never read the store directly — they go
+   through the agent's GetFile RPC — so they need no object-store credentials. */}}
+{{- define "easylab.objectStoreEnv" -}}
+{{- if .Values.objectStore.enabled }}
+- name: AGENT_BLOB_BACKEND
+  value: "s3"
+- name: S3_BUCKET
+  value: {{ .Values.objectStore.bucket | quote }}
+- name: S3_REGION
+  value: {{ .Values.objectStore.region | quote }}
+- name: S3_ENDPOINT
+  value: {{ .Values.objectStore.endpoint | quote }}
+- name: S3_ACCESS_KEY
+  value: {{ .Values.objectStore.accessKey | quote }}
+- name: S3_SECRET_KEY
+  value: {{ .Values.objectStore.secretKey | quote }}
+- name: S3_PATH_STYLE
+  value: {{ .Values.objectStore.pathStyle | toString | quote }}
+- name: S3_PREFIX
+  value: {{ .Values.objectStore.prefix | quote }}
+{{- end }}
+{{- end -}}
+
 {{/* Registry host (TLS ingress name nodes already trust); falls back to the
    in-cluster Service DNS when unset. */}}
 {{- define "easylab.registryHost" -}}

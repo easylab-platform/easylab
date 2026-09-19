@@ -183,6 +183,24 @@ agent:
     type: ClusterIP
     port: 80
 
+# ---- object storage (durable file bytes) ----
+# Disabled (default): file bytes live in the NATS JetStream object store and
+# metadata in the abc-files-meta KV bucket.
+# Enabled: the AGENT stores durable file bytes in an S3-compatible bucket and
+# file metadata in its `agent_files` DB table, so file state leaves NATS. The
+# gateway's embedded extensions read files only through the agent's GetFile
+# RPC, so they need no object-store credentials. No migration of existing NATS
+# objects: an s3 deployment only reads S3.
+objectStore:
+  enabled: false
+  bucket: ""
+  region: "us-east-1"
+  endpoint: ""
+  accessKey: ""
+  secretKey: ""
+  pathStyle: true
+  prefix: "abcp"
+
 # ---- persistence ----
 persistence:
   # hostPath root for /data (single-node dev cluster). DirectoryOrCreate.

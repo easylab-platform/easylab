@@ -4,25 +4,32 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/abcp-sdk/abc-protocol-go/protocol"
+	"connectrpc.com/connect"
+
+	agentv1 "github.com/abcp-sdk/agent-sdk-go/agent/v1"
 )
 
-// fetchAgentFile reads a stored file's bytes from the shared NATS file store
-// (abc-protocol FileStore). Files are NOT owned by the agent — bytes live in
-// the persistent object bucket keyed by code, metadata in the files.meta KV
-// bucket, so any NATS member can read them directly. Used by sandbox-download
-// to bring an uploaded attachment into the sandbox workspace.
+// fetchAgentFile reads a stored file's bytes through the agent's GetFile RPC
+// (the gateway forwards agent.v1 to the real agent). Files are OWNED by the
+// agent: it resolves the caller's tenant from the forwarded credential and
+// reads from whatever blob backend is configured (NATS object store or S3).
+// The extension therefore never touches the shared store directly and needs
+// no object-store credentials of its own.
+//
+// Tenant: the caller tagges the context with [ext.WithLabTenant]; the easylab
+// client interceptor stamps X-Agent-Tenant (trusted on loopback), which the
+// gateway maps to the user's bound agent credential before forwarding.
 func (s *server) fetchAgentFile(ctx context.Context, code string) ([]byte, error) {
-	if s.bus == nil {
-		return nil, fmt.Errorf("file store unavailable (nats not connected)")
+	if s.sdk == nil || s.sdk.Agent == nil {
+		return nil, fmt.Errorf("agent file client unavailable")
 	}
-	store := protocol.NewFileStore(s.bus)
-	rec, err := store.Get(ctx, code)
+	res, err := s.sdk.Agent.GetFile(ctx, connect.NewRequest(&agentv1.GetFileRequest{Code: code}))
 	if err != nil {
-		return nil, fmt.Errorf("file store get %q: %w", code, err)
+		return nil, fmt.Errorf("agent GetFile %q: %w", code, err)
 	}
-	if rec == nil || rec.Data == nil {
+	data := res.Msg.GetData()
+	if data == nil {
 		return nil, fmt.Errorf("file not found: %s", code)
 	}
-	return rec.Data, nil
+	return data, nil
 }

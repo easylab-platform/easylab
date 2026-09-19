@@ -21,7 +21,6 @@ var manifestYaml []byte
 
 type server struct {
 	sdk               *easylabclient.Services // typed easylab clients (lab+ops+registry+sandbox+workflow+agent)
-	bus               *natsbus.Bus            // NATS bus (file store / abc)
 	runtimeNamespace  string                  // namespace where easylab creates sandboxes/deployments
 	ext               *extension.Extension
 	artifact          string // artifact registry base URL (packages + OCI + metadata)
@@ -104,7 +103,6 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	s.bus = nbus
 
 	ext := extension.New(nbus, m.BuildConfig(manifest.Bindings{
 		Handlers: s.handlers(),
