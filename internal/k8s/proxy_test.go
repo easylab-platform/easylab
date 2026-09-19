@@ -206,8 +206,16 @@ func TestDefaultRulesYAMLShape(t *testing.T) {
 	if !strings.Contains(DefaultRulesYAML("gw:80", true), "mitm_default: true") {
 		t.Fatal("mitm_default must be true when requested")
 	}
-	if strings.Count(y, "action: rewrite") != len(targets.EgressPolicy()) {
-		t.Fatalf("rewrite rule count mismatch")
+	// Every policy entry is one rule; rewrite entries carry action: rewrite
+	// and the CDN carve-outs are emitted as action: direct.
+	wantRewrite := 0
+	for _, e := range targets.EgressPolicy() {
+		if !e.Direct {
+			wantRewrite++
+		}
+	}
+	if got := strings.Count(y, "action: rewrite"); got != wantRewrite {
+		t.Fatalf("rewrite rules = %d, want %d", got, wantRewrite)
 	}
 }
 

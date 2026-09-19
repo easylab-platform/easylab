@@ -31,11 +31,11 @@ require (
 	github.com/easylab-platform/artifact/protobuf v0.5.0
 	github.com/easylab-platform/artifact/pub v0.5.0
 	github.com/easylab-platform/artifact/pypi v0.5.1
-	github.com/easylab-platform/artifact/rpm v0.6.0
+	github.com/easylab-platform/artifact/rpm v0.6.1
 	github.com/easylab-platform/artifact/rubygems v0.5.0
 	github.com/easylab-platform/artifact/swiftpm v0.5.0
 	github.com/easylab-platform/artifact/system v0.5.1
-	github.com/easylab-platform/artifact/targets v0.1.0
+	github.com/easylab-platform/artifact/targets v0.1.1
 	github.com/easylab-platform/easylab-proto v0.17.0
 	github.com/easylab-platform/easyvcs v0.9.4
 	github.com/glebarez/sqlite v1.11.0
