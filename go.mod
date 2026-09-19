@@ -11,7 +11,7 @@ require (
 	github.com/easylab-platform/artifact/composer v0.7.0
 	github.com/easylab-platform/artifact/conan v0.6.0
 	github.com/easylab-platform/artifact/conda v0.9.0
-	github.com/easylab-platform/artifact/core v0.19.0
+	github.com/easylab-platform/artifact/core v0.20.0
 	github.com/easylab-platform/artifact/debian v0.9.0
 	github.com/easylab-platform/artifact/generic v0.5.0
 	github.com/easylab-platform/artifact/git v0.2.0

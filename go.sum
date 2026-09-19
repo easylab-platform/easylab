@@ -46,8 +46,8 @@ github.com/easylab-platform/artifact/conan v0.6.0 h1:AyvpqLN0/QBeZuaFRoxvRvS/JYb
 github.com/easylab-platform/artifact/conan v0.6.0/go.mod h1:ksIv9Ux5E6cCkA80jsNpWryxxNB1Ie8ZINepyo+PLAk=
 github.com/easylab-platform/artifact/conda v0.9.0 h1:CjYom+btTZufOMQwIz7LmDQuDRYKtXAnLIqf/oUbhRU=
 github.com/easylab-platform/artifact/conda v0.9.0/go.mod h1:KhrB2cTKeN2ZkWsqr/9huVNZMQiFbjuXaG9C9EfxkQs=
-github.com/easylab-platform/artifact/core v0.19.0 h1:34OtExY5eNs5E3XGgheUW1asSBaaX3+/zvRVpfCKtvs=
-github.com/easylab-platform/artifact/core v0.19.0/go.mod h1:mvW6DkCCSkDbY+ePOvHAnvPVtcUzwNv3+83avipwBNE=
+github.com/easylab-platform/artifact/core v0.20.0 h1:H8SiZH2WYcwi/ivDXDHCWWSk7hxRVKaROR3mj23xdh8=
+github.com/easylab-platform/artifact/core v0.20.0/go.mod h1:mvW6DkCCSkDbY+ePOvHAnvPVtcUzwNv3+83avipwBNE=
 github.com/easylab-platform/artifact/debian v0.9.0 h1:S2emN45ZhkwJ8a03QflwOzM3h0tdLAdd1JTViEFICs8=
 github.com/easylab-platform/artifact/debian v0.9.0/go.mod h1:oCunHMVrCzN1nb6XHg4S/N3nbB8ipgB1VaWwr3METLk=
 github.com/easylab-platform/artifact/generic v0.5.0 h1:5CSWeFgpVyLkYS1Cs18A6w/TWO3VtrvR2eij5UN63+s=
