@@ -50,6 +50,7 @@ import (
 	_ "github.com/easylab-platform/artifact/pypi"
 	_ "github.com/easylab-platform/artifact/rpm"
 	_ "github.com/easylab-platform/artifact/rubygems"
+	_ "github.com/easylab-platform/artifact/s3blob"
 	_ "github.com/easylab-platform/artifact/swiftpm"
 	_ "github.com/easylab-platform/artifact/system"
 
