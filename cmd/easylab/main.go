@@ -100,6 +100,10 @@ func splitList(s string) []string {
 type server struct {
 	cs       *store.CentralStore
 	registry *artifactkit.Registry
+	// registryStats computes the registry footprint for the admin API's
+	// /artifacts/system/stats (the Registry's Meta is a scoped decorator, so
+	// the footprint needs the underlying store).
+	registryStats func(ctx context.Context) (any, error)
 	// registryDir is where the registry's stateful adapters keep data
 	// (OCI upload sessions, git bare mirrors); empty disables persistence.
 	registryDir string
@@ -142,7 +146,7 @@ func main() {
 		log.Fatal("open store:", err)
 	}
 	_ = cs.SetWAL()
-	reg, err := openRegistry(store.HomeDir())
+	reg, regMeta, regBlobs, err := openRegistryStores(store.HomeDir())
 	if err != nil {
 		log.Fatal("open registry:", err)
 	}
@@ -235,7 +239,9 @@ func main() {
 		log.Printf("k8s backend disabled: %v", kerr)
 	}
 	reg.Owners = cs
-	s := &server{cs: cs, registry: reg, registryDir: filepath.Join(store.HomeDir(), "registry"), selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, sbx: sbxReg, k8s: sK8s, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
+	s := &server{cs: cs, registry: reg, registryStats: func(ctx context.Context) (any, error) {
+		return regMeta.Stats(ctx, regBlobs)
+	}, registryDir: filepath.Join(store.HomeDir(), "registry"), selfBase: strings.TrimSuffix(*selfBase, "/"), ops: opsState, sbx: sbxReg, k8s: sK8s, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
 	if sK8s != nil {
 		s.buildBackend = ci.NewK8sBackend(sK8s)
 	}
@@ -544,7 +550,7 @@ func (s *server) adminRouter() *http.ServeMux {
 	if s.registry == nil {
 		return mux
 	}
-	h, err := s.buildProtocol("system", s.registryAuth())
+	h, err := s.buildSystemHandler(s.registryAuth())
 	if err != nil {
 		log.Printf("admin: system handler unavailable: %v", err)
 		return mux
@@ -552,6 +558,24 @@ func (s *server) adminRouter() *http.ServeMux {
 	mux.Handle(artifactkit.MountBase+"/system/", h)
 	mux.Handle(artifactkit.MountBase+"/system", h)
 	return mux
+}
+
+// buildSystemHandler constructs the /artifacts/system handler with the
+// registry footprint injected. It is separate from buildProtocol so the stats
+// closure (which needs the underlying store) stays out of the generic config.
+func (s *server) buildSystemHandler(auth artifactkit.Auth) (http.Handler, error) {
+	if s.registry == nil {
+		return nil, fmt.Errorf("registry not configured")
+	}
+	cfg := map[string]any{"auth": auth}
+	if s.registryStats != nil {
+		cfg["stats_func"] = s.registryStats
+	}
+	if s.cs != nil {
+		// Target CRUD persists user-declared targets in the metadata store.
+		cfg["targets_store"] = s.registry.TargetStore
+	}
+	return artifactkit.Build("system", s.registry, cfg)
 }
 
 func (s *server) serveOCIToken(w http.ResponseWriter, r *http.Request, auth artifactkit.Auth) {

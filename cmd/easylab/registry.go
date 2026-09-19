@@ -25,9 +25,18 @@ import (
 // from their public upstreams (npm, pypi, crates.io, ...) and cache them
 // locally. Set EASYVCS_AIRGAP=1 to disable all upstreams (local-only).
 func openRegistry(home string) (*artifactkit.Registry, error) {
+	reg, _, _, err := openRegistryStores(home)
+	return reg, err
+}
+
+// openRegistryStores is openRegistry plus the concrete metadata + blob stores,
+// so the caller (the admin API) can compute the registry footprint. The
+// Registry's own Meta is a scoped decorator, so the underlying store must be
+// returned explicitly to reach Stats.
+func openRegistryStores(home string) (*artifactkit.Registry, *artifactstore.Store, artifactkit.BlobStore, error) {
 	root := filepath.Join(home, "registry")
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	// Metadata: switchable (shares EASYVCS_DB_* with the easyvcs engine).
 	idx, err := artifactstore.OpenStore(artifactstore.DriverConfig{
@@ -35,7 +44,7 @@ func openRegistry(home string) (*artifactkit.Registry, error) {
 		DSN:  dbDSNOr(filepath.Join(root, "registry.db")),
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	// Blob content: filesystem default; "s3" is a placeholder that falls back to
 	// the filesystem CAS so a misconfigured deployment never fails to start.
@@ -45,7 +54,7 @@ func openRegistry(home string) (*artifactkit.Registry, error) {
 	}
 	blobs, err := artifactstore.OpenBlobStore(blobBackend, filepath.Join(root, "blobs"))
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	airGap := os.Getenv("EASYVCS_AIRGAP") == "1"
 	// The target registry is the single source of truth for public upstreams
@@ -77,7 +86,7 @@ func openRegistry(home string) (*artifactkit.Registry, error) {
 			Repos:     map[string]artifactkit.RepoUpstream{},
 			AirGap:    airGap,
 		},
-	}, nil
+	}, idx, blobs, nil
 }
 
 // dbDSNOr returns the metadata DSN: EASYVCS_DB_DSN if set, else the given

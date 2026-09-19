@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,7 +23,7 @@ func newTestServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg, err := openRegistry(home)
+	reg, regMeta, regBlobs, err := openRegistryStores(home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +35,13 @@ func newTestServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &server{cs: cs, registry: reg, ops: opsState, sbx: sbx, auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs))}
+	return &server{
+		cs: cs, registry: reg, ops: opsState, sbx: sbx,
+		auth: artifactkit.NewStoreAuth(newEasyvcsTokenStore(cs)),
+		registryStats: func(ctx context.Context) (any, error) {
+			return regMeta.Stats(ctx, regBlobs)
+		},
+	}
 }
 
 // newAuthServer returns a server with auth enabled for a single token.

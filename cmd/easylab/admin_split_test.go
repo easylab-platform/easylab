@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -42,5 +43,26 @@ func TestAdminRouterServesStatsPath(t *testing.T) {
 		if rec.Code == http.StatusNotFound && p == "/artifacts/system/targets" {
 			t.Fatalf("%s = 404 on admin mux", p)
 		}
+	}
+}
+
+// TestAdminStatsWired verifies the footprint endpoint is backed by the real
+// store (not the "stats not available" placeholder): with a token it returns a
+// JSON body carrying the blobs/formats fields.
+func TestAdminStatsWired(t *testing.T) {
+	s := newAuthServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/system/stats", nil)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	rec := httptest.NewRecorder()
+	s.adminRouter().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stats = %d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("stats body not JSON: %v (%s)", err, rec.Body.String())
+	}
+	if _, ok := out["blobs"]; !ok {
+		t.Fatalf("stats body missing blobs: %s", rec.Body.String())
 	}
 }

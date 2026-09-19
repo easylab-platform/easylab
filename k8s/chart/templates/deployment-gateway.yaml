@@ -26,7 +26,7 @@ spec:
           imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
           args:
             - "-addr"
-            - "0.0.0.0:8080"
+            - {{ printf "0.0.0.0:%v" (.Values.gateway.port | default 8080) | quote }}
             # The admin API listens on a separate address, loopback by default,
             # so /artifacts/system is never exposed via the gateway Service.
             - "-admin-addr"
@@ -145,7 +145,8 @@ spec:
               value: {{ . | quote }}
             {{- end }}
           ports:
-            - containerPort: 8080
+            - name: http
+              containerPort: {{ .Values.gateway.port | default 8080 }}
               protocol: TCP
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}

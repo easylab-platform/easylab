@@ -1,0 +1,49 @@
+{{- if .Values.gateway.adminNetworkPolicy.enabled }}
+{{/*
+  Second-layer restriction for the operator admin port.
+
+  The admin listener binds loopback by default (gateway.adminAddr), so it is
+  already unreachable through the Service. This policy matters only when an
+  operator overrides adminAddr to a non-loopback address.
+
+  NetworkPolicy semantics: selecting the pod for Ingress isolates it, so every
+  allowed port must be listed. We always re-allow the public port from any
+  source; the admin port is allowed ONLY from the configured allowlist, and
+  when no allowlist is set it is simply not listed (thus denied by isolation).
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "easylab.name" . }}-admin
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ include "easylab.name" . }}
+  policyTypes: ["Ingress"]
+  ingress:
+    # Public registry/gateway port: reachable from anywhere (unchanged).
+    # NetworkPolicy ports are POD ports (the container's 8080), not the
+    # Service's 80.
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.gateway.port | default 8080 }}
+    {{- if or .Values.gateway.adminNetworkPolicy.allowedCIDRs .Values.gateway.adminNetworkPolicy.allowedNamespaces }}
+    # Admin port: only from the configured allowlist.
+    - from:
+        {{- range .Values.gateway.adminNetworkPolicy.allowedCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+        {{- range .Values.gateway.adminNetworkPolicy.allowedNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.gateway.adminPort | default 8081 }}
+    {{- end }}
+{{- end }}

@@ -49,10 +49,23 @@ gateway:
   # the public gateway port and binds loopback by default, so it is never
   # reachable through the gateway Service — an operator reaches it with
   #   kubectl -n <ns> exec deploy/easylab -- curl -s localhost:8081/artifacts/system/stats
-  # Set to "0.0.0.0:8081" only if an external admin tool must reach it, and pair
-  # that with a NetworkPolicy restricting the port. Empty "" disables the admin
-  # listener entirely (the API becomes unreachable, never re-exposed publicly).
+  # Set to "0.0.0.0:8081" only if an external admin tool must reach it, and
+  # enable adminNetworkPolicy below. Empty "" disables the admin listener
+  # entirely (the API becomes unreachable, never re-exposed publicly).
   adminAddr: "127.0.0.1:8081"
+  # Public container port the gateway serves the registry/RPC surface on
+  # (the Service maps service.port -> this). Also the NetworkPolicy public port.
+  port: 8080
+  # Container/NetworkPolicy port the admin listener binds (matches adminAddr's
+  # port). It is NOT exposed on the Service.
+  adminPort: 8081
+  # Second-layer NetworkPolicy for the admin port. Only meaningful when
+  # adminAddr is non-loopback; it then permits the admin port solely from the
+  # listed sources while leaving the public port open. Disabled by default.
+  adminNetworkPolicy:
+    enabled: false
+    allowedCIDRs: []
+    allowedNamespaces: []
   resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "2", memory: 2Gi }
