@@ -11,7 +11,7 @@ require (
 	github.com/easylab-platform/artifact/composer v0.7.0
 	github.com/easylab-platform/artifact/conan v0.6.0
 	github.com/easylab-platform/artifact/conda v0.9.0
-	github.com/easylab-platform/artifact/core v0.17.0
+	github.com/easylab-platform/artifact/core v0.18.0
 	github.com/easylab-platform/artifact/debian v0.9.0
 	github.com/easylab-platform/artifact/generic v0.5.0
 	github.com/easylab-platform/artifact/git v0.2.0
@@ -20,13 +20,13 @@ require (
 	github.com/easylab-platform/artifact/helm v0.6.0
 	github.com/easylab-platform/artifact/hex v0.5.0
 	github.com/easylab-platform/artifact/httpcache v0.4.0
-	github.com/easylab-platform/artifact/huggingface v0.5.0
+	github.com/easylab-platform/artifact/huggingface v0.6.0
 	github.com/easylab-platform/artifact/ivy v0.2.0
 	github.com/easylab-platform/artifact/maven v0.6.0
 	github.com/easylab-platform/artifact/nix v0.8.0
 	github.com/easylab-platform/artifact/npm v0.6.1
 	github.com/easylab-platform/artifact/nuget v0.6.0
-	github.com/easylab-platform/artifact/oci v0.4.2
+	github.com/easylab-platform/artifact/oci v0.5.0
 	github.com/easylab-platform/artifact/protobuf v0.5.0
 	github.com/easylab-platform/artifact/pub v0.7.0
 	github.com/easylab-platform/artifact/pypi v0.6.0
@@ -67,7 +67,7 @@ require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/easylab-platform/artifact/netcache v0.2.0
+	github.com/easylab-platform/artifact/netcache v0.3.0
 	github.com/easylab-platform/artifact/s3blob v0.1.0
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
