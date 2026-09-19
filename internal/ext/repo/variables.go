@@ -3,7 +3,7 @@ package repoext
 import (
 	"context"
 
-	"github.com/abcp-sdk/abc-protocol-go/extension"
+	"github.com/abcp-sdk/abc-protocol-go/v2/extension"
 )
 
 // resolveOrg/resolveRepo/resolveBranch are the authoritative lazy resolvers

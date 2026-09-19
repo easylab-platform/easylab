@@ -155,7 +155,7 @@ func envMapFromArgs(args map[string]interface{}) map[string]string {
 func (s *server) sandboxEdit(ctx context.Context, tenant, sessionName, cid, path string, startLine, endLine int64, content string) (string, error) {
 	data, err := s.sandboxFileRead(ctx, cid, path)
 	if err != nil {
-		return "", ef(ctx, s.ext, tenant, sessionName, "sandbox edit read failed: %v", "sandbox 编辑读取失败：%v", err)
+		return "", ef(ctx, s.ext, tenant, sessionName, MsgSandboxEditReadFailedArg, err)
 	}
 	current := string(data)
 	lines := strings.Split(current, "\n")
@@ -190,9 +190,9 @@ func (s *server) sandboxEdit(ctx context.Context, tenant, sessionName, cid, path
 	}
 	newContent := strings.Join(lines, "\n")
 	if err := s.sandboxFileWrite(ctx, cid, path, []byte(newContent)); err != nil {
-		return "", ef(ctx, s.ext, tenant, sessionName, "sandbox edit write failed: %v", "sandbox 编辑写入失败：%v", err)
+		return "", ef(ctx, s.ext, tenant, sessionName, MsgSandboxEditWriteFailedArg, err)
 	}
-	return fmt.Sprintf("Edited sandbox file '%s'.", path), nil
+	return lcf(ctx, s.ext, tenant, sessionName, MsgEditedSandboxFileArg, path), nil
 }
 
 func (s *server) portFile(ctx context.Context, tenant, sessionName string, sc sandboxCtx, args map[string]interface{}) (string, error) {
@@ -217,29 +217,29 @@ func (s *server) portFile(ctx context.Context, tenant, sessionName string, sc sa
 	// Determine whether sandbox_path is a directory.
 	info, err := s.sandboxFileStat(ctx, sc.cid, sandboxPath)
 	if err != nil {
-		return "", ef(ctx, s.ext, tenant, sessionName, "port sandbox stat failed: %v", "沙箱 stat 失败：%v", err)
+		return "", ef(ctx, s.ext, tenant, sessionName, MsgPortSandboxStatFailedArg, err)
 	}
 
 	if !info.IsDir() {
 		// Single file: read + optimistic-lock commit (one action).
 		data, err := s.sandboxFileRead(ctx, sc.cid, sandboxPath)
 		if err != nil {
-			return "", ef(ctx, s.ext, tenant, sessionName, "port sandbox read failed: %v", "沙箱读取失败：%v", err)
+			return "", ef(ctx, s.ext, tenant, sessionName, MsgPortSandboxReadFailedArg, err)
 		}
 		changeID, werr := writeFiles([]*easylabv1.FileChange{{Path: repoPath, Content: string(data)}})
 		if werr != nil {
-			return "", ef(ctx, s.ext, tenant, sessionName, "port write failed: %v", "沙箱写入失败：%v", werr)
+			return "", ef(ctx, s.ext, tenant, sessionName, MsgPortWriteFailedArg, werr)
 		}
-		return fmt.Sprintf("Ported '%s' to repo '%s' (change %s).", sandboxPath, repoPath, shortID(changeID)), nil
+		return lcf(ctx, s.ext, tenant, sessionName, MsgPortedArgToRepoArgChangeArg, sandboxPath, repoPath, shortID(changeID)), nil
 	}
 
 	// Directory: expand via worker file_list, then one atomic commit (multi-action).
 	files, err := s.sandboxFileList(ctx, sc.cid, sandboxPath)
 	if err != nil {
-		return "", ef(ctx, s.ext, tenant, sessionName, "port sandbox list failed: %v", "沙箱列表失败：%v", err)
+		return "", ef(ctx, s.ext, tenant, sessionName, MsgPortSandboxListFailedArg, err)
 	}
 	if len(files) == 0 {
-		return "", ef(ctx, s.ext, tenant, sessionName, "port sandbox directory '%s' is empty", "沙箱目录 '%s' 为空", sandboxPath)
+		return "", ef(ctx, s.ext, tenant, sessionName, MsgPortSandboxDirectoryArgIsEmpty, sandboxPath)
 	}
 	changes := make([]*easylabv1.FileChange, 0, len(files))
 	for _, f := range files {
@@ -258,9 +258,9 @@ func (s *server) portFile(ctx context.Context, tenant, sessionName string, sc sa
 	}
 	changeID, werr := writeFiles(changes)
 	if werr != nil {
-		return "", ef(ctx, s.ext, tenant, sessionName, "port commit write failed: %v", "提交写入失败：%v", werr)
+		return "", ef(ctx, s.ext, tenant, sessionName, MsgPortCommitWriteFailedArg, werr)
 	}
-	return fmt.Sprintf("Ported directory '%s' to repo '%s' (%d file(s), change %s).", sandboxPath, repoPath, len(changes), shortID(changeID)), nil
+	return lcf(ctx, s.ext, tenant, sessionName, MsgPortedDirectoryArgToRepoArgArgFileSChangeArg, sandboxPath, repoPath, len(changes), shortID(changeID)), nil
 }
 
 // branchOrDefault returns b or "main" when empty.

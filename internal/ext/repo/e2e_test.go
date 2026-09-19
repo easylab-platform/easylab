@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abcp-sdk/abc-protocol-go/agent"
-	"github.com/abcp-sdk/abc-protocol-go/extension"
-	"github.com/abcp-sdk/abc-protocol-go/manifest"
-	"github.com/abcp-sdk/abc-protocol-go/natsrun"
-	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
+	"github.com/abcp-sdk/abc-protocol-go/v2/agent"
+	"github.com/abcp-sdk/abc-protocol-go/v2/extension"
+	"github.com/abcp-sdk/abc-protocol-go/v2/manifest"
+	"github.com/abcp-sdk/abc-protocol-go/v2/natsrun"
+	natsbus "github.com/abcp-sdk/abc-protocol-go/v2/transport/nats"
 )
 
 // ---- manifest binding ----

@@ -3,7 +3,7 @@ package opsext
 import (
 	"context"
 
-	"github.com/abcp-sdk/abc-protocol-go/extension"
+	"github.com/abcp-sdk/abc-protocol-go/v2/extension"
 )
 
 // publishSandboxVars projects the session's sandbox state into the shared KV

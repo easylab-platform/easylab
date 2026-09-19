@@ -7,7 +7,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/abcp-sdk/abc-protocol-go/extension"
+	"github.com/abcp-sdk/abc-protocol-go/v2/extension"
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"github.com/easylab-platform/easylab/internal/ext"
 )
@@ -45,7 +45,7 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 			if err == nil && existing != nil {
 				owner, _ := existing["session"].(string)
 				if owner != "" && owner != sessionName {
-					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "service '%s' belongs to a different session (%s); use another name", "服务 '%s' 属于其它会话（%s）；请换一个名字", name, owner)
+					return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgServiceArgBelongsToADifferentSessionArg, name, owner)
 				}
 			}
 			image = s.qualifyImage(image, defaultTag)
@@ -90,15 +90,13 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 				Annotations: ann,
 			}))
 			if lerr != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "service-deploy failed: %v", "service-deploy 失败：%v", lerr)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgServiceDeployFailedArg, lerr)
 			}
 			// Surface the service's in-cluster DNS address so the sandbox (same
 			// runtime namespace) can reach it by name.
 			svcHost := fmt.Sprintf("%s.%s.svc.cluster.local", name, s.runtimeNamespace)
 			ready := "unknown"
-			return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName,
-				fmt.Sprintf("Deployed '%s' from %s. In-cluster address: http://%s:80 (ready=%s). The sandbox can reach it via this hostname.", name, image, svcHost, ready),
-				fmt.Sprintf("已从 %s 部署 '%s'。集群内地址：http://%s:80（ready=%s）。沙箱可直接用该主机名访问。", image, name, svcHost, ready)),
+			return extension.ToolResultData{Content: lcf(ctx, s.ext, tenant, sessionName, MsgDeployedArgFromArgInClusterAddressHttp, name, image, svcHost, ready),
 				Data: map[string]interface{}{"name": name, "image": image, "svc": svcHost, "url": "http://" + svcHost + ":80", "ready": ready}}, nil
 		},
 	}
@@ -113,7 +111,7 @@ func (s *server) registerDeployTools(m map[string]extension.ToolSpec) {
 				Namespace: strArg(args, "namespace"),
 			}))
 			if err != nil {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "service-list failed: %v", "service-list 失败：%v", err)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgServiceListFailedArg, err)
 			}
 			entries := make([]map[string]interface{}, 0, len(res.Msg.GetServices()))
 			for _, svc := range res.Msg.GetServices() {

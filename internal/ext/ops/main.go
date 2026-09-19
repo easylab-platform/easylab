@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"sync"
 
-	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
-	"github.com/abcp-sdk/abc-protocol-go/extension"
-	"github.com/abcp-sdk/abc-protocol-go/manifest"
-	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
+	abcprotocol "github.com/abcp-sdk/abc-protocol-go/v2"
+	"github.com/abcp-sdk/abc-protocol-go/v2/extension"
+	"github.com/abcp-sdk/abc-protocol-go/v2/manifest"
+	natsbus "github.com/abcp-sdk/abc-protocol-go/v2/transport/nats"
 
 	easylabclient "github.com/easylab-platform/easylab/internal/easylabclient"
 	"github.com/easylab-platform/easylab/internal/ext"

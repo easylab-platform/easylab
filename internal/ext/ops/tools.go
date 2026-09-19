@@ -1,7 +1,7 @@
 package opsext
 
 import (
-	"github.com/abcp-sdk/abc-protocol-go/extension"
+	"github.com/abcp-sdk/abc-protocol-go/v2/extension"
 )
 
 // handlers assembles the full tool map, delegating each domain to its own

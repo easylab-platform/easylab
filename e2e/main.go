@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/abcp-sdk/abc-protocol-go/agent"
-	buspkg "github.com/abcp-sdk/abc-protocol-go/bus"
-	"github.com/abcp-sdk/abc-protocol-go/protocol"
-	natsbus "github.com/abcp-sdk/abc-protocol-go/transport/nats"
+	"github.com/abcp-sdk/abc-protocol-go/v2/agent"
+	buspkg "github.com/abcp-sdk/abc-protocol-go/v2/bus"
+	"github.com/abcp-sdk/abc-protocol-go/v2/protocol"
+	natsbus "github.com/abcp-sdk/abc-protocol-go/v2/transport/nats"
 )
 
 const (

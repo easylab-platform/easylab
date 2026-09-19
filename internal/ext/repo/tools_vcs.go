@@ -7,8 +7,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
-	"github.com/abcp-sdk/abc-protocol-go/extension"
+	abcprotocol "github.com/abcp-sdk/abc-protocol-go/v2"
+	"github.com/abcp-sdk/abc-protocol-go/v2/extension"
 	easylabv1 "github.com/easylab-platform/easylab-proto/easylab/v1"
 	"github.com/easylab-platform/easylab/internal/ext"
 )
@@ -58,7 +58,7 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 			}
 			name := abcprotocol.ArgString(args, "name")
 			if name == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'name'", "缺少 'name'")
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgMissingName)
 			}
 			target := abcprotocol.ArgString(args, "target")
 			if _, err := s.sdk.Lab.SetTag(ctx, connect.NewRequest(&easylabv1.SetTagRequest{
@@ -66,8 +66,7 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 			})); err != nil {
 				return extension.ToolResultData{}, errDownstream("easylab", err)
 			}
-			return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName,
-				fmt.Sprintf("set tag '%s'.", name), fmt.Sprintf("已创建标签 '%s'。", name))}, nil
+			return extension.ToolResultData{Content: lcf(ctx, s.ext, tenant, sessionName, MsgSetTagArg, name)}, nil
 		},
 	}
 
@@ -85,7 +84,7 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 				source = b
 			}
 			if title == "" || target == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "title and target are required", "title 与 target 为必填")
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgTitleAndTargetAreRequired)
 			}
 			res, err := s.sdk.Lab.CreateMergeRequest(ctx, connect.NewRequest(&easylabv1.CreateMergeRequestRequest{
 				Org: o, Repo: r, Title: title, Description: abcprotocol.ArgString(args, "description"),
@@ -100,9 +99,7 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 			// MR and this notifies the default-branch session that created it.
 			// Best-effort — a wake failure never fails the MR creation.
 			s.notifyTargetSession(ctx, tenant, o, r, target, sessionName, iid, source)
-			return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName,
-				fmt.Sprintf("opened change request #%s (%s → %s).", iid, source, target),
-				fmt.Sprintf("已创建合并请求 #%s（%s → %s）。", iid, source, target)),
+			return extension.ToolResultData{Content: lcf(ctx, s.ext, tenant, sessionName, MsgOpenedChangeRequestArgArgArg, iid, source, target),
 				Data: map[string]interface{}{"iid": iid}}, nil
 		},
 	}
@@ -137,15 +134,14 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 			}
 			iid, body := abcprotocol.ArgString(args, "iid"), abcprotocol.ArgString(args, "body")
 			if iid == "" || body == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "iid and body are required", "iid 与 body 为必填")
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgIidAndBodyAreRequired)
 			}
 			if _, err := s.sdk.Lab.AddComment(ctx, connect.NewRequest(&easylabv1.AddCommentRequest{
 				Org: o, Repo: r, Iid: iid, Body: body, Path: abcprotocol.ArgString(args, "path"),
 			})); err != nil {
 				return extension.ToolResultData{}, errDownstream("easylab", err)
 			}
-			return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName,
-				fmt.Sprintf("commented on #%s.", iid), fmt.Sprintf("已在 #%s 评论。", iid))}, nil
+			return extension.ToolResultData{Content: lcf(ctx, s.ext, tenant, sessionName, MsgCommentedOnArg, iid)}, nil
 		},
 	}
 
@@ -159,14 +155,13 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 			branch := abcprotocol.ArgString(args, "branch")
 			prompt := abcprotocol.ArgString(args, "prompt")
 			if branch == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'branch' (the new branch name, chosen by you)", "缺少 'branch'（由你决定的新分支名）")
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgMissingBranchTheNewBranchNameChosenByY)
 			}
 			if prompt == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'prompt' (the self-contained task)", "缺少 'prompt'（自包含任务）")
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgMissingPromptTheSelfContainedTask)
 			}
 			if !validSessionComponent(branch) {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName,
-					"invalid branch name %q (letters/digits/._/- only, no ':' or '..')", "非法分支名 %q（仅字母/数字/._/-，不含 ':' 或 '..'）", branch)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgInvalidBranchNameArgLettersDigitsOnlyNo, branch)
 			}
 			// Only the repository's DEFAULT-branch session may branch off —
 			// this keeps the new branch anchored at the integration branch and
@@ -179,8 +174,7 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 				def = "main"
 			}
 			if b != def {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName,
-					"subsessions may only be started from the '%s' (default-branch) session (this session is on '%s')", "仅允许从 '%s'（默认分支）会话创建子会话（当前会话在 '%s'）", def, b)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgSubsessionsMayOnlyBeStartedFromTheArgD, def, b)
 			}
 			// The new branch must not already exist, and no session may already
 			// own it (the branch and its session are 1:1).
@@ -189,13 +183,11 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 				return extension.ToolResultData{}, errDownstream("easylab", terr)
 			}
 			if tree.branchExists(o, r, branch) {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName,
-					"branch '%s' already exists", "分支 '%s' 已存在", branch)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgBranchArgAlreadyExists, branch)
 			}
 			child := namingSession(o, r, branch)
 			if sessions, lerr := s.ag.ListSessions(ctx); lerr == nil && sessions[child] {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName,
-					"a session for branch '%s' already exists", "分支 '%s' 已有会话", branch)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgASessionForBranchArgAlreadyExists, branch)
 			}
 			// Create the branch off the current (default) branch, then the
 			// child session bound to it with the host's fixed 'build' preset.
@@ -222,10 +214,8 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 				return extension.ToolResultData{}, errDownstream("agent", perr)
 			}
 			return extension.ToolResultData{
-				Content: lc(ctx, s.ext, tenant, sessionName,
-					fmt.Sprintf("Started branch '%s' with subsession '%s'. It is working in the background and will open a change request into '%s' when done. END YOUR TURN NOW and wait for the change-request notification — do not poll.", branch, child, def),
-					fmt.Sprintf("已创建分支 '%s' 及其子会话 '%s'。它在后台工作，完成后会向 '%s' 开一个合并请求。请立即结束本轮并等待合并请求通知——不要轮询。", branch, child, def)),
-				Data: map[string]interface{}{"branch": branch, "session": child},
+				Content: lcf(ctx, s.ext, tenant, sessionName, MsgStartedBranchArgWithSubsessionArgItIsW, branch, child, def),
+				Data:    map[string]interface{}{"branch": branch, "session": child},
 			}, nil
 		},
 	}
@@ -247,20 +237,17 @@ func (s *server) registerVCSTools(m map[string]extension.ToolSpec) {
 				def = "main"
 			}
 			if b != def {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName,
-					"merge is only allowed from the '%s' (default-branch) session (this session is on '%s')", "仅允许 '%s'（默认分支）会话执行合并（当前会话在 '%s'）", def, b)
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgMergeIsOnlyAllowedFromTheArgDefaultBra, def, b)
 			}
 			iid := abcprotocol.ArgString(args, "iid")
 			if iid == "" {
-				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, "missing 'iid'", "缺少 'iid'")
+				return extension.ToolResultData{}, ef(ctx, s.ext, tenant, sessionName, MsgMissingIid)
 			}
 			res, err := s.sdk.Lab.MergeMergeRequest(ctx, connect.NewRequest(&easylabv1.MergeMergeRequestRequest{Org: o, Repo: r, Iid: iid}))
 			if err != nil {
 				return extension.ToolResultData{}, errDownstream("easylab", err)
 			}
-			return extension.ToolResultData{Content: lc(ctx, s.ext, tenant, sessionName,
-				fmt.Sprintf("merged #%s (revision %s, %d conflict(s)).", iid, shortID(res.Msg.GetRevisionId()), res.Msg.GetConflicts()),
-				fmt.Sprintf("已合并 #%s（revision %s，%d 个冲突）。", iid, shortID(res.Msg.GetRevisionId()), res.Msg.GetConflicts())),
+			return extension.ToolResultData{Content: lcf(ctx, s.ext, tenant, sessionName, MsgMergedArgRevisionArgArgConflictS, iid, shortID(res.Msg.GetRevisionId()), res.Msg.GetConflicts()),
 				Data: map[string]interface{}{"revision_id": res.Msg.GetRevisionId(), "conflicts": res.Msg.GetConflicts()}}, nil
 		},
 	}

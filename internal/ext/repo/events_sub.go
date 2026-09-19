@@ -4,7 +4,7 @@ import (
 	"context"
 	"github.com/easylab-platform/easylab/internal/ext"
 
-	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
+	abcprotocol "github.com/abcp-sdk/abc-protocol-go/v2"
 )
 
 // handleLifecycleEvent mirrors one agent lifecycle event into the workspace
