@@ -129,6 +129,7 @@ type server struct {
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
+	adminAddr := flag.String("admin-addr", "127.0.0.1:8081", "loopback listen address for the operator admin API (/artifacts/system); \"\" disables the separate listener")
 	selfBase := flag.String("self-base", "", "external base URL (scheme://host[:port]) used for absolute URLs in registry responses. Required so clients (OCI, nuget, ...) reach the server instead of localhost.")
 	flag.Parse()
 
@@ -267,6 +268,27 @@ func main() {
 
 	mux := s.router()
 	_ = mux
+
+	// The operator admin API (/artifacts/system) runs on its OWN listener,
+	// loopback by default, so it is never reachable through the gateway
+	// Service. An empty -admin-addr disables the split (the system API is then
+	// unavailable, never silently re-exposed on the public port).
+	if *adminAddr != "" {
+		adminSrv := &http.Server{
+			Addr:              *adminAddr,
+			Handler:           s.adminRouter(),
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       2 * time.Minute,
+			WriteTimeout:      2 * time.Minute,
+			IdleTimeout:       time.Minute,
+		}
+		go func() {
+			log.Printf("easylab admin API listening on %s (/artifacts/system)", *adminAddr)
+			if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("admin listener: %v", err)
+			}
+		}()
+	}
 
 	// Dual-stack listener: accepts cleartext HTTP/2 (prior knowledge) for the
 	// Connect/rest surface AND HTTP/1.1 for the h1-native registry face
@@ -432,33 +454,16 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 		return
 	}
 	reg := s.registry
-	auth := s.auth
-	if auth == nil {
-		auth = artifactkit.NewStoreAuth(newEasyvcsTokenStore(s.cs))
-	}
+	auth := s.registryAuth()
 	handlers := map[string]http.Handler{}
 	for _, name := range artifactkit.Registered() {
-		// Build per-protocol config with the correct self_base: OCI uses the
-		// origin root (its /token realm), everything else prefixes /artifacts/<name>.
-		cfg := map[string]any{"auth": auth}
-		if s.selfBase != "" {
-			if name == "oci" {
-				cfg["self_base"] = s.selfBase
-			} else {
-				cfg["self_base"] = s.selfBase + "/artifacts/" + name
-			}
+		// The system/admin API is NEVER on the public listener: it is served
+		// on the separate loopback admin listener (adminRouter), so routing
+		// config and inventory are not reachable through the gateway Service.
+		if name == "system" {
+			continue
 		}
-		// Stateful adapters keep their data next to the registry so it
-		// survives a restart (OCI upload sessions, git bare mirrors).
-		if regDir := s.registryDir; regDir != "" {
-			switch name {
-			case "oci":
-				cfg["upload_dir"] = filepath.Join(regDir, "oci-uploads")
-			case "git":
-				cfg["dir"] = filepath.Join(regDir, "git")
-			}
-		}
-		h, err := artifactkit.Build(name, reg, cfg)
+		h, err := s.buildProtocol(name, auth)
 		if err != nil {
 			log.Printf("registry: skip %s: %v", name, err)
 			continue
@@ -486,6 +491,67 @@ func (s *server) mountPackageRegistry(mux *http.ServeMux) {
 		mux.Handle(artifactkit.MountBase+"/", d)
 		mux.Handle(artifactkit.MountBase, d)
 	}
+}
+
+// registryAuth returns the artifactkit Auth over the easyvcs credential store,
+// shared by the public protocol mounts and the admin listener.
+func (s *server) registryAuth() artifactkit.Auth {
+	if s.auth != nil {
+		return s.auth
+	}
+	return artifactkit.NewStoreAuth(newEasyvcsTokenStore(s.cs))
+}
+
+// buildProtocol constructs one protocol's handler with the shared config
+// (self_base shape, stateful-adapter dirs). It is the single place protocol
+// config is assembled, used by both the public registry and the admin router.
+func (s *server) buildProtocol(name string, auth artifactkit.Auth) (http.Handler, error) {
+	if s.registry == nil {
+		return nil, fmt.Errorf("registry not configured")
+	}
+	// self_base: OCI uses the origin root (its /token realm), everything else
+	// prefixes /artifacts/<name>.
+	cfg := map[string]any{"auth": auth}
+	if s.selfBase != "" {
+		if name == "oci" {
+			cfg["self_base"] = s.selfBase
+		} else {
+			cfg["self_base"] = s.selfBase + "/artifacts/" + name
+		}
+	}
+	// Stateful adapters keep their data next to the registry so it survives a
+	// restart (OCI upload sessions, git bare mirrors).
+	if regDir := s.registryDir; regDir != "" {
+		switch name {
+		case "oci":
+			cfg["upload_dir"] = filepath.Join(regDir, "oci-uploads")
+		case "git":
+			cfg["dir"] = filepath.Join(regDir, "git")
+		}
+	}
+	return artifactkit.Build(name, s.registry, cfg)
+}
+
+// adminRouter serves the operator-only /artifacts/system API (targets,
+// upstreams, proxy policy, package inventory, footprint). It is mounted on a
+// SEPARATE listener that binds loopback by default, so the admin surface is
+// never exposed through the gateway Service — defense in depth on top of the
+// credential gate the system handler already enforces.
+func (s *server) adminRouter() *http.ServeMux {
+	mux := http.NewServeMux()
+	// Liveness/readiness do not belong on the admin port; keep it single
+	// purpose. Only the system handler is mounted.
+	if s.registry == nil {
+		return mux
+	}
+	h, err := s.buildProtocol("system", s.registryAuth())
+	if err != nil {
+		log.Printf("admin: system handler unavailable: %v", err)
+		return mux
+	}
+	mux.Handle(artifactkit.MountBase+"/system/", h)
+	mux.Handle(artifactkit.MountBase+"/system", h)
+	return mux
 }
 
 func (s *server) serveOCIToken(w http.ResponseWriter, r *http.Request, auth artifactkit.Auth) {

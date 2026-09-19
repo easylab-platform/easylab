@@ -44,6 +44,15 @@ gateway:
   # environment-specific; empty disables it (clusters with direct egress).
   upstreamProxy: http://mihomo.develop.svc.cluster.local:7890
   enforceH2: "0"
+  # Operator admin API (/artifacts/system: targets, upstreams, proxy policy,
+  # package inventory, footprint) listen address. It is DELIBERATELY split off
+  # the public gateway port and binds loopback by default, so it is never
+  # reachable through the gateway Service — an operator reaches it with
+  #   kubectl -n <ns> exec deploy/easylab -- curl -s localhost:8081/artifacts/system/stats
+  # Set to "0.0.0.0:8081" only if an external admin tool must reach it, and pair
+  # that with a NetworkPolicy restricting the port. Empty "" disables the admin
+  # listener entirely (the API becomes unreachable, never re-exposed publicly).
+  adminAddr: "127.0.0.1:8081"
   resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "2", memory: 2Gi }

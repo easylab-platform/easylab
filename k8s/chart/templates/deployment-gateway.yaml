@@ -24,7 +24,13 @@ spec:
         - name: easylab
           image: {{ include "easylab.gatewayImage" . }}
           imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
-          args: ["-addr", "0.0.0.0:8080"]
+          args:
+            - "-addr"
+            - "0.0.0.0:8080"
+            # The admin API listens on a separate address, loopback by default,
+            # so /artifacts/system is never exposed via the gateway Service.
+            - "-admin-addr"
+            - {{ .Values.gateway.adminAddr | default "127.0.0.1:8081" | quote }}
           env:
             - name: EASYVCS_HOME
               value: /data
