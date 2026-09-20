@@ -92,6 +92,9 @@ func fwdReq[T any](req *connect.Request[T]) *connect.Request[T] {
 func (c *connAgent) Health(ctx context.Context, req *connect.Request[agentv1.HealthRequest]) (*connect.Response[agentv1.HealthResponse], error) {
 	return c.client.Health(ctx, fwdReq(req))
 }
+func (c *connAgent) GetIdentity(ctx context.Context, req *connect.Request[agentv1.GetIdentityRequest]) (*connect.Response[agentv1.GetIdentityResponse], error) {
+	return c.client.GetIdentity(ctx, fwdReq(req))
+}
 func (c *connAgent) ListSessions(ctx context.Context, req *connect.Request[agentv1.ListSessionsRequest]) (*connect.Response[agentv1.ListSessionsResponse], error) {
 	if err := requireAuthenticated(ctx, "listing sessions"); err != nil {
 		return nil, err

@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	connectrpc.com/connect v1.20.0
 	github.com/abcp-sdk/abc-protocol-go/v2 v2.5.1
-	github.com/abcp-sdk/agent-sdk-go v0.19.0
+	github.com/abcp-sdk/agent-sdk-go v0.20.0
 	github.com/easylab-platform/artifact/apk v0.10.0
 	github.com/easylab-platform/artifact/cargo v0.9.0
 	github.com/easylab-platform/artifact/composer v0.10.0
