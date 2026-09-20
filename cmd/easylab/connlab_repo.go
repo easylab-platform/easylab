@@ -364,7 +364,7 @@ func (c *connLab) UploadReleaseAsset(ctx context.Context, req *connect.Request[e
 	}
 	data := req.Msg.Data
 	digest := artifactkit.DigestOf(data)
-	if _, err := c.s.registry.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err != nil {
+	if _, _, err := c.s.registry.Blobs.Put(ctx, bytes.NewReader(data), digest); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	art, _ := c.s.registry.Meta.Get(ctx, "generic", repoName, req.Msg.Tag)
